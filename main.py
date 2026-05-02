@@ -2,11 +2,11 @@ import asyncio
 import logging
 import sys
 
-from binance_client import BinanceClient
 from chart_generator import generate_chart
-from config import POLL_INTERVAL_SEC, SYMBOLS, TIMEFRAMES
+from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from telegram import send_mitigated_alert, send_new_fvg_alert
+from websocket_client import BinanceWSClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,68 +16,66 @@ logging.basicConfig(
 logger = logging.getLogger("alpha")
 
 
-async def process_symbol_tf(client: BinanceClient, tracker: FVGTracker, symbol: str, tf: str):
-    bars = await client.fetch_klines(symbol, tf)
-    if not bars:
-        return
+class AlphaCaller:
+    def __init__(self):
+        self.tracker = FVGTracker()
+        self.ws_client = BinanceWSClient(on_bar_close=self._on_bar_close)
 
-    tracker.update_buffer(symbol, tf, bars)
+    async def _on_bar_close(self, symbol: str, tf: str, bar):
+        # Build buffer from WebSocket bar history
+        key = f"{symbol}_{tf}"
+        bars = self.ws_client._buffer.get(key, [])
+        if len(bars) < 3:
+            return
 
-    # Check mitigation first
-    mitigated = tracker.check_mitigation(symbol, tf, bars)
-    for zone in mitigated:
-        send_mitigated_alert(zone)
+        # Convert websocket Bar dataclass to format fvg_engine expects
+        bar_objects = bars
+        self.tracker.update_buffer(symbol, tf, bar_objects)
 
-    # Check new FVG
-    new_zone = tracker.check_new_fvg(symbol, tf)
-    if new_zone and not new_zone.alerted:
-        new_zone.alerted = True
+        # Check mitigation
+        mitigated = self.tracker.check_mitigation(symbol, tf, bar_objects)
+        for zone in mitigated:
+            send_mitigated_alert(zone)
 
-        # Generate chart
-        chart_png = generate_chart(
-            bars=bars,
-            zone_top=new_zone.top,
-            zone_bottom=new_zone.bottom,
-            zone_direction=new_zone.direction,
-            symbol=new_zone.symbol,
-            tf=new_zone.tf,
-            rsi_value=new_zone.rsi,
+        # Check new FVG
+        new_zone = self.tracker.check_new_fvg(symbol, tf)
+        if new_zone and not new_zone.alerted:
+            new_zone.alerted = True
+
+            chart_png = generate_chart(
+                bars=bar_objects,
+                zone_top=new_zone.top,
+                zone_bottom=new_zone.bottom,
+                zone_direction=new_zone.direction,
+                symbol=new_zone.symbol,
+                tf=new_zone.tf,
+                rsi_value=new_zone.rsi,
+            )
+
+            send_new_fvg_alert(new_zone, chart_png=chart_png)
+            logger.info(
+                "Alert sent %s %s | strength=%d rsi=%s",
+                symbol, tf, new_zone.main_strength, new_zone.rsi,
+            )
+
+    async def run(self):
+        logger.info(
+            "Alpha Caller (WebSocket) | symbols=%d tfs=%d total=%d",
+            len(self.ws_client._buffer),
+            len(TIMEFRAMES),
+            len(self.ws_client._buffer) * len(TIMEFRAMES),
         )
-
-        send_new_fvg_alert(new_zone, chart_png=chart_png)
-        logger.info("Alert sent %s %s | strength=%d rsi=%s", symbol, tf, new_zone.main_strength, new_zone.rsi)
-
-
-async def poll_cycle(client: BinanceClient, tracker: FVGTracker):
-    tasks = []
-    delay = 0.0
-    for symbol in SYMBOLS:
-        for tf in TIMEFRAMES:
-            tasks.append(asyncio.create_task(_delayed_process(client, tracker, symbol, tf, delay)))
-            delay += 0.08  # stagger ~100ms between starts, ~6s total spread
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def _delayed_process(client, tracker, symbol, tf, delay):
-    await asyncio.sleep(delay)
-    return await process_symbol_tf(client, tracker, symbol, tf)
+        await self.ws_client.run()
 
 
 async def main():
-    tracker = FVGTracker()
-    logger.info("Alpha Caller started | symbols=%d tfs=%d total=%d", len(SYMBOLS), len(TIMEFRAMES), len(SYMBOLS) * len(TIMEFRAMES))
-
-    async with BinanceClient() as client:
-        await poll_cycle(client, tracker)
-        logger.info("Warm-up complete. Entering poll loop every %ds.", POLL_INTERVAL_SEC)
-
-        while True:
-            await asyncio.sleep(POLL_INTERVAL_SEC)
-            await poll_cycle(client, tracker)
+    caller = AlphaCaller()
+    try:
+        await caller.run()
+    except KeyboardInterrupt:
+        caller.ws_client.stop()
+        logger.info("Shutdown by user.")
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Shutdown by user.")
+    asyncio.run(main())
