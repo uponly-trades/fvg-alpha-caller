@@ -3,7 +3,7 @@ import logging
 import sys
 
 from chart_generator import generate_chart
-from config import TIMEFRAMES
+from config import POLL_INTERVAL_SEC, TIMEFRAMES
 from fvg_engine import FVGTracker
 from rest_client import KlinePoller
 from telegram import (
@@ -24,7 +24,7 @@ logger = logging.getLogger("alpha")
 class AlphaCaller:
     def __init__(self):
         self.tracker = FVGTracker()
-        self.poller = KlinePoller(on_bar_close=self._on_bar_close, poll_interval=30)
+        self.poller = KlinePoller(on_bar_close=self._on_bar_close, poll_interval=POLL_INTERVAL_SEC)
 
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:

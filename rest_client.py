@@ -90,21 +90,29 @@ class KlinePoller:
 
     async def run(self):
         self._running = True
+        streams = len(SYMBOLS) * len(TIMEFRAMES)
+        # Stagger delay to stay under Binance rate limit (2400 req/5min = 8 req/s)
+        # With 60s interval: 300 req / 60s = 5 req/s — safe
+        # But burst 300 simultaneously could trigger limit, so stagger 0.15s
+        stagger = 0.15
         logger.info(
-            "KlinePoller starting | symbols=%d tfs=%d streams=%d interval=%ds",
-            len(SYMBOLS), len(TIMEFRAMES), len(SYMBOLS) * len(TIMEFRAMES), self.poll_interval,
+            "KlinePoller starting | symbols=%d tfs=%d streams=%d interval=%ds stagger=%.2fs",
+            len(SYMBOLS), len(TIMEFRAMES), streams, self.poll_interval, stagger,
         )
 
         while self._running:
-            tasks = []
+            errors = 0
             for symbol in SYMBOLS:
                 for tf in TIMEFRAMES:
-                    tasks.append(self._poll_once(symbol, tf))
+                    try:
+                        await self._poll_once(symbol, tf)
+                    except Exception as e:
+                        errors += 1
+                        logger.warning("Poll error %s %s: %s", symbol, tf, e)
+                    await asyncio.sleep(stagger)
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            errors = sum(1 for r in results if isinstance(r, Exception))
             if errors:
-                logger.warning("Poll errors: %d / %d", errors, len(tasks))
+                logger.warning("Poll errors: %d / %d", errors, streams)
 
             await asyncio.sleep(self.poll_interval)
 
