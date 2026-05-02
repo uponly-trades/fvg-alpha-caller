@@ -59,6 +59,45 @@ def send_mitigated_alert(zone) -> bool:
     return _send(msg)
 
 
+def send_approach_alert(zone, current_price: float) -> bool:
+    emoji = "🟢" if zone.direction == 1 else "🔴"
+    dir_text = "Bullish" if zone.direction == 1 else "Bearish"
+    tv_url = _tv_link(zone.symbol, zone.tf)
+    msg = (
+        f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
+        f"{emoji} {zone.label}\n"
+        f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
+        f"💰 Price : {current_price}\n"
+        f"📏 Zone  : {zone.bottom} — {zone.top}\n"
+        f"📈 Strength: {zone.main_strength}%\n\n"
+        f"🛑 SL : {zone.sl}\n"
+        f"🎯 TP1: {zone.tp1} (1.5×)\n"
+        f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
+        f"🔗 <a href='{tv_url}'>Open TradingView</a>"
+    )
+    return _send(msg)
+
+
+def send_touch_alert(zone, current_price: float) -> bool:
+    emoji = "🟢" if zone.direction == 1 else "🔴"
+    dir_text = "Bullish" if zone.direction == 1 else "Bearish"
+    tv_url = _tv_link(zone.symbol, zone.tf)
+    msg = (
+        f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
+        f"{emoji} {zone.label}\n"
+        f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
+        f"💰 Price : {current_price}\n"
+        f"📏 Zone  : {zone.bottom} — {zone.top}\n"
+        f"📈 Strength: {zone.main_strength}%\n"
+        f"📊 RSI(14) : {zone.rsi}\n\n"
+        f"🛑 SL : {zone.sl}\n"
+        f"🎯 TP1: {zone.tp1} (1.5×)\n"
+        f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
+        f"🔗 <a href='{tv_url}'>Open TradingView</a>"
+    )
+    return _send(msg)
+
+
 def _send(text: str) -> bool:
     try:
         resp = requests.post(

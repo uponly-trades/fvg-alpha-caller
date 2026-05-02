@@ -5,8 +5,13 @@ import sys
 from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
-from telegram import send_mitigated_alert, send_new_fvg_alert
-from websocket_client import BinanceWSClient
+from rest_client import KlinePoller
+from telegram import (
+    send_approach_alert,
+    send_mitigated_alert,
+    send_new_fvg_alert,
+    send_touch_alert,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,24 +24,30 @@ logger = logging.getLogger("alpha")
 class AlphaCaller:
     def __init__(self):
         self.tracker = FVGTracker()
-        self.ws_client = BinanceWSClient(on_bar_close=self._on_bar_close)
+        self.poller = KlinePoller(on_bar_close=self._on_bar_close, poll_interval=30)
 
-    async def _on_bar_close(self, symbol: str, tf: str, bar):
-        # Build buffer from WebSocket bar history
-        key = f"{symbol}_{tf}"
-        bars = self.ws_client._buffer.get(key, [])
+    async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
             return
-        logger.info("Bar closed %s %s @ %s | buf=%d", symbol, tf, bar.open_time, len(bars))
 
-        # Convert websocket Bar dataclass to format fvg_engine expects
-        bar_objects = bars
-        self.tracker.update_buffer(symbol, tf, bar_objects)
+        self.tracker.update_buffer(symbol, tf, bars)
 
         # Check mitigation
-        mitigated = self.tracker.check_mitigation(symbol, tf, bar_objects)
+        mitigated = self.tracker.check_mitigation(symbol, tf, bars)
         for zone in mitigated:
             send_mitigated_alert(zone)
+
+        # Check approaching + touch on strong zones
+        interactions = self.tracker.check_interaction(symbol, tf, bars)
+        for event in interactions:
+            zone = event["zone"]
+            price = bars[-1].close
+            if event["type"] == "approaching":
+                send_approach_alert(zone, price)
+                logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
+            elif event["type"] == "touch":
+                send_touch_alert(zone, price)
+                logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
 
         # Check new FVG
         new_zone = self.tracker.check_new_fvg(symbol, tf)
@@ -44,7 +55,7 @@ class AlphaCaller:
             new_zone.alerted = True
 
             chart_png = generate_chart(
-                bars=bar_objects,
+                bars=bars,
                 zone_top=new_zone.top,
                 zone_bottom=new_zone.bottom,
                 zone_direction=new_zone.direction,
@@ -55,18 +66,17 @@ class AlphaCaller:
 
             send_new_fvg_alert(new_zone, chart_png=chart_png)
             logger.info(
-                "Alert sent %s %s | strength=%d rsi=%s",
+                "New FVG alert %s %s | strength=%d rsi=%s",
                 symbol, tf, new_zone.main_strength, new_zone.rsi,
             )
 
     async def run(self):
         logger.info(
-            "Alpha Caller (WebSocket) | symbols=%d tfs=%d total=%d",
-            len(self.ws_client._buffer),
+            "Alpha Caller (REST Poller) | tfs=%d streams=%d",
             len(TIMEFRAMES),
-            len(self.ws_client._buffer) * len(TIMEFRAMES),
+            len(self.poller._last_close_time),
         )
-        await self.ws_client.run()
+        await self.poller.run()
 
 
 async def main():
@@ -74,7 +84,7 @@ async def main():
     try:
         await caller.run()
     except KeyboardInterrupt:
-        caller.ws_client.stop()
+        caller.poller.stop()
         logger.info("Shutdown by user.")
 
 

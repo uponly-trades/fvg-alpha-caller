@@ -32,6 +32,9 @@ class FVGZone:
     tp1: float = 0.0
     tp2: float = 0.0
     price: float = 0.0
+    # Interaction tracking
+    approach_alerted: bool = False
+    touch_alerted: bool = False
 
 
 def sma(values: List[float], length: int) -> Optional[float]:
@@ -299,3 +302,66 @@ class FVGTracker:
             del self.zones[zid]
 
         return mitigated
+
+    def check_interaction(self, symbol: str, tf: str, bars: List) -> List[Dict]:
+        """
+        Check approaching and touch on strong FVG zones (strength >= 70).
+        Returns list of dicts: {"type": "approaching"|"touch", "zone": FVGZone}
+        """
+        if not bars:
+            return []
+        curr = bars[-1]
+        events = []
+
+        # Calculate current ATR for approach distance
+        closes = [b.close for b in bars]
+        highs = [b.high for b in bars]
+        lows = [b.low for b in bars]
+        current_atr = atr(highs, lows, closes, ATR_LEN)
+
+        for zid, zone in list(self.zones.items()):
+            if zone.symbol != symbol or zone.tf != tf:
+                continue
+            # Only alert on strong imbalance zones
+            if "Strong" not in zone.label:
+                continue
+
+            approach_dist = current_atr * 0.5 if current_atr else zone.size * 0.5
+
+            if zone.direction == 1:
+                # Bull zone: price approaching from above
+                price_above = curr.close
+                dist_to_top = price_above - zone.top
+                dist_to_bottom = price_above - zone.bottom
+
+                # Approaching: within approach_dist of zone top, but not yet touched
+                if not zone.approach_alerted and dist_to_top > 0 and dist_to_top <= approach_dist:
+                    zone.approach_alerted = True
+                    events.append({"type": "approaching", "zone": zone})
+                    logger.info("Approaching bull zone %s %s | dist=%.2f", symbol, tf, dist_to_top)
+
+                # Touch: low entered the zone (low <= top)
+                if not zone.touch_alerted and curr.low <= zone.top:
+                    zone.touch_alerted = True
+                    events.append({"type": "touch", "zone": zone})
+                    logger.info("Touch bull zone %s %s | low=%.2f zone_top=%.2f", symbol, tf, curr.low, zone.top)
+
+            else:
+                # Bear zone: price approaching from below
+                price_below = curr.close
+                dist_to_bottom = zone.bottom - price_below
+                dist_to_top = zone.top - price_below
+
+                # Approaching: within approach_dist of zone bottom, but not yet touched
+                if not zone.approach_alerted and dist_to_bottom > 0 and dist_to_bottom <= approach_dist:
+                    zone.approach_alerted = True
+                    events.append({"type": "approaching", "zone": zone})
+                    logger.info("Approaching bear zone %s %s | dist=%.2f", symbol, tf, dist_to_bottom)
+
+                # Touch: high entered the zone (high >= bottom)
+                if not zone.touch_alerted and curr.high >= zone.bottom:
+                    zone.touch_alerted = True
+                    events.append({"type": "touch", "zone": zone})
+                    logger.info("Touch bear zone %s %s | high=%.2f zone_bottom=%.2f", symbol, tf, curr.high, zone.bottom)
+
+        return events
