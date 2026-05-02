@@ -148,23 +148,24 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         else:
             label = "Neutral Bullish"
 
-    # RSI
+    # RSI(14) with Wilder's smoothing
     rsi_val = 50.0
     if len(closes) >= 15:
         import numpy as np
-        deltas = np.diff(closes[-15:])
+        deltas = np.diff(closes)
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
-        avg_gain = np.mean(gains[:14])
-        avg_loss = np.mean(losses[:14])
-        for i in range(14, len(deltas)):
-            avg_gain = (avg_gain * 13 + gains[i]) / 14
-            avg_loss = (avg_loss * 13 + losses[i]) / 14
-        if avg_loss > 0:
-            rs = avg_gain / avg_loss
-            rsi_val = 100 - (100 / (1 + rs))
-        else:
-            rsi_val = 100.0
+        if len(gains) >= 14:
+            avg_gain = np.mean(gains[:14])
+            avg_loss = np.mean(losses[:14])
+            for i in range(14, len(gains)):
+                avg_gain = (avg_gain * 13 + gains[i]) / 14
+                avg_loss = (avg_loss * 13 + losses[i]) / 14
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi_val = 100 - (100 / (1 + rs))
+            else:
+                rsi_val = 100.0
 
     # SL / TP based on ATR
     atr_val = atr_val if atr_val else fvg["size"]
