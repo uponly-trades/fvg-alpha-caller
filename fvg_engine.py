@@ -26,6 +26,12 @@ class FVGZone:
     label: str = ""
     alerted: bool = False
     mitigated_alerted: bool = False
+    rsi: float = 50.0
+    atr: float = 0.0
+    sl: float = 0.0
+    tp1: float = 0.0
+    tp2: float = 0.0
+    price: float = 0.0
 
 
 def sma(values: List[float], length: int) -> Optional[float]:
@@ -142,6 +148,30 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         else:
             label = "Neutral Bullish"
 
+    # RSI
+    rsi_val = 50.0
+    if len(closes) >= 15:
+        import numpy as np
+        deltas = np.diff(closes[-15:])
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains[:14])
+        avg_loss = np.mean(losses[:14])
+        for i in range(14, len(deltas)):
+            avg_gain = (avg_gain * 13 + gains[i]) / 14
+            avg_loss = (avg_loss * 13 + losses[i]) / 14
+        if avg_loss > 0:
+            rs = avg_gain / avg_loss
+            rsi_val = 100 - (100 / (1 + rs))
+        else:
+            rsi_val = 100.0
+
+    # SL / TP based on ATR
+    atr_val = atr_val if atr_val else fvg["size"]
+    sl = fvg["bottom"] - atr_val * 0.8 if direction == 1 else fvg["top"] + atr_val * 0.8
+    tp1 = fvg["top"] + atr_val * 1.5 if direction == 1 else fvg["bottom"] - atr_val * 1.5
+    tp2 = fvg["top"] + atr_val * 2.5 if direction == 1 else fvg["bottom"] - atr_val * 2.5
+
     return {
         "main_strength": main_strength,
         "bull_strength": bull_str,
@@ -149,6 +179,12 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         "vol_score": vol_score,
         "trend_score": trend_score,
         "label": label,
+        "rsi": round(rsi_val, 1),
+        "atr": round(atr_val, 4),
+        "sl": round(sl, 4),
+        "tp1": round(tp1, 4),
+        "tp2": round(tp2, 4),
+        "price": round(curr.close, 4),
     }
 
 
@@ -201,6 +237,12 @@ class FVGTracker:
             bull_strength=strength["bull_strength"],
             bear_strength=strength["bear_strength"],
             label=strength["label"],
+            rsi=strength["rsi"],
+            atr=strength["atr"],
+            sl=strength["sl"],
+            tp1=strength["tp1"],
+            tp2=strength["tp2"],
+            price=strength["price"],
         )
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"

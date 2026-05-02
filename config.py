@@ -22,7 +22,7 @@ TREND_WEIGHT  = 20
 CANDLE_WEIGHT = 10
 
 # Alert thresholds
-MIN_STRENGTH_TO_ALERT = 0  # alert all FVGs; raise to filter weak ones
+MIN_STRENGTH_TO_ALERT = 70  # only strong FVGs (>=70)
 
 # Polling
 POLL_INTERVAL_SEC = 60
