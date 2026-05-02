@@ -27,6 +27,7 @@ class AlphaCaller:
         bars = self.ws_client._buffer.get(key, [])
         if len(bars) < 3:
             return
+        logger.info("Bar closed %s %s @ %s | buf=%d", symbol, tf, bar.open_time, len(bars))
 
         # Convert websocket Bar dataclass to format fvg_engine expects
         bar_objects = bars
