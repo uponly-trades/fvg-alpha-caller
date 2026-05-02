@@ -173,6 +173,12 @@ class FVGTracker:
         last_time = bars[-1].open_time
         if self.last_bar_time.get(key) == last_time:
             return None  # already processed this bar
+
+        # Warm-up: only set timestamp, skip detection on first ever bar
+        if key not in self.last_bar_time:
+            self.last_bar_time[key] = last_time
+            return None
+
         self.last_bar_time[key] = last_time
 
         fvg = detect_fvg(bars)
