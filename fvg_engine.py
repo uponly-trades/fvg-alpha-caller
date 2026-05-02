@@ -50,6 +50,17 @@ def ema(values: List[float], length: int) -> Optional[float]:
     return ema_val
 
 
+def rma(values: List[float], length: int) -> Optional[float]:
+    """Wilder's smoothing — matches Pine Script ta.rma()."""
+    if len(values) < length:
+        return None
+    alpha = 1.0 / length
+    rma_val = sum(values[:length]) / length
+    for v in values[length:]:
+        rma_val = alpha * v + (1 - alpha) * rma_val
+    return rma_val
+
+
 def atr(highs: List[float], lows: List[float], closes: List[float], length: int) -> Optional[float]:
     if len(highs) < length + 1 or len(lows) < length + 1 or len(closes) < length + 1:
         return None
@@ -58,7 +69,8 @@ def atr(highs: List[float], lows: List[float], closes: List[float], length: int)
         h, l, c = highs[-i], lows[-i], closes[-(i + 1)]
         tr = max(h - l, abs(h - c), abs(l - c))
         trs.append(tr)
-    return sum(trs) / length
+    trs.reverse()  # oldest first for RMA
+    return rma(trs, length)
 
 
 def detect_fvg(bars: List) -> Optional[Dict]:
