@@ -1,4 +1,7 @@
+import json
 import logging
+import os
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -6,6 +9,9 @@ from config import (
     ATR_LEN, CANDLE_WEIGHT, GAP_WEIGHT, MIN_STRENGTH_TO_ALERT,
     TREND_EMA_LEN, TREND_WEIGHT, VOL_MA_LEN, VOL_WEIGHT,
 )
+
+ZONE_TTL_MS = 24 * 60 * 60 * 1000  # 24 hours
+PERSIST_PATH = os.environ.get("ZONE_PERSIST_PATH", "/app/data/zones.json")
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +218,93 @@ class FVGTracker:
         self.zones: Dict[str, FVGZone] = {}
         # key: (symbol, tf) -> last processed bar open_time
         self.last_bar_time: Dict[tuple, int] = {}
+        self._load_zones()
+
+    def _zone_to_dict(self, zone: FVGZone) -> dict:
+        return {
+            "symbol": zone.symbol,
+            "tf": zone.tf,
+            "direction": zone.direction,
+            "top": zone.top,
+            "bottom": zone.bottom,
+            "size": zone.size,
+            "born_time": zone.born_time,
+            "mitigation": zone.mitigation,
+            "bull_strength": zone.bull_strength,
+            "bear_strength": zone.bear_strength,
+            "main_strength": zone.main_strength,
+            "label": zone.label,
+            "alerted": zone.alerted,
+            "mitigated_alerted": zone.mitigated_alerted,
+            "rsi": zone.rsi,
+            "atr": zone.atr,
+            "sl": zone.sl,
+            "tp1": zone.tp1,
+            "tp2": zone.tp2,
+            "price": zone.price,
+            "approach_alerted": zone.approach_alerted,
+            "touch_alerted": zone.touch_alerted,
+        }
+
+    def _dict_to_zone(self, d: dict) -> FVGZone:
+        return FVGZone(
+            symbol=d["symbol"],
+            tf=d["tf"],
+            direction=d["direction"],
+            top=d["top"],
+            bottom=d["bottom"],
+            size=d["size"],
+            born_time=d["born_time"],
+            mitigation=d.get("mitigation", 0.0),
+            bull_strength=d.get("bull_strength", 0),
+            bear_strength=d.get("bear_strength", 0),
+            main_strength=d.get("main_strength", 0),
+            label=d.get("label", ""),
+            alerted=d.get("alerted", False),
+            mitigated_alerted=d.get("mitigated_alerted", False),
+            rsi=d.get("rsi", 50.0),
+            atr=d.get("atr", 0.0),
+            sl=d.get("sl", 0.0),
+            tp1=d.get("tp1", 0.0),
+            tp2=d.get("tp2", 0.0),
+            price=d.get("price", 0.0),
+            approach_alerted=d.get("approach_alerted", False),
+            touch_alerted=d.get("touch_alerted", False),
+        )
+
+    def _save_zones(self):
+        try:
+            os.makedirs(os.path.dirname(PERSIST_PATH), exist_ok=True)
+            data = {zid: self._zone_to_dict(z) for zid, z in self.zones.items()}
+            with open(PERSIST_PATH, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            logger.warning("Zone save failed: %s", e)
+
+    def _load_zones(self):
+        if not os.path.exists(PERSIST_PATH):
+            return
+        try:
+            with open(PERSIST_PATH, "r") as f:
+                raw = json.load(f)
+            now_ms = int(time.time() * 1000)
+            loaded = 0
+            dropped = 0
+            for zid, d in raw.items():
+                # Drop stale zones (> 24h old)
+                if now_ms - d.get("born_time", 0) > ZONE_TTL_MS:
+                    dropped += 1
+                    continue
+                # Drop weak zones (should not happen, but safety)
+                if d.get("main_strength", 0) < MIN_STRENGTH_TO_ALERT:
+                    dropped += 1
+                    continue
+                zone = self._dict_to_zone(d)
+                self.zones[zid] = zone
+                loaded += 1
+            logger.info("Zones loaded: %d loaded, %d dropped (stale/weak)", loaded, dropped)
+        except Exception as e:
+            logger.warning("Zone load failed: %s", e)
 
     def update_buffer(self, symbol: str, tf: str, bars: List):
         self.buffers[(symbol, tf)] = bars
@@ -263,6 +356,7 @@ class FVGTracker:
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
         self.zones[zone_id] = zone
+        self._save_zones()
         logger.info("New FVG %s %s %s | strength=%d", symbol, tf, "BULL" if zone.direction == 1 else "BEAR", zone.main_strength)
         return zone
 
@@ -300,6 +394,9 @@ class FVGTracker:
 
         for zid in to_remove:
             del self.zones[zid]
+
+        if to_remove:
+            self._save_zones()
 
         return mitigated
 
