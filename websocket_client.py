@@ -87,13 +87,16 @@ class BinanceWSClient:
 
         key = self._make_key(symbol, tf)
 
-        # Buffer bars for this stream
+        # Buffer bars for this stream — replace forming updates, append new bars
         if key not in self._buffer:
             self._buffer[key] = []
-        self._buffer[key].append(bar)
-        # Keep only last 100 bars
-        if len(self._buffer[key]) > 100:
-            self._buffer[key] = self._buffer[key][-100:]
+        buf = self._buffer[key]
+        if buf and buf[-1].open_time == bar.open_time:
+            buf[-1] = bar
+        else:
+            buf.append(bar)
+            if len(buf) > 100:
+                self._buffer[key] = buf[-100:]
 
         # Idempotent bar close detection
         if bar.is_closed:
