@@ -59,7 +59,7 @@ def send_mitigated_alert(zone) -> bool:
     return _send(msg)
 
 
-def send_approach_alert(zone, current_price: float) -> bool:
+def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] = None) -> bool:
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
@@ -75,10 +75,12 @@ def send_approach_alert(zone, current_price: float) -> bool:
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
         f"🔗 <a href='{tv_url}'>Open TradingView</a>"
     )
+    if chart_png:
+        return _send_photo(msg, chart_png)
     return _send(msg)
 
 
-def send_touch_alert(zone, current_price: float) -> bool:
+def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = None) -> bool:
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
@@ -95,6 +97,8 @@ def send_touch_alert(zone, current_price: float) -> bool:
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
         f"🔗 <a href='{tv_url}'>Open TradingView</a>"
     )
+    if chart_png:
+        return _send_photo(msg, chart_png)
     return _send(msg)
 
 

@@ -42,11 +42,20 @@ class AlphaCaller:
         for event in interactions:
             zone = event["zone"]
             price = bars[-1].close
+            chart_png = generate_chart(
+                bars=bars,
+                zone_top=zone.top,
+                zone_bottom=zone.bottom,
+                zone_direction=zone.direction,
+                symbol=zone.symbol,
+                tf=zone.tf,
+                rsi_value=zone.rsi,
+            )
             if event["type"] == "approaching":
-                send_approach_alert(zone, price)
+                send_approach_alert(zone, price, chart_png=chart_png)
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
             elif event["type"] == "touch":
-                send_touch_alert(zone, price)
+                send_touch_alert(zone, price, chart_png=chart_png)
                 logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
 
         # Check new FVG
