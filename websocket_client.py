@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 
 import websockets
 from websockets.exceptions import ConnectionClosed, InvalidStatusCode
@@ -33,7 +33,7 @@ class BinanceWSClient:
     RECONNECT_DELAY_INITIAL = 1.0
     RECONNECT_DELAY_MAX = 60.0
 
-    def __init__(self, on_bar_close: Callable[[str, str, Bar], None]):
+    def __init__(self, on_bar_close: Callable[[str, str, Bar], Awaitable[None]]):
         self.on_bar_close = on_bar_close
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self._running = False
@@ -101,7 +101,7 @@ class BinanceWSClient:
             if bar.open_time > last_time:
                 self._last_closed_time[key] = bar.open_time
                 logger.debug("Bar closed %s %s @ %s", symbol, tf, bar.open_time)
-                self.on_bar_close(symbol, tf, bar)
+                await self.on_bar_close(symbol, tf, bar)
 
     async def _connect(self):
         url = self._build_url()
