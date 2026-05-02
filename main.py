@@ -50,10 +50,17 @@ async def process_symbol_tf(client: BinanceClient, tracker: FVGTracker, symbol: 
 
 async def poll_cycle(client: BinanceClient, tracker: FVGTracker):
     tasks = []
+    delay = 0.0
     for symbol in SYMBOLS:
         for tf in TIMEFRAMES:
-            tasks.append(process_symbol_tf(client, tracker, symbol, tf))
+            tasks.append(asyncio.create_task(_delayed_process(client, tracker, symbol, tf, delay)))
+            delay += 0.08  # stagger ~100ms between starts, ~6s total spread
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _delayed_process(client, tracker, symbol, tf, delay):
+    await asyncio.sleep(delay)
+    return await process_symbol_tf(client, tracker, symbol, tf)
 
 
 async def main():
