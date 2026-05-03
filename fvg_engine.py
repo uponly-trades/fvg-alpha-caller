@@ -322,6 +322,7 @@ class FVGZone:
     confirm_label: str = "LOW"
     invalidated: bool = False
     invalid_reason: str = ""
+    indicator_context: str = ""
 
 
 def sma(values: List[float], length: int) -> Optional[float]:
@@ -583,6 +584,7 @@ class FVGTracker:
             "confirm_label": zone.confirm_label,
             "invalidated": zone.invalidated,
             "invalid_reason": zone.invalid_reason,
+            "indicator_context": zone.indicator_context,
         }
 
     def _dict_to_zone(self, d: dict) -> FVGZone:
@@ -626,6 +628,7 @@ class FVGTracker:
             confirm_label=d.get("confirm_label", "LOW"),
             invalidated=d.get("invalidated", False),
             invalid_reason=d.get("invalid_reason", ""),
+            indicator_context=d.get("indicator_context", ""),
         )
 
     def _save_zones(self):

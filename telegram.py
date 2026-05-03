@@ -19,6 +19,11 @@ def _tv_link(symbol: str, tf: str) -> str:
     return f"https://www.tradingview.com/chart/?symbol=BINANCE:{tv_symbol}&interval={iv}"
 
 
+def _indicator_block(zone) -> str:
+    indicator_context = getattr(zone, "indicator_context", "")
+    return f"\n\n{indicator_context}" if indicator_context else ""
+
+
 def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
@@ -31,6 +36,7 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
     invalid_text = f"\n❌ Invalid: {zone.invalid_reason}" if getattr(zone, "invalidated", False) and zone.invalid_reason else ""
+    indicator_block = _indicator_block(zone)
 
     caption = (
         f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
@@ -53,7 +59,7 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
         f"• Vol Spike: {zone.volume_spike_ratio:.2f}x\n"
         f"• Confluence: {zone.confluence_tf_count} TF\n"
         f"• Displacement: {disp_text}\n"
-        f"• BTC Align: {btc_align_text}{invalid_text}\n\n"
+        f"• BTC Align: {btc_align_text}{invalid_text}{indicator_block}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -87,6 +93,7 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
+    indicator_block = _indicator_block(zone)
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -100,7 +107,7 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
         f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
         f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
         f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
-        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
+        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}{indicator_block}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -120,6 +127,7 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
+    indicator_block = _indicator_block(zone)
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -132,7 +140,7 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
         f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
         f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
         f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
-        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
+        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}{indicator_block}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"

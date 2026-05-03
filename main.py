@@ -5,6 +5,7 @@ import sys
 from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
+from indicator_context import format_indicator_context
 from websocket_client import BinanceKlineWS
 from telegram import (
     send_approach_alert,
@@ -51,6 +52,7 @@ class AlphaCaller:
                 tf=zone.tf,
                 rsi_value=zone.rsi,
             )
+            zone.indicator_context = format_indicator_context(zone.symbol, self.tracker.buffers)
             if event["type"] == "approaching":
                 send_approach_alert(zone, price, chart_png=chart_png)
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
@@ -73,6 +75,7 @@ class AlphaCaller:
                 rsi_value=new_zone.rsi,
             )
 
+            new_zone.indicator_context = format_indicator_context(new_zone.symbol, self.tracker.buffers)
             send_new_fvg_alert(new_zone, chart_png=chart_png)
             logger.info(
                 "New FVG alert %s %s | strength=%d rsi=%s",

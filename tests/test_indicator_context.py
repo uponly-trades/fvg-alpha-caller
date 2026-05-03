@@ -107,3 +107,59 @@ def test_long_short_ratio_uses_binance_response_and_cache(monkeypatch):
     assert second == (72.21, 27.79)
     assert len(calls) == 1
     assert calls[0][1]["period"] == "15m"
+
+
+
+def test_zone_indicator_context_text_can_be_rendered_in_alert(monkeypatch):
+    import telegram
+
+    class Zone:
+        direction = 1
+        label = "Strong Bullish Imbalance"
+        symbol = "BTCUSDT"
+        tf = "15m"
+        price = 100.0
+        bottom = 99.0
+        top = 101.0
+        size = 2.0
+        main_strength = 80
+        bull_strength = 80
+        bear_strength = 20
+        rsi = 55.0
+        atr = 1.2
+        vol_change_pct = 10.0
+        price_change_pct = 1.0
+        price_change_24h_pct = 2.0
+        candle_body_pct = 70.0
+        dist_to_zone = 0.1
+        dominance_state = "ALT"
+        btc_state = "UP"
+        dominance_bias = -0.01
+        btc_trend = 0.01
+        confirm_score = 80
+        confirm_label = "A+"
+        volume_spike_ratio = 2.0
+        confluence_tf_count = 2
+        displacement_ok = True
+        btc_alignment_ok = True
+        invalidated = False
+        invalid_reason = ""
+        sl = 98.0
+        tp1 = 103.0
+        tp2 = 105.0
+        indicator_context = (
+            "📊 Indicator Context\n"
+            "15m: StochRSI 15.0/10.0 bull | RSI7 55.0 | "
+            "KDJ K50.0 D45.0 J60.0 bull | LS L60.0/S40.0"
+        )
+
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+
+    telegram.send_new_fvg_alert(Zone())
+
+    assert "📊 Indicator Context" in sent["text"]
+    assert "StochRSI" in sent["text"]
+    assert "RSI7" in sent["text"]
+    assert "KDJ" in sent["text"]
+    assert "LS L60.0/S40.0" in sent["text"]
