@@ -10,6 +10,7 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
 
 import indicator_context
+import chart_generator
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,24 @@ def test_long_short_ratio_uses_binance_response_and_cache(monkeypatch):
     assert second == (72.21, 27.79)
     assert len(calls) == 1
     assert calls[0][1]["period"] == "15m"
+
+
+
+def test_chart_generator_renders_indicator_panels():
+    bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
+
+    png = chart_generator.generate_chart(
+        bars=bars,
+        zone_top=24.0,
+        zone_bottom=22.0,
+        zone_direction=1,
+        symbol="BTCUSDT",
+        tf="15m",
+        rsi_value=55.0,
+    )
+
+    assert png is not None
+    assert png.startswith(b"\x89PNG")
 
 
 

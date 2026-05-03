@@ -10,6 +10,8 @@ import mplfinance as mpf
 import numpy as np
 import pandas as pd
 
+from indicator_context import kdj_series, rsi_series, stochrsi_series
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,13 +67,22 @@ def generate_chart(
         df.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq="min")
 
         closes = df["Close"].tolist()
+        highs = df["High"].tolist()
+        lows = df["Low"].tolist()
         ema20 = _calc_ema(closes, 20)
         ema50 = _calc_ema(closes, 50)
-        rsi = _calc_rsi(closes, 14)
+        stoch_k, stoch_d = stochrsi_series(closes)
+        rsi7 = rsi_series(closes, 7)
+        kdj_k, kdj_d, kdj_j = kdj_series(highs, lows, closes)
 
         df["EMA20"] = ema20
         df["EMA50"] = ema50
-        df["RSI"] = rsi
+        df["StochRSI"] = stoch_k
+        df["MAStochRSI"] = stoch_d
+        df["RSI7"] = rsi7
+        df["KDJ_K"] = kdj_k
+        df["KDJ_D"] = kdj_d
+        df["KDJ_J"] = kdj_j
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
@@ -81,11 +92,13 @@ def generate_chart(
         apds = [
             mpf.make_addplot(df["EMA20"], color="orange", width=0.8, label="EMA20"),
             mpf.make_addplot(df["EMA50"], color="blue", width=0.8, label="EMA50"),
-            mpf.make_addplot(df["RSI"], panel=1, color="purple", width=0.8, ylabel="RSI"),
+            mpf.make_addplot(df["StochRSI"], panel=1, color="teal", width=0.8, ylabel="StochRSI"),
+            mpf.make_addplot(df["MAStochRSI"], panel=1, color="magenta", width=0.8),
+            mpf.make_addplot(df["RSI7"], panel=2, color="purple", width=0.8, ylabel="RSI7"),
+            mpf.make_addplot(df["KDJ_K"], panel=3, color="blue", width=0.8, ylabel="KDJ"),
+            mpf.make_addplot(df["KDJ_D"], panel=3, color="orange", width=0.8),
+            mpf.make_addplot(df["KDJ_J"], panel=3, color="green", width=0.8),
         ]
-
-        # RSI overbought/oversold lines
-        rsi_panel = len(apds) - 1  # last addplot index
 
         fig, axes = mpf.plot(
             df,
@@ -95,13 +108,15 @@ def generate_chart(
             ylabel="Price",
             volume=False,
             addplot=apds,
-            panel_ratios=(3, 1),
+            panel_ratios=(3, 1, 1, 1),
             returnfig=True,
-            figsize=(10, 7),
+            figsize=(10, 10),
         )
 
         ax_main = axes[0]
-        ax_rsi = axes[2]
+        ax_stoch = axes[2]
+        ax_rsi = axes[4]
+        ax_kdj = axes[6]
 
         # Add FVG zone rectangle
         xlim = ax_main.get_xlim()
@@ -117,10 +132,13 @@ def generate_chart(
         )
         ax_main.add_patch(rect)
 
-        # RSI horizontal lines
+        # Indicator horizontal lines
+        for ax in (ax_stoch, ax_rsi, ax_kdj):
+            ax.axhline(y=80, color="red", linestyle="--", linewidth=0.7, alpha=0.5)
+            ax.axhline(y=20, color="green", linestyle="--", linewidth=0.7, alpha=0.5)
+            ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
         ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
         ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.8, alpha=0.7)
-        ax_rsi.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.5)
 
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
