@@ -21,7 +21,7 @@ class BinanceKlineWS:
     events then update the same buffers consumed by the FVG engine.
     """
 
-    BASE_URL = "wss://fstream.binance.com/stream?streams="
+    BASE_URL = "wss://fstream.binancefuture.com/stream?streams="
     MAX_STREAMS_PER_CONN = 100
     STALE_AFTER_SEC = 120
     FALLBACK_INTERVAL_SEC = 30
