@@ -3,9 +3,9 @@ import logging
 import sys
 
 from chart_generator import generate_chart
-from config import POLL_INTERVAL_SEC, TIMEFRAMES
+from config import TIMEFRAMES
 from fvg_engine import FVGTracker
-from rest_client import KlinePoller
+from websocket_client import BinanceKlineWS
 from telegram import (
     send_approach_alert,
     send_mitigated_alert,
@@ -24,7 +24,7 @@ logger = logging.getLogger("alpha")
 class AlphaCaller:
     def __init__(self):
         self.tracker = FVGTracker()
-        self.poller = KlinePoller(on_bar_close=self._on_bar_close, poll_interval=POLL_INTERVAL_SEC)
+        self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
 
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
@@ -81,9 +81,8 @@ class AlphaCaller:
 
     async def run(self):
         logger.info(
-            "Alpha Caller (REST Poller) | tfs=%d streams=%d",
+            "Alpha Caller (Binance WS + REST fallback) | tfs=%d",
             len(TIMEFRAMES),
-            len(self.poller._last_close_time),
         )
         await self.poller.run()
 
