@@ -13,11 +13,10 @@ TELEGRAM_PHOTO_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
 def _tv_link(symbol: str, tf: str) -> str:
     """Build TradingView chart URL."""
-    # Binance spot prefix; futures use same chart
     interval_map = {"15m": "15", "1h": "60", "4h": "240"}
     iv = interval_map.get(tf, "60")
-    sym = symbol.replace("USDT", "")
-    return f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{symbol}&interval={iv}"
+    tv_symbol = f"{symbol}.P"
+    return f"https://www.tradingview.com/chart/?symbol=BINANCE%3A{tv_symbol}&interval={iv}"
 
 
 def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
