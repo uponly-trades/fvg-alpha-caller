@@ -39,6 +39,20 @@ CANDLE_WEIGHT = 10
 # Alert thresholds
 MIN_STRENGTH_TO_ALERT = 70  # only strong FVGs (>=70)
 
+# Regime bands (deviation from EMA)
+DOM_NEUTRAL_BAND = 0.0015   # 0.15%
+BTC_NEUTRAL_BAND = 0.0020   # 0.20%
+
+# Confirmation filters
+VOL_SPIKE_MED = 1.5
+VOL_SPIKE_HIGH = 2.0
+DISPLACEMENT_BODY_PCT = 65.0
+MIN_CONFIRM_SCORE_ALERT = 35
+
+# Invalidation
+INVALID_ATR_BUFFER = 0.15
+INVALID_LOOKAHEAD_BARS = 6
+
 # Polling
 POLL_INTERVAL_SEC = 30
 KLINES_LIMIT = 100

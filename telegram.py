@@ -27,18 +27,11 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
     price_icon = "🟢" if zone.price_change_pct > 0 else "🔴"
 
-    # Dominance context
-    dom_text = "Neutral"
-    if zone.dominance_bias < -0.5:
-        dom_text = "🟢 Alt Season"
-    elif zone.dominance_bias > 0.5:
-        dom_text = "🔴 BTC Season"
-
-    btc_text = "Neutral"
-    if zone.btc_trend > 0.5:
-        btc_text = "🟢 Uptrend"
-    elif zone.btc_trend < -0.5:
-        btc_text = "🔴 Downtrend"
+    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
+    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
+    disp_text = "YES" if zone.displacement_ok else "NO"
+    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
+    invalid_text = f"\n❌ Invalid: {zone.invalid_reason}" if getattr(zone, "invalidated", False) and zone.invalid_reason else ""
 
     caption = (
         f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
@@ -51,11 +44,17 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
         f"📊 RSI(14) : {zone.rsi}\n"
         f"📊 ATR(14) : {zone.atr}\n\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"{price_icon} Price Change: {zone.price_change_pct:+.2f}%\n"
+        f"{price_icon} Bar Change: {zone.price_change_pct:+.2f}%\n"
+        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
         f"📊 Candle Body: {zone.candle_body_pct:.1f}%\n"
         f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
-        f"₿ BTC Trend: {btc_text} ({zone.btc_trend:+.1f})\n\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
+        f"₿ BTC Trend: {btc_text} ({zone.btc_trend:+.4f})\n"
+        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label})\n"
+        f"• Vol Spike: {zone.volume_spike_ratio:.2f}x\n"
+        f"• Confluence: {zone.confluence_tf_count} TF\n"
+        f"• Displacement: {disp_text}\n"
+        f"• BTC Align: {btc_align_text}{invalid_text}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -85,8 +84,10 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
-    dom_text = "🟢 Alt Season" if zone.dominance_bias < -0.5 else "🔴 BTC Season" if zone.dominance_bias > 0.5 else "Neutral"
-    btc_text = "🟢 Uptrend" if zone.btc_trend > 0.5 else "🔴 Downtrend" if zone.btc_trend < -0.5 else "Neutral"
+    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
+    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
+    disp_text = "YES" if zone.displacement_ok else "NO"
+    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -97,8 +98,10 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n"
         f"📊 RSI(14) : {zone.rsi}\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
-        f"₿ BTC: {btc_text} ({zone.btc_trend:+.1f})\n\n"
+        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
+        f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
+        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -114,8 +117,10 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
-    dom_text = "🟢 Alt Season" if zone.dominance_bias < -0.5 else "🔴 BTC Season" if zone.dominance_bias > 0.5 else "Neutral"
-    btc_text = "🟢 Uptrend" if zone.btc_trend > 0.5 else "🔴 Downtrend" if zone.btc_trend < -0.5 else "Neutral"
+    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
+    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
+    disp_text = "YES" if zone.displacement_ok else "NO"
+    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -125,8 +130,10 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
         f"📈 Strength: {zone.main_strength}%\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"📊 RSI(14) : {zone.rsi}\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
-        f"₿ BTC: {btc_text} ({zone.btc_trend:+.1f})\n\n"
+        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
+        f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
+        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
