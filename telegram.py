@@ -27,6 +27,19 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
     price_icon = "🟢" if zone.price_change_pct > 0 else "🔴"
 
+    # Dominance context
+    dom_text = "Neutral"
+    if zone.dominance_bias < -0.5:
+        dom_text = "🟢 Alt Season"
+    elif zone.dominance_bias > 0.5:
+        dom_text = "🔴 BTC Season"
+
+    btc_text = "Neutral"
+    if zone.btc_trend > 0.5:
+        btc_text = "🟢 Uptrend"
+    elif zone.btc_trend < -0.5:
+        btc_text = "🔴 Downtrend"
+
     caption = (
         f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
         f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
@@ -41,6 +54,8 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
         f"{price_icon} Price Change: {zone.price_change_pct:+.2f}%\n"
         f"📊 Candle Body: {zone.candle_body_pct:.1f}%\n"
         f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
+        f"₿ BTC Trend: {btc_text} ({zone.btc_trend:+.1f})\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -70,6 +85,8 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
+    dom_text = "🟢 Alt Season" if zone.dominance_bias < -0.5 else "🔴 BTC Season" if zone.dominance_bias > 0.5 else "Neutral"
+    btc_text = "🟢 Uptrend" if zone.btc_trend > 0.5 else "🔴 Downtrend" if zone.btc_trend < -0.5 else "Neutral"
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -79,7 +96,9 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
         f"📈 Strength: {zone.main_strength}%\n\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n"
-        f"📊 RSI(14) : {zone.rsi}\n\n"
+        f"📊 RSI(14) : {zone.rsi}\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
+        f"₿ BTC: {btc_text} ({zone.btc_trend:+.1f})\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -95,6 +114,8 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
     vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
+    dom_text = "🟢 Alt Season" if zone.dominance_bias < -0.5 else "🔴 BTC Season" if zone.dominance_bias > 0.5 else "Neutral"
+    btc_text = "🟢 Uptrend" if zone.btc_trend > 0.5 else "🔴 Downtrend" if zone.btc_trend < -0.5 else "Neutral"
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -103,7 +124,9 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
         f"📈 Strength: {zone.main_strength}%\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"📊 RSI(14) : {zone.rsi}\n\n"
+        f"📊 RSI(14) : {zone.rsi}\n"
+        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.1f})\n"
+        f"₿ BTC: {btc_text} ({zone.btc_trend:+.1f})\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"

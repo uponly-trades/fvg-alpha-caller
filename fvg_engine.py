@@ -5,8 +5,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import requests
+
 from config import (
-    ATR_LEN, CANDLE_WEIGHT, GAP_WEIGHT, MIN_STRENGTH_TO_ALERT,
+    ATR_LEN, BASE_URL, CANDLE_WEIGHT, GAP_WEIGHT, MIN_STRENGTH_TO_ALERT,
     TREND_EMA_LEN, TREND_WEIGHT, VOL_MA_LEN, VOL_WEIGHT,
 )
 
@@ -14,6 +16,76 @@ ZONE_TTL_MS = 24 * 60 * 60 * 1000  # 24 hours
 PERSIST_PATH = os.environ.get("ZONE_PERSIST_PATH", "/app/data/zones.json")
 
 logger = logging.getLogger(__name__)
+
+# --- BTCDOM / BTC trend cache ---
+# Fetches BTCDOMUSDT and BTCUSDT klines periodically to determine
+# altcoin dominance bias and BTC trend for BTC's own signals.
+_DOMINANCE_CACHE: Dict[str, float] = {}  # {"btcdom_ema": float, "btc_ema": float}
+_DOMINANCE_LAST_FETCH = 0.0
+DOMINANCE_FETCH_INTERVAL = 300  # refresh every 5 min
+
+
+def _fetch_closes(symbol: str, interval: str = "1h", limit: int = 60) -> List[float]:
+    """Fetch recent closed kline closes from Binance Futures."""
+    url = f"{BASE_URL}/fapi/v1/klines"
+    try:
+        resp = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+        resp.raise_for_status()
+        raw = resp.json()
+        # drop last (forming) candle
+        return [float(k[4]) for k in raw[:-1]]
+    except Exception as e:
+        logger.warning("Fetch closes failed %s: %s", symbol, e)
+        return []
+
+
+def get_dominance_bias() -> float:
+    """
+    Returns BTCDOM trend bias: negative = alt season (money leaving BTC), positive = BTC season.
+    Range roughly -1.0 to +1.0 based on EMA slope.
+    """
+    global _DOMINANCE_CACHE, _DOMINANCE_LAST_FETCH
+    now = time.time()
+    if now - _DOMINANCE_LAST_FETCH < DOMINANCE_FETCH_INTERVAL and "btcdom_ema" in _DOMINANCE_CACHE:
+        current = _DOMINANCE_CACHE.get("btcdom_current", 50.0)
+        ema_val = _DOMINANCE_CACHE["btcdom_ema"]
+        return (current - ema_val) / max(ema_val, 1.0) * 10  # scaled
+
+    closes = _fetch_closes("BTCDOMUSDT", "1h", 60)
+    if len(closes) < 20:
+        return 0.0
+    _DOMINANCE_LAST_FETCH = now
+    _DOMINANCE_CACHE["btcdom_current"] = closes[-1]
+    _DOMINANCE_CACHE["btcdom_ema"] = ema(closes, 20)
+    current = closes[-1]
+    ema_val = _DOMINANCE_CACHE["btcdom_ema"]
+    return (current - ema_val) / max(ema_val, 1.0) * 10
+
+
+def get_btc_trend() -> float:
+    """
+    Returns BTC trend: positive = uptrend, negative = downtrend.
+    Based on close vs EMA50 on 1h.
+    """
+    global _DOMINANCE_CACHE
+    now = time.time()
+    if now - _DOMINANCE_LAST_FETCH < DOMINANCE_FETCH_INTERVAL and "btc_ema" in _DOMINANCE_CACHE:
+        current = _DOMINANCE_CACHE.get("btc_current", 0.0)
+        ema_val = _DOMINANCE_CACHE["btc_ema"]
+        if ema_val > 0:
+            return (current - ema_val) / ema_val * 10
+        return 0.0
+
+    closes = _fetch_closes("BTCUSDT", "1h", 60)
+    if len(closes) < 50:
+        return 0.0
+    _DOMINANCE_CACHE["btc_current"] = closes[-1]
+    _DOMINANCE_CACHE["btc_ema"] = ema(closes, 50)
+    current = closes[-1]
+    ema_val = _DOMINANCE_CACHE["btc_ema"]
+    if ema_val > 0:
+        return (current - ema_val) / ema_val * 10
+    return 0.0
 
 
 @dataclass
@@ -46,6 +118,9 @@ class FVGZone:
     # Interaction tracking
     approach_alerted: bool = False
     touch_alerted: bool = False
+    # Market context
+    dominance_bias: float = 0.0   # BTCDOM trend: negative=alt season
+    btc_trend: float = 0.0        # BTC trend: positive=uptrend
 
 
 def sma(values: List[float], length: int) -> Optional[float]:
@@ -87,7 +162,7 @@ def atr(highs: List[float], lows: List[float], closes: List[float], length: int)
     return rma(trs, length)
 
 
-def detect_fvg(bars: List) -> Optional[Dict]:
+def detect_fvg(bars: List, symbol: str = "") -> Optional[Dict]:
     """Detect FVG on the most recently closed bar (last in list)."""
     if len(bars) < 3:
         return None
@@ -116,7 +191,7 @@ def detect_fvg(bars: List) -> Optional[Dict]:
     }
 
 
-def calc_strength(bars: List, fvg: Dict) -> Dict:
+def calc_strength(bars: List, fvg: Dict, symbol: str = "") -> Dict:
     """Calculate strength scores identical to Pine Script logic."""
     closes  = [b.close for b in bars]
     highs   = [b.high for b in bars]
@@ -148,7 +223,36 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
     candle_range = max(curr.high - curr.low, 0.01)
     candle_strength = abs(curr.close - curr.open) / candle_range * CANDLE_WEIGHT
 
-    total = gap_strength + vol_strength + trend_strength + candle_strength
+    # Market context: dominance + BTC trend
+    symbol = fvg.get("symbol", "")
+    dom_bias = get_dominance_bias()
+    btc_tr = get_btc_trend()
+    is_btc = symbol == "BTCUSDT"
+
+    # Context bonus/penalty (up to ±10 points)
+    context_adj = 0.0
+    if is_btc:
+        # BTC signals: boosted when BTC in trend direction
+        if direction == 1 and btc_tr > 0:
+            context_adj = min(btc_tr, 1.0) * 10
+        elif direction == -1 and btc_tr < 0:
+            context_adj = min(abs(btc_tr), 1.0) * 10
+        elif direction == 1 and btc_tr < 0:
+            context_adj = max(btc_tr, -1.0) * 10
+        elif direction == -1 and btc_tr > 0:
+            context_adj = max(-btc_tr, -1.0) * 10
+    else:
+        # Alt signals: boosted when BTCDOM falling (alt season) for bullish, rising for bearish
+        if direction == 1 and dom_bias < 0:
+            context_adj = min(abs(dom_bias), 1.0) * 10
+        elif direction == -1 and dom_bias > 0:
+            context_adj = min(dom_bias, 1.0) * 10
+        elif direction == 1 and dom_bias > 0:
+            context_adj = max(-dom_bias, -1.0) * 10
+        elif direction == -1 and dom_bias < 0:
+            context_adj = max(dom_bias, -1.0) * 10
+
+    total = gap_strength + vol_strength + trend_strength + candle_strength + context_adj
     main_strength = int(max(min(total, 100), 0))
 
     bull_str = main_strength if direction == 1 else 100 - main_strength
@@ -212,25 +316,6 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
     else:
         dist_to_zone = fvg["bottom"] - curr.close
 
-    # Extra metrics
-    vol_change_pct = 0.0
-    if len(volumes) >= 2 and volumes[-2] > 0:
-        vol_change_pct = (volumes[-1] - volumes[-2]) / volumes[-2] * 100
-
-    price_change_pct = 0.0
-    if curr.open != 0:
-        price_change_pct = (curr.close - curr.open) / curr.open * 100
-
-    candle_body_pct = 0.0
-    if candle_range > 0:
-        candle_body_pct = abs(curr.close - curr.open) / candle_range * 100
-
-    dist_to_zone = 0.0
-    if direction == 1:
-        dist_to_zone = curr.close - fvg["top"]
-    else:
-        dist_to_zone = fvg["bottom"] - curr.close
-
     # SL / TP based on ATR
     atr_val = atr_val if atr_val else fvg["size"]
     sl = fvg["bottom"] - atr_val * 0.8 if direction == 1 else fvg["top"] + atr_val * 0.8
@@ -247,10 +332,6 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         "price_change_pct": round(price_change_pct, 2),
         "candle_body_pct": round(candle_body_pct, 1),
         "dist_to_zone": round(dist_to_zone, 4),
-        "vol_change_pct": round(vol_change_pct, 1),
-        "price_change_pct": round(price_change_pct, 2),
-        "candle_body_pct": round(candle_body_pct, 1),
-        "dist_to_zone": round(dist_to_zone, 4),
         "label": label,
         "rsi": round(rsi_val, 1),
         "atr": round(atr_val, 4),
@@ -258,6 +339,8 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         "tp1": round(tp1, 4),
         "tp2": round(tp2, 4),
         "price": round(curr.close, 4),
+        "dominance_bias": round(dom_bias, 2),
+        "btc_trend": round(btc_tr, 2),
     }
 
 
@@ -299,6 +382,8 @@ class FVGTracker:
             "dist_to_zone": zone.dist_to_zone,
             "approach_alerted": zone.approach_alerted,
             "touch_alerted": zone.touch_alerted,
+            "dominance_bias": zone.dominance_bias,
+            "btc_trend": zone.btc_trend,
         }
 
     def _dict_to_zone(self, d: dict) -> FVGZone:
@@ -329,6 +414,8 @@ class FVGTracker:
             dist_to_zone=d.get("dist_to_zone", 0.0),
             approach_alerted=d.get("approach_alerted", False),
             touch_alerted=d.get("touch_alerted", False),
+            dominance_bias=d.get("dominance_bias", 0.0),
+            btc_trend=d.get("btc_trend", 0.0),
         )
 
     def _save_zones(self):
@@ -385,11 +472,12 @@ class FVGTracker:
 
         self.last_bar_time[key] = last_time
 
-        fvg = detect_fvg(bars)
+        fvg = detect_fvg(bars, symbol=symbol)
         if not fvg:
             return None
 
-        strength = calc_strength(bars, fvg)
+        fvg["symbol"] = symbol
+        strength = calc_strength(bars, fvg, symbol=symbol)
         if strength["main_strength"] < MIN_STRENGTH_TO_ALERT:
             return None
 
@@ -415,6 +503,8 @@ class FVGTracker:
             price_change_pct=strength["price_change_pct"],
             candle_body_pct=strength["candle_body_pct"],
             dist_to_zone=strength["dist_to_zone"],
+            dominance_bias=strength["dominance_bias"],
+            btc_trend=strength["btc_trend"],
         )
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
