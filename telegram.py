@@ -24,6 +24,8 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
+    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
+    price_icon = "🟢" if zone.price_change_pct > 0 else "🔴"
 
     caption = (
         f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
@@ -35,6 +37,10 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
         f"   • Bull: {zone.bull_strength}% | Bear: {zone.bear_strength}%\n"
         f"📊 RSI(14) : {zone.rsi}\n"
         f"📊 ATR(14) : {zone.atr}\n\n"
+        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
+        f"{price_icon} Price Change: {zone.price_change_pct:+.2f}%\n"
+        f"📊 Candle Body: {zone.candle_body_pct:.1f}%\n"
+        f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -63,6 +69,7 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
+    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -70,6 +77,9 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
         f"💰 Price : {current_price}\n"
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
         f"📈 Strength: {zone.main_strength}%\n\n"
+        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
+        f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n"
+        f"📊 RSI(14) : {zone.rsi}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"
         f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
@@ -84,6 +94,7 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
+    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -91,6 +102,7 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
         f"💰 Price : {current_price}\n"
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
         f"📈 Strength: {zone.main_strength}%\n"
+        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"📊 RSI(14) : {zone.rsi}\n\n"
         f"🛑 SL : {zone.sl}\n"
         f"🎯 TP1: {zone.tp1} (1.5×)\n"

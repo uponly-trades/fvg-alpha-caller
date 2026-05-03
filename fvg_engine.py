@@ -38,6 +38,11 @@ class FVGZone:
     tp1: float = 0.0
     tp2: float = 0.0
     price: float = 0.0
+    # Extra metrics
+    vol_change_pct: float = 0.0   # vs previous bar
+    price_change_pct: float = 0.0 # bar change percent
+    candle_body_pct: float = 0.0  # body / range
+    dist_to_zone: float = 0.0     # distance from price to zone edge
     # Interaction tracking
     approach_alerted: bool = False
     touch_alerted: bool = False
@@ -188,6 +193,44 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
             else:
                 rsi_val = 100.0
 
+    # Extra metrics
+    vol_change_pct = 0.0
+    if len(volumes) >= 2 and volumes[-2] > 0:
+        vol_change_pct = (volumes[-1] - volumes[-2]) / volumes[-2] * 100
+
+    price_change_pct = 0.0
+    if curr.open != 0:
+        price_change_pct = (curr.close - curr.open) / curr.open * 100
+
+    candle_body_pct = 0.0
+    if candle_range > 0:
+        candle_body_pct = abs(curr.close - curr.open) / candle_range * 100
+
+    dist_to_zone = 0.0
+    if direction == 1:
+        dist_to_zone = curr.close - fvg["top"]
+    else:
+        dist_to_zone = fvg["bottom"] - curr.close
+
+    # Extra metrics
+    vol_change_pct = 0.0
+    if len(volumes) >= 2 and volumes[-2] > 0:
+        vol_change_pct = (volumes[-1] - volumes[-2]) / volumes[-2] * 100
+
+    price_change_pct = 0.0
+    if curr.open != 0:
+        price_change_pct = (curr.close - curr.open) / curr.open * 100
+
+    candle_body_pct = 0.0
+    if candle_range > 0:
+        candle_body_pct = abs(curr.close - curr.open) / candle_range * 100
+
+    dist_to_zone = 0.0
+    if direction == 1:
+        dist_to_zone = curr.close - fvg["top"]
+    else:
+        dist_to_zone = fvg["bottom"] - curr.close
+
     # SL / TP based on ATR
     atr_val = atr_val if atr_val else fvg["size"]
     sl = fvg["bottom"] - atr_val * 0.8 if direction == 1 else fvg["top"] + atr_val * 0.8
@@ -200,6 +243,14 @@ def calc_strength(bars: List, fvg: Dict) -> Dict:
         "bear_strength": bear_str,
         "vol_score": vol_score,
         "trend_score": trend_score,
+        "vol_change_pct": round(vol_change_pct, 1),
+        "price_change_pct": round(price_change_pct, 2),
+        "candle_body_pct": round(candle_body_pct, 1),
+        "dist_to_zone": round(dist_to_zone, 4),
+        "vol_change_pct": round(vol_change_pct, 1),
+        "price_change_pct": round(price_change_pct, 2),
+        "candle_body_pct": round(candle_body_pct, 1),
+        "dist_to_zone": round(dist_to_zone, 4),
         "label": label,
         "rsi": round(rsi_val, 1),
         "atr": round(atr_val, 4),
@@ -242,6 +293,10 @@ class FVGTracker:
             "tp1": zone.tp1,
             "tp2": zone.tp2,
             "price": zone.price,
+            "vol_change_pct": zone.vol_change_pct,
+            "price_change_pct": zone.price_change_pct,
+            "candle_body_pct": zone.candle_body_pct,
+            "dist_to_zone": zone.dist_to_zone,
             "approach_alerted": zone.approach_alerted,
             "touch_alerted": zone.touch_alerted,
         }
@@ -268,6 +323,10 @@ class FVGTracker:
             tp1=d.get("tp1", 0.0),
             tp2=d.get("tp2", 0.0),
             price=d.get("price", 0.0),
+            vol_change_pct=d.get("vol_change_pct", 0.0),
+            price_change_pct=d.get("price_change_pct", 0.0),
+            candle_body_pct=d.get("candle_body_pct", 0.0),
+            dist_to_zone=d.get("dist_to_zone", 0.0),
             approach_alerted=d.get("approach_alerted", False),
             touch_alerted=d.get("touch_alerted", False),
         )
@@ -352,6 +411,10 @@ class FVGTracker:
             tp1=strength["tp1"],
             tp2=strength["tp2"],
             price=strength["price"],
+            vol_change_pct=strength["vol_change_pct"],
+            price_change_pct=strength["price_change_pct"],
+            candle_body_pct=strength["candle_body_pct"],
+            dist_to_zone=strength["dist_to_zone"],
         )
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
