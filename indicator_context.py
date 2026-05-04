@@ -123,13 +123,17 @@ def cross_state(k_values: List[Optional[float]], d_values: List[Optional[float]]
     return "neutral"
 
 
+def _missing(value: Optional[float]) -> bool:
+    return value is None or bool(np.isnan(value))
+
+
 def pivot_lows(values: List[Optional[float]], left: int = 10, right: int = 10) -> List[int]:
     pivots: List[int] = []
     for i in range(left, len(values) - right):
         value = values[i]
-        if value is None:
+        if _missing(value):
             continue
-        window = [v for v in values[i - left:i + right + 1] if v is not None]
+        window = [v for v in values[i - left:i + right + 1] if not _missing(v)]
         if window and value == min(window):
             pivots.append(i)
     return pivots
@@ -139,9 +143,9 @@ def pivot_highs(values: List[Optional[float]], left: int = 10, right: int = 10) 
     pivots: List[int] = []
     for i in range(left, len(values) - right):
         value = values[i]
-        if value is None:
+        if _missing(value):
             continue
-        window = [v for v in values[i - left:i + right + 1] if v is not None]
+        window = [v for v in values[i - left:i + right + 1] if not _missing(v)]
         if window and value == max(window):
             pivots.append(i)
     return pivots
