@@ -131,6 +131,17 @@ def test_chart_generator_renders_indicator_panels():
 
 
 
+def test_align_series_to_index_forward_fills_higher_timeframe_values():
+    target = make_bars([10, 11, 12, 13, 14, 15])
+    source = [target[0], target[3]]
+    target_index = chart_generator.pd.to_datetime([b.open_time for b in target], unit="ms")
+
+    aligned = chart_generator._align_series_to_index([10.0, 80.0], source, target_index)
+
+    assert aligned == [10.0, 10.0, 10.0, 80.0, 80.0, 80.0]
+
+
+
 def test_chart_generator_renders_when_higher_timeframes_lack_stochrsi_data():
     bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
     short_bars = make_bars([10, 11, 12])

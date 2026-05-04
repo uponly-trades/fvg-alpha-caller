@@ -57,6 +57,17 @@ def _align_series(values: List[Optional[float]], length: int) -> List[float]:
     return aligned
 
 
+def _align_series_to_index(values: List[Optional[float]], bars, target_index) -> List[float]:
+    if not bars:
+        return [50.0] * len(target_index)
+    source_index = pd.to_datetime([b.open_time for b in bars], unit="ms")
+    cleaned = [np.nan if v is None else v for v in values]
+    aligned = pd.Series(cleaned, index=source_index).reindex(target_index, method="ffill").tolist()
+    if all(np.isnan(v) for v in aligned):
+        return [50.0] * len(target_index)
+    return aligned
+
+
 def _align_price(values: List[float], length: int) -> List[float]:
     if len(values) >= length:
         return values[-length:]
@@ -93,7 +104,7 @@ def generate_chart(
             "Close": [b.close for b in bars],
             "Volume": [b.volume for b in bars],
         })
-        df.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq="min")
+        df.index = pd.to_datetime([b.open_time for b in bars], unit="ms")
 
         closes = df["Close"].tolist()
         highs = df["High"].tolist()
@@ -116,8 +127,8 @@ def generate_chart(
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
-            df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
-            df[f"MAStochRSI_{stoch_tf}"] = _align_series(stoch_d, len(df))
+            df[f"StochRSI_{stoch_tf}"] = _align_series_to_index(stoch_k, tf_bars, df.index)
+            df[f"MAStochRSI_{stoch_tf}"] = _align_series_to_index(stoch_d, tf_bars, df.index)
             stoch_source[stoch_tf] = (tf_bars, stoch_k)
 
         # Color for FVG zone
@@ -185,9 +196,9 @@ def generate_chart(
         for stoch_tf, ax in (("15m", ax_stoch_15m), ("1h", ax_stoch_1h), ("4h", ax_stoch_4h)):
             tf_bars, stoch_k = stoch_source[stoch_tf]
             if len(tf_bars) >= 25:
-                tf_highs = _align_price([float(b.high) for b in tf_bars], len(df))
-                tf_lows = _align_price([float(b.low) for b in tf_bars], len(df))
-                _draw_divergence(ax, tf_highs, tf_lows, _align_series(stoch_k, len(df)))
+                tf_highs = _align_series_to_index([float(b.high) for b in tf_bars], tf_bars, df.index)
+                tf_lows = _align_series_to_index([float(b.low) for b in tf_bars], tf_bars, df.index)
+                _draw_divergence(ax, tf_highs, tf_lows, _align_series_to_index(stoch_k, tf_bars, df.index))
         _draw_divergence(ax_rsi, highs, lows, rsi7)
 
         buf = io.BytesIO()
