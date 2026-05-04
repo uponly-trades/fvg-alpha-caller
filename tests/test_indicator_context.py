@@ -368,3 +368,34 @@ def test_send_trade_recap_formats_daily_summary(monkeypatch):
     assert "Closed Winrate: 50.0%" in text
     assert "LONG VALID - BTCUSDT 15m" in text
     assert "Status: TP1" in text
+
+
+def test_chart_generator_draws_trade_plan_overlays(monkeypatch):
+    bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
+    hlines = []
+    original_axhline = chart_generator.matplotlib.axes.Axes.axhline
+
+    def spy_axhline(self, y=0, *args, **kwargs):
+        hlines.append((y, kwargs.get("color")))
+        return original_axhline(self, y=y, *args, **kwargs)
+
+    monkeypatch.setattr(chart_generator.matplotlib.axes.Axes, "axhline", spy_axhline)
+
+    png = chart_generator.generate_chart(
+        bars=bars,
+        zone_top=24.0,
+        zone_bottom=22.0,
+        zone_direction=1,
+        symbol="BTCUSDT",
+        tf="15m",
+        rsi_value=55.0,
+        timeframe_bars={"15m": bars, "30m": bars, "1h": bars, "2h": bars, "4h": bars},
+        trade_plan=SimpleNamespace(entry=25.0, sl=21.0, tp1=27.0, tp2=29.0),
+    )
+
+    assert png is not None
+    assert png.startswith(b"\x89PNG")
+    assert (25.0, "#1f77b4") in hlines
+    assert (21.0, "#d62728") in hlines
+    assert (27.0, "#2ca02c") in hlines
+    assert (29.0, "#006400") in hlines

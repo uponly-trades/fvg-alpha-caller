@@ -95,6 +95,7 @@ def generate_chart(
     tf: str,
     rsi_value: Optional[float] = None,
     timeframe_bars: Optional[Dict[str, List]] = None,
+    trade_plan=None,
 ) -> Optional[bytes]:
     """Generate candlestick chart with FVG zone, EMAs, and RSI. Returns PNG bytes."""
     try:
@@ -189,6 +190,26 @@ def generate_chart(
             linestyle="--",
         )
         ax_main.add_patch(rect)
+
+        if trade_plan is not None:
+            overlay_levels = [
+                ("Entry", float(trade_plan.entry), "#1f77b4"),
+                ("SL", float(trade_plan.sl), "#d62728"),
+                ("TP1", float(trade_plan.tp1), "#2ca02c"),
+                ("TP2", float(trade_plan.tp2), "#006400"),
+            ]
+            x_text = xlim[0] + (xlim[1] - xlim[0]) * 0.02
+            for label, price, color in overlay_levels:
+                ax_main.axhline(y=price, color=color, linestyle="-", linewidth=1.2, alpha=0.9)
+                ax_main.text(
+                    x_text,
+                    price,
+                    f" {label} {price:g} ",
+                    color="white",
+                    fontsize=8,
+                    va="center",
+                    bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color},
+                )
 
         # Indicator horizontal lines
         for ax in (ax_stoch_15m, ax_stoch_30m, ax_stoch_1h, ax_stoch_2h, ax_stoch_4h, ax_rsi, ax_kdj):
