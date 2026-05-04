@@ -270,3 +270,101 @@ def test_zone_indicator_context_text_is_not_rendered_in_alert(monkeypatch):
     assert "StochRSI" not in sent["text"]
     assert "KDJ" not in sent["text"]
     assert "LS L60.0/S40.0" not in sent["text"]
+
+
+def test_trade_plan_alert_uses_reduced_trade_content(monkeypatch):
+    import telegram
+
+    class Zone:
+        direction = 1
+        label = "Strong Bullish Imbalance"
+        symbol = "BTCUSDT"
+        tf = "30m"
+        price = 100.0
+        bottom = 99.0
+        top = 101.0
+        main_strength = 80
+        atr = 1.2
+        vol_change_pct = 10.0
+        price_change_pct = 1.0
+        price_change_24h_pct = 2.0
+        dominance_state = "ALT"
+        btc_state = "UP"
+        dominance_bias = -0.01
+        btc_trend = 0.01
+        confirm_score = 80
+        confirm_label = "A+"
+        indicator_context = "StochRSI should not render"
+
+    setup = SimpleNamespace(
+        status="LONG VALID",
+        valid=True,
+        mode="scalping",
+        reason="long FVG with aligned StochRSI combo",
+        trade=SimpleNamespace(direction="long", entry=100.0, sl=98.9, tp1=101.1, tp2=102.2, rr=2.0),
+    )
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+
+    telegram.send_new_fvg_alert(Zone(), trade_setup=setup)
+
+    text = sent["text"]
+    assert "LONG VALID - BULLISH FVG | BTCUSDT | 30m" in text
+    assert "Entry: 100.0" in text
+    assert "SL: 98.9" in text
+    assert "TP1: 101.1" in text
+    assert "TP2: 102.2" in text
+    assert "RR: 1:2" in text
+    assert "Mode: scalping" in text
+    assert "Zone: 99.0 — 101.0" in text
+    assert "Strength: 80%" in text
+    assert "Reason: long FVG with aligned StochRSI combo" in text
+    assert "interval=30" in text
+    assert "StochRSI should not render" not in text
+    assert "Vol Change" not in text
+    assert "BTCDOM" not in text
+
+
+def test_skipped_trade_alert_renders_skip_reason(monkeypatch):
+    import telegram
+
+    zone = SimpleNamespace(direction=-1, symbol="ETHUSDT", tf="2h", bottom=99.0, top=101.0, main_strength=80)
+    setup = SimpleNamespace(status="SKIP: MIXED COMBO", valid=False, mode="intraday", reason="combo timeframes are mixed", trade=None)
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+
+    telegram.send_touch_alert(zone, 100.0, trade_setup=setup)
+
+    text = sent["text"]
+    assert "SKIP: MIXED COMBO - BEARISH FVG | ETHUSDT | 2h" in text
+    assert "Entry:" not in text
+    assert "Skip Reason: combo timeframes are mixed" in text
+    assert "interval=120" in text
+
+
+def test_send_trade_recap_formats_daily_summary(monkeypatch):
+    import telegram
+
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+
+    telegram.send_trade_recap("Siang", {
+        "open": 4,
+        "tp1": 2,
+        "win": 1,
+        "loss": 1,
+        "closed_winrate": 50.0,
+        "recent": [
+            {"direction": "long", "symbol": "BTCUSDT", "tf": "15m", "entry": 100.0, "sl": 98.0, "tp1": 102.0, "tp2": 104.0, "status": "tp1_hit"}
+        ],
+    })
+
+    text = sent["text"]
+    assert "Trade Recap — Siang" in text
+    assert "Open: 4" in text
+    assert "TP1: 2" in text
+    assert "Win TP2: 1" in text
+    assert "Loss: 1" in text
+    assert "Closed Winrate: 50.0%" in text
+    assert "LONG VALID - BTCUSDT 15m" in text
+    assert "Status: TP1" in text

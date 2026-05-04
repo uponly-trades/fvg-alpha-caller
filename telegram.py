@@ -13,13 +13,55 @@ TELEGRAM_PHOTO_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
 def _tv_link(symbol: str, tf: str) -> str:
     """Build TradingView chart URL."""
-    interval_map = {"15m": "15", "1h": "60", "4h": "240"}
+    interval_map = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
     iv = interval_map.get(tf, "60")
     tv_symbol = f"{symbol}.P"
     return f"https://www.tradingview.com/chart/?symbol=BINANCE:{tv_symbol}&interval={iv}"
 
 
-def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None) -> bool:
+def _fvg_direction_text(zone) -> str:
+    return "BULLISH" if int(zone.direction) == 1 else "BEARISH"
+
+
+def _trade_title(zone, trade_setup) -> str:
+    return f"{trade_setup.status} - {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
+
+
+def _format_trade_alert(zone, current_price: float, trade_setup) -> str:
+    tv_url = _tv_link(zone.symbol, zone.tf)
+    lines = [f"<b>{_trade_title(zone, trade_setup)}</b>", ""]
+    if trade_setup.trade is not None:
+        trade = trade_setup.trade
+        lines.extend([
+            f"Entry: {trade.entry}",
+            f"SL: {trade.sl}",
+            f"TP1: {trade.tp1}",
+            f"TP2: {trade.tp2}",
+            "RR: 1:2",
+        ])
+    else:
+        lines.append(f"Price: {current_price}")
+        lines.append(f"Skip Reason: {trade_setup.reason}")
+
+    lines.extend([
+        f"Mode: {trade_setup.mode}",
+        f"Zone: {zone.bottom} — {zone.top}",
+        f"Strength: {zone.main_strength}%",
+    ])
+    if trade_setup.trade is not None:
+        lines.append(f"Reason: {trade_setup.reason}")
+    lines.append("")
+    lines.append(f"<a href='{tv_url}'>Open TradingView</a>")
+    return "\n".join(lines)
+
+
+def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
+    if trade_setup is not None:
+        msg = _format_trade_alert(zone, getattr(zone, "price", 0.0), trade_setup)
+        if chart_png:
+            return _send_photo(msg, chart_png)
+        return _send(msg)
+
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
@@ -77,7 +119,13 @@ def send_mitigated_alert(zone) -> bool:
     return _send(msg)
 
 
-def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] = None) -> bool:
+def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
+    if trade_setup is not None:
+        msg = _format_trade_alert(zone, current_price, trade_setup)
+        if chart_png:
+            return _send_photo(msg, chart_png)
+        return _send(msg)
+
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
@@ -86,7 +134,6 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
-    indicator_block = _indicator_block(zone)
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -111,7 +158,13 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     return _send(msg)
 
 
-def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = None) -> bool:
+def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
+    if trade_setup is not None:
+        msg = _format_trade_alert(zone, current_price, trade_setup)
+        if chart_png:
+            return _send_photo(msg, chart_png)
+        return _send(msg)
+
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
     tv_url = _tv_link(zone.symbol, zone.tf)
@@ -120,7 +173,6 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
-    indicator_block = _indicator_block(zone)
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
@@ -142,6 +194,30 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     if chart_png:
         return _send_photo(msg, chart_png)
     return _send(msg)
+
+
+def send_trade_recap(session_name: str, recap: dict) -> bool:
+    lines = [
+        f"<b>Trade Recap — {session_name}</b>",
+        "",
+        f"Open: {recap['open']}",
+        f"TP1: {recap['tp1']}",
+        f"Win TP2: {recap['win']}",
+        f"Loss: {recap['loss']}",
+        f"Closed Winrate: {recap['closed_winrate']}%",
+    ]
+    recent = recap.get("recent", [])
+    if recent:
+        lines.extend(["", "Recent:"])
+        for record in recent:
+            direction = "LONG" if record.get("direction") == "long" else "SHORT"
+            status = str(record.get("status", "")).upper().replace("TP1_HIT", "TP1")
+            lines.extend([
+                f"{direction} VALID - {record['symbol']} {record['tf']}",
+                f"Entry {record['entry']} | SL {record['sl']} | TP1 {record['tp1']} | TP2 {record['tp2']}",
+                f"Status: {status}",
+            ])
+    return _send("\n".join(lines))
 
 
 def _send(text: str) -> bool:
