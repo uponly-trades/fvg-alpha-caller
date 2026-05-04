@@ -49,8 +49,12 @@ def _calc_ema(values: List[float], length: int) -> List[float]:
 def _align_series(values: List[Optional[float]], length: int) -> List[float]:
     cleaned = [np.nan if v is None else v for v in values]
     if len(cleaned) >= length:
-        return cleaned[-length:]
-    return [np.nan] * (length - len(cleaned)) + cleaned
+        aligned = cleaned[-length:]
+    else:
+        aligned = [np.nan] * (length - len(cleaned)) + cleaned
+    if all(np.isnan(v) for v in aligned):
+        return [50.0] * length
+    return aligned
 
 
 def generate_chart(

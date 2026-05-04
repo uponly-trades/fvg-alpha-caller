@@ -130,6 +130,26 @@ def test_chart_generator_renders_indicator_panels():
 
 
 
+def test_chart_generator_renders_when_higher_timeframes_lack_stochrsi_data():
+    bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
+    short_bars = make_bars([10, 11, 12])
+
+    png = chart_generator.generate_chart(
+        bars=bars,
+        zone_top=24.0,
+        zone_bottom=22.0,
+        zone_direction=1,
+        symbol="INJUSDT",
+        tf="15m",
+        rsi_value=61.0,
+        timeframe_bars={"15m": bars, "1h": short_bars, "4h": short_bars},
+    )
+
+    assert png is not None
+    assert png.startswith(b"\x89PNG")
+
+
+
 def test_zone_indicator_context_text_can_be_rendered_in_alert(monkeypatch):
     import telegram
 
