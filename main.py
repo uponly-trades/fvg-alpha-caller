@@ -27,6 +27,9 @@ class AlphaCaller:
         self.tracker = FVGTracker()
         self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
 
+    def _timeframe_bars(self, symbol: str) -> dict:
+        return {tf: self.tracker.buffers.get((symbol, tf), []) for tf in TIMEFRAMES}
+
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
             return
@@ -51,6 +54,7 @@ class AlphaCaller:
                 symbol=zone.symbol,
                 tf=zone.tf,
                 rsi_value=zone.rsi,
+                timeframe_bars=self._timeframe_bars(zone.symbol),
             )
             zone.indicator_context = format_indicator_context(zone.symbol, self.tracker.buffers)
             if event["type"] == "approaching":
@@ -73,6 +77,7 @@ class AlphaCaller:
                 symbol=new_zone.symbol,
                 tf=new_zone.tf,
                 rsi_value=new_zone.rsi,
+                timeframe_bars=self._timeframe_bars(new_zone.symbol),
             )
 
             new_zone.indicator_context = format_indicator_context(new_zone.symbol, self.tracker.buffers)

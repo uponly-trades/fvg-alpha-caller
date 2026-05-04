@@ -122,6 +122,7 @@ def test_chart_generator_renders_indicator_panels():
         symbol="BTCUSDT",
         tf="15m",
         rsi_value=55.0,
+        timeframe_bars={"15m": bars, "1h": bars, "4h": bars},
     )
 
     assert png is not None
