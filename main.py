@@ -5,7 +5,6 @@ import sys
 from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
-from indicator_context import format_indicator_context
 from websocket_client import BinanceKlineWS
 from telegram import (
     send_approach_alert,
@@ -36,12 +35,6 @@ class AlphaCaller:
             bars_by_tf[tf] = bars
         return bars_by_tf
 
-    def _indicator_buffers(self, symbol: str) -> dict:
-        buffers = dict(self.tracker.buffers)
-        for tf, bars in self._timeframe_bars(symbol).items():
-            buffers.setdefault((symbol, tf), bars)
-        return buffers
-
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
             return
@@ -68,7 +61,6 @@ class AlphaCaller:
                 rsi_value=zone.rsi,
                 timeframe_bars=self._timeframe_bars(zone.symbol),
             )
-            zone.indicator_context = format_indicator_context(zone.symbol, self._indicator_buffers(zone.symbol))
             if event["type"] == "approaching":
                 send_approach_alert(zone, price, chart_png=chart_png)
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
@@ -92,7 +84,6 @@ class AlphaCaller:
                 timeframe_bars=self._timeframe_bars(new_zone.symbol),
             )
 
-            new_zone.indicator_context = format_indicator_context(new_zone.symbol, self._indicator_buffers(new_zone.symbol))
             send_new_fvg_alert(new_zone, chart_png=chart_png)
             logger.info(
                 "New FVG alert %s %s | strength=%d rsi=%s",

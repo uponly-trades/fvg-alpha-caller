@@ -23,7 +23,7 @@ SYMBOLS = [
     "JUPUSDT", "ACHUSDT", "SSVUSDT", "LQTYUSDT", "IDUSDT",
 ]
 
-TIMEFRAMES = ["15m", "1h", "4h"]
+TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h"]
 
 # Indicators
 VOL_MA_LEN   = 20

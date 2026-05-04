@@ -116,6 +116,43 @@ def test_long_short_ratio_uses_binance_response_and_cache(monkeypatch):
 
 
 
+def test_chart_generator_renders_30m_1h_2h_4h_stochrsi_without_divergence(monkeypatch):
+    bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
+    divergence_calls = []
+    labels = []
+
+    monkeypatch.setattr(chart_generator, "_draw_divergence", lambda *args, **kwargs: divergence_calls.append(args))
+
+    original_make_addplot = chart_generator.mpf.make_addplot
+    def spy_make_addplot(*args, **kwargs):
+        if "ylabel" in kwargs:
+            labels.append(kwargs["ylabel"])
+        return original_make_addplot(*args, **kwargs)
+
+    monkeypatch.setattr(chart_generator.mpf, "make_addplot", spy_make_addplot)
+
+    png = chart_generator.generate_chart(
+        bars=bars,
+        zone_top=24.0,
+        zone_bottom=22.0,
+        zone_direction=1,
+        symbol="BTCUSDT",
+        tf="15m",
+        rsi_value=55.0,
+        timeframe_bars={"15m": bars, "30m": bars, "1h": bars, "2h": bars, "4h": bars},
+    )
+
+    assert png is not None
+    assert png.startswith(b"\x89PNG")
+    assert "sRSI 30m" in labels
+    assert "sRSI 1h" in labels
+    assert "sRSI 2h" in labels
+    assert "sRSI 4h" in labels
+    assert len(divergence_calls) == 1
+    assert divergence_calls[0][0].get_ylabel() == "RSI7"
+
+
+
 def test_chart_generator_renders_indicator_panels():
     bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
 
@@ -144,12 +181,9 @@ def test_alpha_caller_uses_ws_warmup_buffers_for_missing_timeframes():
     caller.poller = SimpleNamespace(_buffers={"BTCUSDT_1h": one_hour, "BTCUSDT_4h": four_hour})
 
     bars_by_tf = caller._timeframe_bars("BTCUSDT")
-    indicator_buffers = caller._indicator_buffers("BTCUSDT")
-
     assert bars_by_tf["15m"] == fifteen
     assert bars_by_tf["1h"] == one_hour
     assert bars_by_tf["4h"] == four_hour
-    assert indicator_buffers[("BTCUSDT", "4h")] == four_hour
 
 
 
@@ -184,7 +218,7 @@ def test_chart_generator_renders_when_higher_timeframes_lack_stochrsi_data():
 
 
 
-def test_zone_indicator_context_text_can_be_rendered_in_alert(monkeypatch):
+def test_zone_indicator_context_text_is_not_rendered_in_alert(monkeypatch):
     import telegram
 
     class Zone:
@@ -232,8 +266,7 @@ def test_zone_indicator_context_text_can_be_rendered_in_alert(monkeypatch):
 
     telegram.send_new_fvg_alert(Zone())
 
-    assert "📊 Indicator Context" in sent["text"]
-    assert "StochRSI" in sent["text"]
-    assert "RSI7" in sent["text"]
-    assert "KDJ" in sent["text"]
-    assert "LS L60.0/S40.0" in sent["text"]
+    assert "📊 Indicator Context" not in sent["text"]
+    assert "StochRSI" not in sent["text"]
+    assert "KDJ" not in sent["text"]
+    assert "LS L60.0/S40.0" not in sent["text"]

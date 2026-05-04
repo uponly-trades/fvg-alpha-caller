@@ -123,14 +123,12 @@ def generate_chart(
         df["KDJ_J"] = kdj_j
 
         timeframe_bars = timeframe_bars or {tf: bars}
-        stoch_source = {}
-        for stoch_tf in ("15m", "1h", "4h"):
+        for stoch_tf in ("15m", "30m", "1h", "2h", "4h"):
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
-            df[f"StochRSI_{stoch_tf}"] = _align_series_to_index(stoch_k, tf_bars, df.index)
-            df[f"MAStochRSI_{stoch_tf}"] = _align_series_to_index(stoch_d, tf_bars, df.index)
-            stoch_source[stoch_tf] = (tf_bars, stoch_k)
+            df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
+            df[f"MAStochRSI_{stoch_tf}"] = _align_series(stoch_d, len(df))
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
@@ -142,14 +140,18 @@ def generate_chart(
             mpf.make_addplot(df["EMA50"], color="blue", width=0.8, label="EMA50"),
             mpf.make_addplot(df["StochRSI_15m"], panel=1, color="teal", width=0.8, ylabel="sRSI 15m"),
             mpf.make_addplot(df["MAStochRSI_15m"], panel=1, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_1h"], panel=2, color="teal", width=0.8, ylabel="sRSI 1h"),
-            mpf.make_addplot(df["MAStochRSI_1h"], panel=2, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_4h"], panel=3, color="teal", width=0.8, ylabel="sRSI 4h"),
-            mpf.make_addplot(df["MAStochRSI_4h"], panel=3, color="magenta", width=0.8),
-            mpf.make_addplot(df["RSI7"], panel=4, color="purple", width=0.8, ylabel="RSI7"),
-            mpf.make_addplot(df["KDJ_K"], panel=5, color="blue", width=0.8, ylabel="KDJ"),
-            mpf.make_addplot(df["KDJ_D"], panel=5, color="orange", width=0.8),
-            mpf.make_addplot(df["KDJ_J"], panel=5, color="green", width=0.8),
+            mpf.make_addplot(df["StochRSI_30m"], panel=2, color="teal", width=0.8, ylabel="sRSI 30m"),
+            mpf.make_addplot(df["MAStochRSI_30m"], panel=2, color="magenta", width=0.8),
+            mpf.make_addplot(df["StochRSI_1h"], panel=3, color="teal", width=0.8, ylabel="sRSI 1h"),
+            mpf.make_addplot(df["MAStochRSI_1h"], panel=3, color="magenta", width=0.8),
+            mpf.make_addplot(df["StochRSI_2h"], panel=4, color="teal", width=0.8, ylabel="sRSI 2h"),
+            mpf.make_addplot(df["MAStochRSI_2h"], panel=4, color="magenta", width=0.8),
+            mpf.make_addplot(df["StochRSI_4h"], panel=5, color="teal", width=0.8, ylabel="sRSI 4h"),
+            mpf.make_addplot(df["MAStochRSI_4h"], panel=5, color="magenta", width=0.8),
+            mpf.make_addplot(df["RSI7"], panel=6, color="purple", width=0.8, ylabel="RSI7"),
+            mpf.make_addplot(df["KDJ_K"], panel=7, color="blue", width=0.8, ylabel="KDJ"),
+            mpf.make_addplot(df["KDJ_D"], panel=7, color="orange", width=0.8),
+            mpf.make_addplot(df["KDJ_J"], panel=7, color="green", width=0.8),
         ]
 
         fig, axes = mpf.plot(
@@ -160,17 +162,19 @@ def generate_chart(
             ylabel="Price",
             volume=False,
             addplot=apds,
-            panel_ratios=(3, 1, 1, 1, 1, 1),
+            panel_ratios=(3, 1, 1, 1, 1, 1, 1, 1),
             returnfig=True,
-            figsize=(10, 13),
+            figsize=(10, 17),
         )
 
         ax_main = axes[0]
         ax_stoch_15m = axes[2]
-        ax_stoch_1h = axes[4]
-        ax_stoch_4h = axes[6]
-        ax_rsi = axes[8]
-        ax_kdj = axes[10]
+        ax_stoch_30m = axes[4]
+        ax_stoch_1h = axes[6]
+        ax_stoch_2h = axes[8]
+        ax_stoch_4h = axes[10]
+        ax_rsi = axes[12]
+        ax_kdj = axes[14]
 
         # Add FVG zone rectangle
         xlim = ax_main.get_xlim()
@@ -187,19 +191,13 @@ def generate_chart(
         ax_main.add_patch(rect)
 
         # Indicator horizontal lines
-        for ax in (ax_stoch_15m, ax_stoch_1h, ax_stoch_4h, ax_rsi, ax_kdj):
+        for ax in (ax_stoch_15m, ax_stoch_30m, ax_stoch_1h, ax_stoch_2h, ax_stoch_4h, ax_rsi, ax_kdj):
             ax.axhline(y=80, color="red", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=20, color="green", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
         ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
         ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.8, alpha=0.7)
 
-        for stoch_tf, ax in (("15m", ax_stoch_15m), ("1h", ax_stoch_1h), ("4h", ax_stoch_4h)):
-            tf_bars, stoch_k = stoch_source[stoch_tf]
-            if len(tf_bars) >= 25:
-                tf_highs = _align_series_to_index([float(b.high) for b in tf_bars], tf_bars, df.index)
-                tf_lows = _align_series_to_index([float(b.low) for b in tf_bars], tf_bars, df.index)
-                _draw_divergence(ax, tf_highs, tf_lows, _align_series_to_index(stoch_k, tf_bars, df.index))
         _draw_divergence(ax_rsi, highs, lows, rsi7)
 
         buf = io.BytesIO()
