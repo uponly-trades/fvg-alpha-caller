@@ -1,6 +1,7 @@
 import os
 import sys
 from dataclasses import dataclass
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +12,7 @@ os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
 
 import indicator_context
 import chart_generator
+import main
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,24 @@ def test_chart_generator_renders_indicator_panels():
 
     assert png is not None
     assert png.startswith(b"\x89PNG")
+
+
+
+def test_alpha_caller_uses_ws_warmup_buffers_for_missing_timeframes():
+    caller = object.__new__(main.AlphaCaller)
+    fifteen = make_bars([10, 11, 12])
+    one_hour = make_bars([20, 21, 22])
+    four_hour = make_bars([30, 31, 32])
+    caller.tracker = SimpleNamespace(buffers={("BTCUSDT", "15m"): fifteen})
+    caller.poller = SimpleNamespace(_buffers={"BTCUSDT_1h": one_hour, "BTCUSDT_4h": four_hour})
+
+    bars_by_tf = caller._timeframe_bars("BTCUSDT")
+    indicator_buffers = caller._indicator_buffers("BTCUSDT")
+
+    assert bars_by_tf["15m"] == fifteen
+    assert bars_by_tf["1h"] == one_hour
+    assert bars_by_tf["4h"] == four_hour
+    assert indicator_buffers[("BTCUSDT", "4h")] == four_hour
 
 
 

@@ -28,7 +28,19 @@ class AlphaCaller:
         self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
 
     def _timeframe_bars(self, symbol: str) -> dict:
-        return {tf: self.tracker.buffers.get((symbol, tf), []) for tf in TIMEFRAMES}
+        bars_by_tf = {}
+        for tf in TIMEFRAMES:
+            bars = self.tracker.buffers.get((symbol, tf), [])
+            if not bars:
+                bars = self.poller._buffers.get(f"{symbol}_{tf}", [])
+            bars_by_tf[tf] = bars
+        return bars_by_tf
+
+    def _indicator_buffers(self, symbol: str) -> dict:
+        buffers = dict(self.tracker.buffers)
+        for tf, bars in self._timeframe_bars(symbol).items():
+            buffers.setdefault((symbol, tf), bars)
+        return buffers
 
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
@@ -56,7 +68,7 @@ class AlphaCaller:
                 rsi_value=zone.rsi,
                 timeframe_bars=self._timeframe_bars(zone.symbol),
             )
-            zone.indicator_context = format_indicator_context(zone.symbol, self.tracker.buffers)
+            zone.indicator_context = format_indicator_context(zone.symbol, self._indicator_buffers(zone.symbol))
             if event["type"] == "approaching":
                 send_approach_alert(zone, price, chart_png=chart_png)
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
@@ -80,7 +92,7 @@ class AlphaCaller:
                 timeframe_bars=self._timeframe_bars(new_zone.symbol),
             )
 
-            new_zone.indicator_context = format_indicator_context(new_zone.symbol, self.tracker.buffers)
+            new_zone.indicator_context = format_indicator_context(new_zone.symbol, self._indicator_buffers(new_zone.symbol))
             send_new_fvg_alert(new_zone, chart_png=chart_png)
             logger.info(
                 "New FVG alert %s %s | strength=%d rsi=%s",
