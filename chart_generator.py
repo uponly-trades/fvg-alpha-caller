@@ -10,7 +10,7 @@ import mplfinance as mpf
 import numpy as np
 import pandas as pd
 
-from indicator_context import kdj_series, rsi_series, stochrsi_series
+from indicator_context import divergence_state, kdj_series, pivot_highs, pivot_lows, rsi_series, stochrsi_series
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,23 @@ def _align_series(values: List[Optional[float]], length: int) -> List[float]:
     return aligned
 
 
+def _align_price(values: List[float], length: int) -> List[float]:
+    if len(values) >= length:
+        return values[-length:]
+    return [np.nan] * (length - len(values)) + values
+
+
+def _draw_divergence(ax, highs: List[float], lows: List[float], osc: List[Optional[float]], x_offset: int = 0):
+    low_pivots = pivot_lows(osc)
+    high_pivots = pivot_highs(osc)
+    for prev, curr in zip(low_pivots, low_pivots[1:]):
+        if 5 <= curr - prev <= 60 and lows[curr] < lows[prev] and osc[curr] is not None and osc[prev] is not None and osc[curr] > osc[prev]:
+            ax.plot([prev + x_offset, curr + x_offset], [osc[prev], osc[curr]], color="cyan", linewidth=1.4)
+    for prev, curr in zip(high_pivots, high_pivots[1:]):
+        if 5 <= curr - prev <= 60 and highs[curr] > highs[prev] and osc[curr] is not None and osc[prev] is not None and osc[curr] < osc[prev]:
+            ax.plot([prev + x_offset, curr + x_offset], [osc[prev], osc[curr]], color="red", linewidth=1.4)
+
+
 def generate_chart(
     bars,
     zone_top: float,
@@ -94,12 +111,14 @@ def generate_chart(
         df["KDJ_J"] = kdj_j
 
         timeframe_bars = timeframe_bars or {tf: bars}
+        stoch_source = {}
         for stoch_tf in ("15m", "1h", "4h"):
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
             df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
             df[f"MAStochRSI_{stoch_tf}"] = _align_series(stoch_d, len(df))
+            stoch_source[stoch_tf] = (tf_bars, stoch_k)
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
@@ -162,6 +181,14 @@ def generate_chart(
             ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
         ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
         ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.8, alpha=0.7)
+
+        for stoch_tf, ax in (("15m", ax_stoch_15m), ("1h", ax_stoch_1h), ("4h", ax_stoch_4h)):
+            tf_bars, stoch_k = stoch_source[stoch_tf]
+            if len(tf_bars) >= 25:
+                tf_highs = _align_price([float(b.high) for b in tf_bars], len(df))
+                tf_lows = _align_price([float(b.low) for b in tf_bars], len(df))
+                _draw_divergence(ax, tf_highs, tf_lows, _align_series(stoch_k, len(df)))
+        _draw_divergence(ax_rsi, highs, lows, rsi7)
 
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")

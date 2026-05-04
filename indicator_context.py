@@ -24,6 +24,8 @@ class IndicatorContext:
     kdj_d: Optional[float] = None
     kdj_j: Optional[float] = None
     kdj_state: str = "neutral"
+    rsi_divergence: str = "none"
+    stoch_divergence: str = "none"
     long_pct: Optional[float] = None
     short_pct: Optional[float] = None
 
@@ -121,6 +123,47 @@ def cross_state(k_values: List[Optional[float]], d_values: List[Optional[float]]
     return "neutral"
 
 
+def pivot_lows(values: List[Optional[float]], left: int = 10, right: int = 10) -> List[int]:
+    pivots: List[int] = []
+    for i in range(left, len(values) - right):
+        value = values[i]
+        if value is None:
+            continue
+        window = [v for v in values[i - left:i + right + 1] if v is not None]
+        if window and value == min(window):
+            pivots.append(i)
+    return pivots
+
+
+def pivot_highs(values: List[Optional[float]], left: int = 10, right: int = 10) -> List[int]:
+    pivots: List[int] = []
+    for i in range(left, len(values) - right):
+        value = values[i]
+        if value is None:
+            continue
+        window = [v for v in values[i - left:i + right + 1] if v is not None]
+        if window and value == max(window):
+            pivots.append(i)
+    return pivots
+
+
+def divergence_state(highs: List[float], lows: List[float], osc: List[Optional[float]], left: int = 10, right: int = 10) -> str:
+    low_pivots = pivot_lows(osc, left, right)
+    high_pivots = pivot_highs(osc, left, right)
+
+    for prev, curr in zip(low_pivots, low_pivots[1:]):
+        if 5 <= curr - prev <= 60 and lows[curr] < lows[prev] and osc[curr] is not None and osc[prev] is not None and osc[curr] > osc[prev]:
+            if curr == low_pivots[-1]:
+                return "bull_div"
+
+    for prev, curr in zip(high_pivots, high_pivots[1:]):
+        if 5 <= curr - prev <= 60 and highs[curr] > highs[prev] and osc[curr] is not None and osc[prev] is not None and osc[curr] < osc[prev]:
+            if curr == high_pivots[-1]:
+                return "bear_div"
+
+    return "none"
+
+
 def fetch_long_short_ratio(symbol: str, tf: str) -> Optional[Tuple[float, float]]:
     key = (symbol, tf)
     now = time.time()
@@ -169,6 +212,8 @@ def calculate_indicator_context(tf: str, bars, ls_ratio: Optional[Tuple[float, f
         kdj_d=round(kdj_d[-1], 1) if kdj_d[-1] is not None else None,
         kdj_j=round(kdj_j[-1], 1) if kdj_j[-1] is not None else None,
         kdj_state=cross_state(kdj_k, kdj_d),
+        rsi_divergence=divergence_state(highs, lows, rsi7),
+        stoch_divergence=divergence_state(highs, lows, stoch_k),
         long_pct=long_pct,
         short_pct=short_pct,
     )
@@ -185,8 +230,8 @@ def format_context_line(ctx: IndicatorContext) -> str:
     if ctx.long_pct is not None and ctx.short_pct is not None:
         ls = f"LS L{ctx.long_pct:.1f}/S{ctx.short_pct:.1f}"
     return (
-        f"{ctx.tf:<3}: StochRSI {_fmt(ctx.stoch_k)}/{_fmt(ctx.stoch_d)} {ctx.stoch_state} | "
-        f"RSI7 {_fmt(ctx.rsi7)} | "
+        f"{ctx.tf:<3}: StochRSI {_fmt(ctx.stoch_k)}/{_fmt(ctx.stoch_d)} {ctx.stoch_state} div={ctx.stoch_divergence} | "
+        f"RSI7 {_fmt(ctx.rsi7)} div={ctx.rsi_divergence} | "
         f"KDJ K{_fmt(ctx.kdj_k)} D{_fmt(ctx.kdj_d)} J{_fmt(ctx.kdj_j)} {ctx.kdj_state} | "
         f"{ls}"
     )

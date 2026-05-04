@@ -81,6 +81,7 @@ def test_build_indicator_context_formats_three_timeframes(monkeypatch):
     assert "StochRSI" in text
     assert "RSI7" in text
     assert "KDJ" in text
+    assert "div=" in text
     assert "LS L60.0/S40.0" in text
 
 
