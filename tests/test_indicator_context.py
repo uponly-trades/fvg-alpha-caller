@@ -399,3 +399,71 @@ def test_chart_generator_draws_trade_plan_overlays(monkeypatch):
     assert (21.0, "#d62728") in hlines
     assert (27.0, "#2ca02c") in hlines
     assert (29.0, "#006400") in hlines
+
+
+@pytest.mark.asyncio
+async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch):
+    caller = object.__new__(main.AlphaCaller)
+    bars = make_bars([10, 11, 12, 13])
+    zone = SimpleNamespace(
+        symbol="BTCUSDT",
+        tf="15m",
+        direction=1,
+        top=12.0,
+        bottom=11.0,
+        rsi=55.0,
+        main_strength=80,
+        price=13.0,
+        born_time=1777899600000,
+        alerted=False,
+    )
+    caller.tracker = SimpleNamespace(
+        buffers={},
+        update_buffer=lambda symbol, tf, bars: None,
+        check_mitigation=lambda symbol, tf, bars: [],
+        check_interaction=lambda symbol, tf, bars: [],
+        check_new_fvg=lambda symbol, tf: zone,
+    )
+    caller.poller = SimpleNamespace(_buffers={})
+    saved = []
+    caller.sim_store = SimpleNamespace(
+        update_open_trades=lambda symbol, bar: 0,
+        add_trade=lambda zone, setup, created_at: saved.append((zone, setup, created_at)) or True,
+        daily_recap=lambda date: {"open": 0, "tp1": 0, "win": 0, "loss": 0, "closed_winrate": 0.0, "recent": []},
+    )
+    caller._last_recap_key = None
+
+    setup = SimpleNamespace(
+        status="LONG VALID",
+        valid=True,
+        mode="scalping",
+        reason="aligned combo",
+        trade=SimpleNamespace(entry=13.0, sl=10.9, tp1=15.1, tp2=17.2),
+    )
+    calls = {}
+    monkeypatch.setattr(main, "evaluate_trade_setup", lambda zone, current_price, bars_by_tf: calls.setdefault("setup", setup))
+    monkeypatch.setattr(main, "generate_chart", lambda **kwargs: calls.setdefault("trade_plan", kwargs.get("trade_plan")) or b"png")
+    monkeypatch.setattr(main, "send_new_fvg_alert", lambda zone, chart_png=None, trade_setup=None: calls.setdefault("sent_setup", trade_setup) or True)
+    monkeypatch.setattr(main, "send_trade_recap", lambda session, recap: True)
+
+    await caller._on_bar_close("BTCUSDT", "15m", bars)
+
+    assert zone.alerted is True
+    assert calls["setup"] is setup
+    assert calls["trade_plan"] is setup.trade
+    assert calls["sent_setup"] is setup
+    assert saved == [(zone, setup, 1777899600000)]
+
+
+def test_alpha_caller_sends_each_session_recap_once(monkeypatch):
+    caller = object.__new__(main.AlphaCaller)
+    caller._last_recap_key = None
+    caller.sim_store = SimpleNamespace(daily_recap=lambda date: {"open": 0, "tp1": 0, "win": 0, "loss": 0, "closed_winrate": 0.0, "recent": []})
+    sent = []
+    monkeypatch.setattr(main, "send_trade_recap", lambda session, recap: sent.append(session) or True)
+
+    now = main.datetime(2026, 5, 4, 12, 5, tzinfo=main.timezone.utc)
+    caller._maybe_send_recap(now)
+    caller._maybe_send_recap(now)
+
+    assert sent == ["Siang"]
