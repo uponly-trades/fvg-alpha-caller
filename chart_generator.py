@@ -46,6 +46,13 @@ def _calc_ema(values: List[float], length: int) -> List[float]:
     return [np.nan] * (length - 1) + ema
 
 
+def _align_series(values: List[Optional[float]], length: int) -> List[float]:
+    cleaned = [np.nan if v is None else v for v in values]
+    if len(cleaned) >= length:
+        return cleaned[-length:]
+    return [np.nan] * (length - len(cleaned)) + cleaned
+
+
 def generate_chart(
     bars,
     zone_top: float,
@@ -83,15 +90,12 @@ def generate_chart(
         df["KDJ_J"] = kdj_j
 
         timeframe_bars = timeframe_bars or {tf: bars}
-        stoch_frames = {}
         for stoch_tf in ("15m", "1h", "4h"):
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
-            stoch_frames[stoch_tf] = (
-                stoch_k[-1] if stoch_k and stoch_k[-1] is not None else None,
-                stoch_d[-1] if stoch_d and stoch_d[-1] is not None else None,
-            )
+            df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
+            df[f"MAStochRSI_{stoch_tf}"] = _align_series(stoch_d, len(df))
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
@@ -101,10 +105,16 @@ def generate_chart(
         apds = [
             mpf.make_addplot(df["EMA20"], color="orange", width=0.8, label="EMA20"),
             mpf.make_addplot(df["EMA50"], color="blue", width=0.8, label="EMA50"),
-            mpf.make_addplot(df["RSI7"], panel=1, color="purple", width=0.8, ylabel="RSI7"),
-            mpf.make_addplot(df["KDJ_K"], panel=2, color="blue", width=0.8, ylabel="KDJ"),
-            mpf.make_addplot(df["KDJ_D"], panel=2, color="orange", width=0.8),
-            mpf.make_addplot(df["KDJ_J"], panel=2, color="green", width=0.8),
+            mpf.make_addplot(df["StochRSI_15m"], panel=1, color="teal", width=0.8, ylabel="StochRSI 15m"),
+            mpf.make_addplot(df["MAStochRSI_15m"], panel=1, color="magenta", width=0.8),
+            mpf.make_addplot(df["StochRSI_1h"], panel=2, color="teal", width=0.8, ylabel="StochRSI 1h"),
+            mpf.make_addplot(df["MAStochRSI_1h"], panel=2, color="magenta", width=0.8),
+            mpf.make_addplot(df["StochRSI_4h"], panel=3, color="teal", width=0.8, ylabel="StochRSI 4h"),
+            mpf.make_addplot(df["MAStochRSI_4h"], panel=3, color="magenta", width=0.8),
+            mpf.make_addplot(df["RSI7"], panel=4, color="purple", width=0.8, ylabel="RSI7"),
+            mpf.make_addplot(df["KDJ_K"], panel=5, color="blue", width=0.8, ylabel="KDJ"),
+            mpf.make_addplot(df["KDJ_D"], panel=5, color="orange", width=0.8),
+            mpf.make_addplot(df["KDJ_J"], panel=5, color="green", width=0.8),
         ]
 
         fig, axes = mpf.plot(
@@ -115,14 +125,17 @@ def generate_chart(
             ylabel="Price",
             volume=False,
             addplot=apds,
-            panel_ratios=(3, 1, 1),
+            panel_ratios=(3, 1, 1, 1, 1, 1),
             returnfig=True,
-            figsize=(10, 9),
+            figsize=(10, 13),
         )
 
         ax_main = axes[0]
-        ax_rsi = axes[2]
-        ax_kdj = axes[4]
+        ax_stoch_15m = axes[2]
+        ax_stoch_1h = axes[4]
+        ax_stoch_4h = axes[6]
+        ax_rsi = axes[8]
+        ax_kdj = axes[10]
 
         # Add FVG zone rectangle
         xlim = ax_main.get_xlim()
@@ -139,25 +152,12 @@ def generate_chart(
         ax_main.add_patch(rect)
 
         # Indicator horizontal lines
-        for ax in (ax_rsi, ax_kdj):
+        for ax in (ax_stoch_15m, ax_stoch_1h, ax_stoch_4h, ax_rsi, ax_kdj):
             ax.axhline(y=80, color="red", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=20, color="green", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
         ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
         ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.8, alpha=0.7)
-
-        stoch_text = "  |  ".join(
-            f"{stoch_tf} StochRSI {k:.1f}/{d:.1f}" if k is not None and d is not None else f"{stoch_tf} StochRSI n/a"
-            for stoch_tf, (k, d) in stoch_frames.items()
-        )
-        ax_main.text(
-            0.01,
-            0.02,
-            stoch_text,
-            transform=ax_main.transAxes,
-            fontsize=8,
-            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "gray"},
-        )
 
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
