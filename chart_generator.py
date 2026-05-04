@@ -61,10 +61,11 @@ def _align_series_to_index(values: List[Optional[float]], bars, target_index) ->
     if not bars:
         return [50.0] * len(target_index)
     source_index = pd.to_datetime([b.open_time for b in bars], unit="ms")
-    cleaned = [np.nan if v is None else v for v in values]
-    aligned = pd.Series(cleaned, index=source_index).reindex(target_index, method="ffill").tolist()
-    if all(np.isnan(v) for v in aligned):
+    source = pd.Series([np.nan if v is None else v for v in values], index=source_index).dropna()
+    if source.empty:
         return [50.0] * len(target_index)
+    aligned = source.reindex(source.index.union(target_index)).interpolate(method="time").reindex(target_index)
+    aligned = aligned.ffill().bfill().tolist()
     return aligned
 
 

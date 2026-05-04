@@ -1,5 +1,7 @@
 import os
 import sys
+
+import pytest
 from dataclasses import dataclass
 from types import SimpleNamespace
 from pathlib import Path
@@ -151,14 +153,14 @@ def test_alpha_caller_uses_ws_warmup_buffers_for_missing_timeframes():
 
 
 
-def test_align_series_to_index_forward_fills_higher_timeframe_values():
+def test_align_series_to_index_interpolates_higher_timeframe_values():
     target = make_bars([10, 11, 12, 13, 14, 15])
     source = [target[0], target[3]]
     target_index = chart_generator.pd.to_datetime([b.open_time for b in target], unit="ms")
 
     aligned = chart_generator._align_series_to_index([10.0, 80.0], source, target_index)
 
-    assert aligned == [10.0, 10.0, 10.0, 80.0, 80.0, 80.0]
+    assert aligned == pytest.approx([10.0, 33.33333333333333, 56.666666666666664, 80.0, 80.0, 80.0])
 
 
 
