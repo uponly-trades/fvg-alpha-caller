@@ -100,8 +100,11 @@ KLINES_LIMIT = 100
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 
-# Postgres
-DATABASE_URL = os.environ["DATABASE_URL"]
+# Postgres — fallback ke fvg-postgres container (same Coolify network)
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://fvg:f18bbdd5a18785da8d18d8d92965defc@fvg-postgres:5432/fvg",
+)
 
 # Binance
 BASE_URL = "https://fapi.binance.com"
