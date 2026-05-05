@@ -1,6 +1,6 @@
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import requests
@@ -239,10 +239,12 @@ def _fmt_price(v) -> str:
         return str(v)
 
 
+_TZ_WIB = timezone(timedelta(hours=7))
+
 def _fmt_ts(ts_ms) -> str:
     try:
-        dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
-        return dt.strftime("%d %b %H:%M UTC")
+        dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=_TZ_WIB)
+        return dt.strftime("%d %b %H:%M WIB")
     except Exception:
         return "—"
 
