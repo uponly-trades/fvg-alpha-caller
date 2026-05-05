@@ -68,7 +68,7 @@ class AlphaCaller:
             tf=zone.tf,
         )
         if kronos is not None:
-            return build_trade_from_kronos(kronos)
+            return build_trade_from_kronos(kronos, int(zone.direction))
         return evaluate_trade_setup(zone, current_price, bars_by_tf)
 
     def _save_chart_png(self, zone, chart_png: bytes) -> str:

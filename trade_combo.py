@@ -142,10 +142,10 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
 _TIMEFRAME_MAP = {"SCALPING": "scalping", "INTRADAY": "intraday", "SWING": "swing"}
 
 
-def build_trade_from_kronos(kronos: dict) -> TradeSetupResult:
+def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResult:
     """
     Convert Kronos prediction response into TradeSetupResult.
-    RANGING → SKIP. LONG/SHORT → valid trade with Kronos levels.
+    RANGING → SKIP. Direction must align with zone_direction, else SKIP.
     """
     direction = kronos.get("direction", "RANGING")
     timeframe = kronos.get("timeframe", "INTRADAY")
@@ -154,8 +154,17 @@ def build_trade_from_kronos(kronos: dict) -> TradeSetupResult:
 
     if direction == "RANGING":
         return TradeSetupResult(
-            f"SKIP: RANGING", False, mode,
-            f"Kronos predicts ranging market (confidence {confidence}%)",
+            "SKIP: RANGING", False, mode,
+            f"Kronos ranging (conf {confidence}%)",
+            None, {}, {},
+        )
+
+    # Must align with FVG zone direction
+    expected = "LONG" if zone_direction == 1 else "SHORT"
+    if direction != expected:
+        return TradeSetupResult(
+            "SKIP: KRONOS CONFLICT", False, mode,
+            f"Kronos {direction} conflicts with {expected} FVG zone (conf {confidence}%)",
             None, {}, {},
         )
 
@@ -168,7 +177,7 @@ def build_trade_from_kronos(kronos: dict) -> TradeSetupResult:
         rr=2.0,
     )
     status = f"{direction} VALID"
-    reason = f"Kronos {direction.lower()} signal — {timeframe.lower()} (confidence {confidence}%)"
+    reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"
     return TradeSetupResult(status, True, mode, reason, trade, {}, {})
 
 
