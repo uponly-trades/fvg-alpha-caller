@@ -406,7 +406,10 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     vol_score = volumes[-1] / vol_ma if vol_ma and vol_ma != 0 else 1.0
 
     trend_ema = ema(closes, TREND_EMA_LEN)
-    trend_score = 1.0 if (direction == 1 and curr.close > trend_ema) or (direction == -1 and curr.close < trend_ema) else 0.0
+    if trend_ema is not None:
+        trend_score = 1.0 if (direction == 1 and curr.close > trend_ema) or (direction == -1 and curr.close < trend_ema) else 0.0
+    else:
+        trend_score = 0.5
 
     atr_val = atr(highs, lows, closes, ATR_LEN)
     gap_strength = min(fvg["size"] / atr_val, 2.0) / 2.0 * GAP_WEIGHT if atr_val and atr_val > 0 else 0
