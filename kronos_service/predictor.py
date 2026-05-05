@@ -42,8 +42,15 @@ def load_model(device: str = "mps"):
 def _run_kronos(bars: List[Dict]) -> List[Dict]:
     """Run Kronos inference on OHLCV bars list. Returns predicted bars list."""
     import pandas as pd
+    n = len(bars)
+    # Generate monotonic 1-minute timestamps (relative — model only uses cyclical features)
+    base = pd.Timestamp("2024-01-01")
+    x_ts = pd.Series(pd.date_range(base, periods=n, freq="1min"))
+    y_ts = pd.Series(pd.date_range(x_ts.iloc[-1] + pd.Timedelta("1min"), periods=PREDICT_STEPS, freq="1min"))
     df = pd.DataFrame(bars)[["open", "high", "low", "close", "volume"]]
-    pred_df = _predictor.predict(df, pred_len=PREDICT_STEPS)
+    df["amount"] = df["close"] * df["volume"]  # required by Kronos tokenizer
+    df.index = x_ts
+    pred_df = _predictor.predict(df, x_timestamp=x_ts, y_timestamp=y_ts, pred_len=PREDICT_STEPS, verbose=False)
     return pred_df[["open", "high", "low", "close", "volume"]].to_dict(orient="records")
 
 
