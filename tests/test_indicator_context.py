@@ -494,3 +494,82 @@ def test_alpha_caller_sends_each_session_recap_once(monkeypatch):
     caller._maybe_send_recap(now)
 
     assert sent == ["Siang"]
+
+
+def test_kronos_client_fallback_on_timeout(monkeypatch):
+    """When Kronos service unreachable, client returns None without raising."""
+    import kronos_client
+    import httpx
+
+    async def fake_post(*a, **kw):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    import asyncio
+    result = asyncio.get_event_loop().run_until_complete(
+        kronos_client.predict(
+            bars=[{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}] * 20,
+            current_price=100.0,
+            atr=1.0,
+            zone_direction=1,
+            symbol="BTCUSDT",
+            tf="15m",
+        )
+    )
+    assert result is None
+
+
+def test_kronos_client_returns_decision_on_success(monkeypatch):
+    """When service returns valid JSON, client returns dict with all fields."""
+    import kronos_client
+    import httpx
+    from unittest.mock import MagicMock
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(return_value={
+        "direction": "LONG", "timeframe": "INTRADAY",
+        "entry": 100.0, "sl": 99.0, "tp1": 101.0, "tp2": 102.0, "confidence": 72,
+    })
+
+    async def fake_post(*a, **kw):
+        return mock_response
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    import asyncio
+    result = asyncio.get_event_loop().run_until_complete(
+        kronos_client.predict(
+            bars=[{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}] * 20,
+            current_price=100.0, atr=1.0, zone_direction=1, symbol="BTCUSDT", tf="15m",
+        )
+    )
+    assert result is not None
+    assert result["direction"] == "LONG"
+    assert result["confidence"] == 72
+
+
+def test_build_trade_from_kronos_long():
+    from trade_combo import build_trade_from_kronos
+    kronos = {"direction": "LONG", "timeframe": "INTRADAY", "entry": 100.0,
+              "sl": 99.0, "tp1": 101.0, "tp2": 102.0, "confidence": 75}
+    result = build_trade_from_kronos(kronos)
+    assert result.status == "LONG VALID"
+    assert result.valid is True
+    assert result.mode == "intraday"
+    assert result.trade.entry == 100.0
+    assert result.trade.sl == 99.0
+    assert result.trade.tp1 == 101.0
+    assert result.trade.tp2 == 102.0
+    assert result.trade.rr == 2.0
+
+
+def test_build_trade_from_kronos_ranging():
+    from trade_combo import build_trade_from_kronos
+    kronos = {"direction": "RANGING", "timeframe": "SCALPING", "entry": 100.0,
+              "sl": 99.5, "tp1": 100.5, "tp2": 101.0, "confidence": 30}
+    result = build_trade_from_kronos(kronos)
+    assert result.status == "SKIP: RANGING"
+    assert result.valid is False
+    assert result.trade is None
