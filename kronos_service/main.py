@@ -73,6 +73,7 @@ def predict_endpoint(req: PredictRequest):
             current_price=req.current_price,
             atr=req.atr,
             zone_direction=req.zone_direction,
+            tf=req.tf,
         )
     except Exception as e:
         logger.error("Kronos predict failed for %s %s: %s", req.symbol, req.tf, e)
