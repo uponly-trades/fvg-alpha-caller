@@ -124,35 +124,38 @@ def generate_chart(
         df["KDJ_J"] = kdj_j
 
         timeframe_bars = timeframe_bars or {tf: bars}
-        for stoch_tf in ("15m", "30m", "1h", "2h", "4h"):
+
+        # StochRSI per TF — all overlaid in one panel
+        stoch_tfs = ("15m", "30m", "1h", "2h", "4h")
+        stoch_colors = {"15m": "#00bfff", "30m": "#00e676", "1h": "#ff9800", "2h": "#e040fb", "4h": "#ff1744"}
+        for stoch_tf in stoch_tfs:
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
-            df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
-            df[f"MAStochRSI_{stoch_tf}"] = _align_series(stoch_d, len(df))
+            df[f"StochRSI_{stoch_tf}"] = _align_series_to_index(stoch_k, tf_bars, df.index) if tf_bars else _align_series(stoch_k, len(df))
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
         zone_alpha = 0.15
 
-        # Build addplot
+        # Build addplot — StochRSI all in panel 1, RSI7 panel 2, KDJ panel 3
+        first_stoch = True
         apds = [
             mpf.make_addplot(df["EMA20"], color="orange", width=0.8, label="EMA20"),
             mpf.make_addplot(df["EMA50"], color="blue", width=0.8, label="EMA50"),
-            mpf.make_addplot(df["StochRSI_15m"], panel=1, color="teal", width=0.8, ylabel="sRSI 15m"),
-            mpf.make_addplot(df["MAStochRSI_15m"], panel=1, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_30m"], panel=2, color="teal", width=0.8, ylabel="sRSI 30m"),
-            mpf.make_addplot(df["MAStochRSI_30m"], panel=2, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_1h"], panel=3, color="teal", width=0.8, ylabel="sRSI 1h"),
-            mpf.make_addplot(df["MAStochRSI_1h"], panel=3, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_2h"], panel=4, color="teal", width=0.8, ylabel="sRSI 2h"),
-            mpf.make_addplot(df["MAStochRSI_2h"], panel=4, color="magenta", width=0.8),
-            mpf.make_addplot(df["StochRSI_4h"], panel=5, color="teal", width=0.8, ylabel="sRSI 4h"),
-            mpf.make_addplot(df["MAStochRSI_4h"], panel=5, color="magenta", width=0.8),
-            mpf.make_addplot(df["RSI7"], panel=6, color="purple", width=0.8, ylabel="RSI7"),
-            mpf.make_addplot(df["KDJ_K"], panel=7, color="blue", width=0.8, ylabel="KDJ"),
-            mpf.make_addplot(df["KDJ_D"], panel=7, color="orange", width=0.8),
-            mpf.make_addplot(df["KDJ_J"], panel=7, color="green", width=0.8),
+        ]
+        for stoch_tf in stoch_tfs:
+            kwargs = dict(panel=1, color=stoch_colors[stoch_tf], width=0.9, alpha=0.85)
+            if first_stoch:
+                kwargs["ylabel"] = "sRSI"
+                first_stoch = False
+            apds.append(mpf.make_addplot(df[f"StochRSI_{stoch_tf}"], **kwargs))
+
+        apds += [
+            mpf.make_addplot(df["RSI7"], panel=2, color="purple", width=0.8, ylabel="RSI7"),
+            mpf.make_addplot(df["KDJ_K"], panel=3, color="blue", width=0.8, ylabel="KDJ"),
+            mpf.make_addplot(df["KDJ_D"], panel=3, color="orange", width=0.8),
+            mpf.make_addplot(df["KDJ_J"], panel=3, color="green", width=0.8),
         ]
 
         fig, axes = mpf.plot(
@@ -163,19 +166,15 @@ def generate_chart(
             ylabel="Price",
             volume=False,
             addplot=apds,
-            panel_ratios=(3, 1, 1, 1, 1, 1, 1, 1),
+            panel_ratios=(4, 1.2, 1, 1),
             returnfig=True,
-            figsize=(10, 17),
+            figsize=(10, 10),
         )
 
         ax_main = axes[0]
-        ax_stoch_15m = axes[2]
-        ax_stoch_30m = axes[4]
-        ax_stoch_1h = axes[6]
-        ax_stoch_2h = axes[8]
-        ax_stoch_4h = axes[10]
-        ax_rsi = axes[12]
-        ax_kdj = axes[14]
+        ax_stoch = axes[2]
+        ax_rsi = axes[4]
+        ax_kdj = axes[6]
 
         # Add FVG zone rectangle
         xlim = ax_main.get_xlim()
@@ -212,12 +211,19 @@ def generate_chart(
                 )
 
         # Indicator horizontal lines
-        for ax in (ax_stoch_15m, ax_stoch_30m, ax_stoch_1h, ax_stoch_2h, ax_stoch_4h, ax_rsi, ax_kdj):
+        for ax in (ax_stoch, ax_rsi, ax_kdj):
             ax.axhline(y=80, color="red", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=20, color="green", linestyle="--", linewidth=0.7, alpha=0.5)
             ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
         ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
         ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.8, alpha=0.7)
+
+        # Legend untuk StochRSI panel
+        legend_patches = [
+            mpatches.Patch(color=stoch_colors[stf], label=stf)
+            for stf in stoch_tfs
+        ]
+        ax_stoch.legend(handles=legend_patches, loc="upper left", fontsize=6, ncol=5, framealpha=0.5)
 
         _draw_divergence(ax_rsi, highs, lows, rsi7)
 

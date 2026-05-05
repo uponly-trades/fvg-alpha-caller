@@ -144,10 +144,10 @@ def test_chart_generator_renders_30m_1h_2h_4h_stochrsi_without_divergence(monkey
 
     assert png is not None
     assert png.startswith(b"\x89PNG")
-    assert "sRSI 30m" in labels
-    assert "sRSI 1h" in labels
-    assert "sRSI 2h" in labels
-    assert "sRSI 4h" in labels
+    # all StochRSI TFs now share one panel with a single "sRSI" ylabel
+    assert "sRSI" in labels
+    assert "sRSI 30m" not in labels
+    assert "sRSI 1h" not in labels
     assert len(divergence_calls) == 1
     assert divergence_calls[0][0].get_ylabel() == "RSI7"
 
@@ -455,7 +455,7 @@ async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch)
     assert saved == [(zone, setup, 1777899600000)]
 
 
-def test_sparkline_row_appears_in_trade_alert(monkeypatch):
+def test_trade_alert_text_has_no_ascii_sparkline(monkeypatch):
     import telegram
 
     class Zone:
@@ -472,7 +472,7 @@ def test_sparkline_row_appears_in_trade_alert(monkeypatch):
         mode="scalping",
         reason="aligned combo",
         trade=SimpleNamespace(direction="long", entry=100.0, sl=98.9, tp1=101.1, tp2=102.2, rr=2.0),
-        sparklines={"15m": "▁▂▃▄▅▆▇▆▅▄", "30m": "▃▄▅▆▇▆▅▄▃▂", "1h": "▅▆▇▆▅▄▃▂▁▂", "2h": "▂▃▄▅▆▇▆▅▄▃", "4h": "▆▇▆▅▄▃▂▁▂▃"},
+        sparklines={"15m": "▁▂▃▄▅▆▇▆▅▄"},
     )
     sent = {}
     monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
@@ -480,43 +480,11 @@ def test_sparkline_row_appears_in_trade_alert(monkeypatch):
     telegram.send_new_fvg_alert(Zone(), trade_setup=setup)
 
     text = sent["text"]
-    assert "<code>" in text
-    assert "15m" in text
-    assert "30m" in text
-    assert "1h" in text
-    assert "2h" in text
-    assert "4h" in text
-    assert "▁▂▃▄▅▆▇▆▅▄" in text
-    assert "▆▇▆▅▄▃▂▁▂▃" in text
-
-
-def test_sparkline_row_uses_fallback_when_sparklines_absent(monkeypatch):
-    import telegram
-
-    class Zone:
-        direction = -1
-        symbol = "ETHUSDT"
-        tf = "1h"
-        bottom = 99.0
-        top = 101.0
-        main_strength = 80
-
-    setup = SimpleNamespace(
-        status="SKIP: MIXED COMBO",
-        valid=False,
-        mode="intraday",
-        reason="combo timeframes are mixed",
-        trade=None,
-        sparklines=None,
-    )
-    sent = {}
-    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
-
-    telegram.send_touch_alert(Zone(), 100.0, trade_setup=setup)
-
-    text = sent["text"]
-    assert "<code>" in text
-    assert "──────────" in text
+    # sparklines now only in PNG chart, not in text
+    assert "<code>" not in text
+    assert "▁▂▃▄▅▆▇▆▅▄" not in text
+    assert "LONG VALID - BULLISH FVG | SOLUSDT | 15m" in text
+    assert "Entry: 100.0" in text
 
 
 def test_alpha_caller_sends_each_session_recap_once(monkeypatch):
