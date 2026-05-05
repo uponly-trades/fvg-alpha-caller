@@ -34,7 +34,6 @@ class AlphaCaller:
         self.tracker = FVGTracker()
         self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
         self.sim_store = SimTradeStore()
-        self._last_recap_key = None
 
     def _timeframe_bars(self, symbol: str) -> dict:
         bars_by_tf = {}
@@ -108,9 +107,8 @@ class AlphaCaller:
         for name, (start_hour, end_hour) in sessions.items():
             if start_hour <= now.hour < end_hour:
                 key = f"{now.date().isoformat()}-{name}"
-                if self._last_recap_key != key:
+                if self.sim_store.mark_recap_sent(key):
                     send_trade_recap(name, self.sim_store.daily_recap(now.date().isoformat()))
-                    self._last_recap_key = key
                 return
 
     async def _on_bar_close(self, symbol: str, tf: str, bars):

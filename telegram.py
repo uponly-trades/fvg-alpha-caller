@@ -238,51 +238,36 @@ def send_trade_recap(session_name: str, recap: dict) -> bool:
     closed = win_c + loss_c
 
     wr_emoji = "🔥" if wr >= 70 else "✅" if wr >= 50 else "⚠️" if wr >= 30 else "❌"
-
-    # Total realized PnL in R (win=+2R, tp1_hit=+1R, loss=-1R)
     total_r = win_c * 2.0 + tp1_c * 1.0 - loss_c * 1.0
     r_sign = "+" if total_r >= 0 else ""
     r_emoji = "🟢" if total_r > 0 else "🔴" if total_r < 0 else "⚪"
 
     lines = [
-        f"📊 <b>Trade Recap — {session_name}</b>",
-        f"📅 {date_str}",
+        f"📊 <b>Trade Recap — {session_name}  |  {date_str}</b>",
         "",
-        f"⏳ Open      : <b>{open_c}</b>",
-        f"🎯 TP1 Hit   : <b>{tp1_c}</b>",
-        f"✅ Win (TP2) : <b>{win_c}</b>",
-        f"❌ Loss      : <b>{loss_c}</b>",
-        f"📈 Closed    : <b>{closed}</b>  |  WR: {wr_emoji} <b>{wr}%</b>",
-        f"{r_emoji} Total PnL  : <b>{r_sign}{total_r:.1f}R</b>",
+        f"{'⏳':2} {open_c} open   {'🎯':2} {tp1_c} tp1   {'✅':2} {win_c} win   {'❌':2} {loss_c} loss",
+        f"WR {wr_emoji} <b>{wr}%</b>  ({closed} closed)   {r_emoji} <b>{r_sign}{total_r:.1f}R</b>",
     ]
 
     recent = recap.get("recent", [])
     if recent:
-        lines.extend(["", "━━━━━━━━━━━━━━━━", "🕐 <b>Recent Trades</b>"])
-        status_label = {"win": "✅ WIN", "loss": "❌ LOSS", "tp1_hit": "🎯 TP1 HIT", "open": "⏳ OPEN"}
-        dir_emoji = {"long": "🟢 LONG", "short": "🔴 SHORT"}
+        lines.extend(["", "─────────────────────"])
+        status_icon = {"win": "✅", "loss": "❌", "tp1_hit": "🎯", "open": "⏳"}
+        dir_icon = {"long": "🟢", "short": "🔴"}
         for r in recent:
-            direction = dir_emoji.get(r.get("direction", ""), r.get("direction", "?").upper())
-            status = str(r.get("status", "open"))
-            s_label = status_label.get(status, f"❓ {status.upper()}")
-            created = _fmt_ts(r.get("created_at", 0))
+            d_icon = dir_icon.get(r.get("direction", ""), "❓")
+            s_icon = status_icon.get(str(r.get("status", "open")), "❓")
+            sym = r["symbol"].replace("USDT", "")
+            tf = r["tf"]
+            entry = _fmt_price(r["entry"])
+            tp2 = _fmt_price(r["tp2"])
+            sl = _fmt_price(r["sl"])
             pnl = _calc_pnl_pct(r)
-            pnl_str = f"  PnL   : <b>{'+' if pnl >= 0 else ''}{pnl:.2f}%</b>" if pnl is not None else ""
-            upnl_str = "  uPnL  : —" if status in ("open", "tp1_hit") else ""
-            trade_lines = [
-                "",
-                f"{direction} | <code>{r['symbol']}</code> {r['tf']} | {created}",
-                f"  Entry : <b>{_fmt_price(r['entry'])}</b>",
-                f"  SL    : {_fmt_price(r['sl'])}",
-                f"  TP1   : {_fmt_price(r['tp1'])}",
-                f"  TP2   : {_fmt_price(r['tp2'])}",
-            ]
-            if pnl_str:
-                trade_lines.append(pnl_str)
-            if upnl_str:
-                trade_lines.append(upnl_str)
-            trade_lines.append(f"  {s_label}")
-            lines.extend(trade_lines)
+            pnl_str = f"  {'+' if pnl >= 0 else ''}{pnl:.2f}%" if pnl is not None else ""
+            created = _fmt_ts(r.get("created_at", 0))
+            lines.append(
+                f"{s_icon} {d_icon} <b>{sym}</b> {tf}  {entry} → {tp2}  SL {sl}{pnl_str}  <i>{created}</i>"
+            )
 
     return _send("\n".join(lines))
 

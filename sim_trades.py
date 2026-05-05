@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_date ON kronos_decisions(date);
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_valid ON kronos_decisions(valid);
+
+CREATE TABLE IF NOT EXISTS sent_recaps (
+    key TEXT PRIMARY KEY,
+    sent_at BIGINT NOT NULL
+);
 """
 
 
@@ -251,6 +256,22 @@ class SimTradeStore:
         except Exception as e:
             logger.error("update_open_trades failed: %s", e)
             return 0
+
+    def mark_recap_sent(self, key: str) -> bool:
+        """Persist recap key to DB so restarts don't re-send."""
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT key FROM sent_recaps WHERE key = %s", (key,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    "INSERT INTO sent_recaps (key, sent_at) VALUES (%s, %s)",
+                    (key, int(datetime.now(timezone.utc).timestamp() * 1000)),
+                )
+            return True
+        except Exception as e:
+            logger.error("mark_recap_sent failed: %s", e)
+            return False
 
     def daily_recap(self, date: Optional[str] = None) -> Dict:
         if date is None:
