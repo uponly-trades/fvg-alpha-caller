@@ -434,7 +434,7 @@ async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch)
     monkeypatch.setattr(main, "evaluate_trade_setup", lambda zone, current_price, bars_by_tf: calls.setdefault("setup", setup))
     monkeypatch.setattr(main, "evaluate_for_mode", lambda zone, mode, price, bars_by_tf: setup)
     monkeypatch.setattr(main, "generate_chart", lambda **kwargs: calls.setdefault("trade_plan", kwargs.get("trade_plan")) or b"png")
-    monkeypatch.setattr(main, "send_new_fvg_alert", lambda zone, chart_png=None, trade_setup=None: calls.setdefault("sent_setup", trade_setup) or True)
+    monkeypatch.setattr(main, "send_new_fvg_alert", lambda zone, chart_png=None, trade_setup=None, **kwargs: calls.setdefault("sent_setup", trade_setup) or True)
     monkeypatch.setattr(main, "send_trade_recap", lambda session, recap: True)
     monkeypatch.setattr(main.AlphaCaller, "_save_chart_png", lambda self, zone, png: "/app/data/charts/test.png")
 
