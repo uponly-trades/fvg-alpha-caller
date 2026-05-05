@@ -1,0 +1,26 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: dell-dubai
+    steps:
+      - name: Pull latest code
+        run: |
+          cd /opt/fvg-alpha-caller
+          git pull origin main
+
+      - name: Rebuild and restart
+        run: |
+          cd /opt/fvg-alpha-caller
+          docker compose build --no-cache
+          docker compose up -d
+
+      - name: Verify running
+        run: |
+          sleep 5
+          docker compose -f /opt/fvg-alpha-caller/docker-compose.yaml ps
+          docker logs fvg-alpha-caller-fvg-alpha-caller-1 --tail 10
