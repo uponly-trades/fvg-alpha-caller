@@ -46,28 +46,46 @@ def _confidence_label(score: int) -> str:
     return "❌ Low"
 
 
-def _rev_check_lines(timeframe_bars: dict) -> List[str]:
-    """Detect recent swing highs/lows per TF using pivot_highs/pivot_lows."""
+def _stoch_state_lines(timeframe_bars: dict) -> List[str]:
+    """StochRSI state per TF — oversold/overbought/ranging with K value."""
     try:
-        from indicator_context import pivot_highs, pivot_lows
+        from indicator_context import stochrsi_series
     except ImportError:
         return []
-    lines = []
+
     tf_order = ("15m", "30m", "1h", "2h", "4h")
+    lines = ["<b>StochRSI per TF</b>"]
     for tf in tf_order:
         bars = timeframe_bars.get(tf, [])
-        if len(bars) < 25:
+        if len(bars) < 20:
+            lines.append(f"  {tf:<4} —")
             continue
-        highs = [float(b.high) for b in bars]
-        lows = [float(b.low) for b in bars]
-        ph = pivot_highs(highs, left=5, right=5)
-        pl = pivot_lows(lows, left=5, right=5)
-        if ph:
-            last_top = highs[ph[-1]]
-            lines.append(f"✅ Rev. Top    — {tf}  ({_fmt_price(last_top)})")
-        if pl:
-            last_bot = lows[pl[-1]]
-            lines.append(f"✅ Rev. Bottom — {tf}  ({_fmt_price(last_bot)})")
+        closes = [float(b.close) for b in bars]
+        k_vals, d_vals = stochrsi_series(closes)
+        pairs = [(k, d) for k, d in zip(k_vals, d_vals) if k is not None and d is not None]
+        if len(pairs) < 2:
+            lines.append(f"  {tf:<4} —")
+            continue
+        k, d = pairs[-1]
+        pk, pd = pairs[-2]
+
+        # State
+        if k <= 20 and d <= 20:
+            state = "🟢 Oversold"
+        elif k >= 80 and d >= 80:
+            state = "🔴 Overbought"
+        elif pk <= pd and k > d and min(pk, pd, k, d) <= 30:
+            state = "🟢 Bullish cross"
+        elif pk >= pd and k < d and max(pk, pd, k, d) >= 70:
+            state = "🔴 Bearish cross"
+        elif k > 50 and d > 50:
+            state = "↗️ Bullish"
+        elif k < 50 and d < 50:
+            state = "↘️ Bearish"
+        else:
+            state = "↔️ Ranging"
+
+        lines.append(f"  {tf:<4} {state}  K:{k:.0f} D:{d:.0f}")
     return lines
 
 
@@ -106,10 +124,10 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
     if trade_setup is not None and trade_setup.trade is not None:
         lines.append(f"Reason: {trade_setup.reason}")
 
-    rev_lines = _rev_check_lines(timeframe_bars or {})
-    if rev_lines:
+    stoch_lines = _stoch_state_lines(timeframe_bars or {})
+    if stoch_lines:
         lines.append("")
-        lines.extend(rev_lines)
+        lines.extend(stoch_lines)
 
     lines.extend(["", f"<a href='{tv_url}'>Open TradingView</a>"])
     return "\n".join(lines)
