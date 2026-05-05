@@ -77,6 +77,9 @@ def derive_decision(
     From Kronos predicted bars, derive trading decision.
     Returns dict with: direction, timeframe, entry, sl, tp1, tp2, confidence.
     """
+    if not predicted:
+        raise ValueError("predicted bars list is empty")
+
     closes = [b["close"] for b in predicted]
     highs = [b["high"] for b in predicted]
     lows = [b["low"] for b in predicted]
@@ -100,9 +103,9 @@ def derive_decision(
     confidence = int(round(raw_confidence * 100))
 
     # TP/SL from predicted high/low, clamped to [0.5×ATR, 5×ATR]
-    atr = atr if atr > 0 else abs(entry * 0.001)
-    min_risk = atr * ATR_MIN_MULT
-    max_risk = atr * ATR_MAX_MULT
+    effective_atr = atr if atr > 0 else abs(entry * 0.001)
+    min_risk = effective_atr * ATR_MIN_MULT
+    max_risk = effective_atr * ATR_MAX_MULT
 
     if direction == "LONG":
         raw_tp2_dist = max(highs) - entry
@@ -110,17 +113,17 @@ def derive_decision(
         raw_tp2_dist = entry - min(lows)
     else:
         # RANGING: use 1x ATR as default
-        raw_tp2_dist = atr
+        raw_tp2_dist = effective_atr
 
     tp2_dist = float(np.clip(raw_tp2_dist, min_risk, max_risk))
     tp1_dist = tp2_dist / 2.0
     sl_dist = tp2_dist / 2.0  # RR 1:2 — risk = half of tp2_dist
 
-    if direction == "LONG" or direction == "RANGING":
+    if direction == "LONG" or (direction == "RANGING" and zone_direction >= 0):
         sl = entry - sl_dist
         tp1 = entry + tp1_dist
         tp2 = entry + tp2_dist
-    else:  # SHORT
+    else:  # SHORT or RANGING with bearish zone
         sl = entry + sl_dist
         tp1 = entry - tp1_dist
         tp2 = entry - tp2_dist
