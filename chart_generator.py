@@ -1,17 +1,16 @@
 import io
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
-import mplfinance as mpf
 import numpy as np
 import pandas as pd
 
-from indicator_context import divergence_state, kdj_series, pivot_highs, pivot_lows, rsi_series, stochrsi_series
+from indicator_context import kdj_series, pivot_highs, pivot_lows, rsi_series, stochrsi_series
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +155,14 @@ def generate_chart(
         # Row 2: RSI7 per TF (5 cols)
         # Row 3: StochRSI+MaStochRSI per TF (5 cols)
         ncols = len(stoch_tfs)
-        fig = plt.figure(figsize=(14, 12))
+        _BG = "#131722"
+        plt.rcParams.update({
+            "figure.facecolor": _BG, "axes.facecolor": _BG,
+            "axes.edgecolor": "#444", "text.color": "white",
+            "xtick.color": "white", "ytick.color": "white",
+            "axes.labelcolor": "white",
+        })
+        fig = plt.figure(figsize=(14, 12), facecolor=_BG)
         gs = GridSpec(
             4, ncols,
             figure=fig,
@@ -170,16 +176,38 @@ def generate_chart(
         rsi_axes   = [fig.add_subplot(gs[2, i]) for i in range(ncols)]
         stoch_axes = [fig.add_subplot(gs[3, i]) for i in range(ncols)]
 
-        # ── Candles ───────────────────────────────────────────────────────
-        mpf.plot(df, type="candle", style="charles", ax=ax_main, volume=False)
-        title_str = f"{symbol}  {tf}  |  RSI7: {rsi_value:.1f}" if rsi_value else f"{symbol}  {tf}"
-        ax_main.set_title(title_str, fontsize=11, fontweight="bold")
-        ax_main.set_ylabel("Price")
+        # Apply dark bg to every axes explicitly (rcParams alone not enough after add_subplot)
+        for _ax in [ax_main, ax_kdj] + rsi_axes + stoch_axes:
+            _ax.set_facecolor(_BG)
+            _ax.spines[:].set_color("#444")
+            _ax.tick_params(colors="white", labelsize=6)
 
-        x = range(len(df))
+        # ── Candles (manual — mplfinance clobbers GridSpec) ───────────────
+        x = np.arange(len(df))
+        c_open  = df["Open"].values
+        c_close = df["Close"].values
+        c_high  = df["High"].values
+        c_low   = df["Low"].values
+        up, down = c_close >= c_open, c_close < c_open
+        w = 0.4
+        for idx in x[up]:
+            ax_main.bar(idx, c_close[idx]-c_open[idx], w, bottom=c_open[idx], color="#26a69a", edgecolor="#26a69a")
+            ax_main.vlines(idx, c_low[idx], c_open[idx],   color="#26a69a", linewidth=0.8)
+            ax_main.vlines(idx, c_close[idx], c_high[idx], color="#26a69a", linewidth=0.8)
+        for idx in x[down]:
+            ax_main.bar(idx, c_open[idx]-c_close[idx], w, bottom=c_close[idx], color="#ef5350", edgecolor="#ef5350")
+            ax_main.vlines(idx, c_low[idx], c_close[idx],  color="#ef5350", linewidth=0.8)
+            ax_main.vlines(idx, c_open[idx], c_high[idx],  color="#ef5350", linewidth=0.8)
+
+        title_str = f"{symbol}  {tf}  |  RSI7: {rsi_value:.1f}" if rsi_value else f"{symbol}  {tf}"
+        ax_main.set_title(title_str, fontsize=11, fontweight="bold", color="white")
+        ax_main.set_ylabel("Price", color="white")
+        ax_main.tick_params(colors="white")
+
         ax_main.plot(x, ema20, color="orange", linewidth=0.9, label="EMA20")
-        ax_main.plot(x, ema50, color="blue",   linewidth=0.9, label="EMA50")
-        ax_main.legend(loc="upper left", fontsize=7, framealpha=0.5)
+        ax_main.plot(x, ema50, color="#5599ff", linewidth=0.9, label="EMA50")
+        ax_main.legend(loc="upper left", fontsize=7, framealpha=0.4,
+                       facecolor="#1e2330", edgecolor="#444", labelcolor="white")
 
         xlim = ax_main.get_xlim()
         ax_main.add_patch(mpatches.Rectangle(
@@ -200,18 +228,19 @@ def generate_chart(
                              color="white", fontsize=8, va="center",
                              bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color})
 
-        ax_main.tick_params(labelbottom=False)
+        ax_main.tick_params(labelbottom=False, colors="white")
 
         # ── KDJ ───────────────────────────────────────────────────────────
-        ax_kdj.plot(x, kdj_k, color="blue",   linewidth=0.8, label="K")
-        ax_kdj.plot(x, kdj_d, color="orange", linewidth=0.8, label="D")
-        ax_kdj.plot(x, kdj_j, color="green",  linewidth=0.8, label="J")
+        ax_kdj.plot(x, kdj_k, color="#5599ff", linewidth=0.8, label="K")
+        ax_kdj.plot(x, kdj_d, color="orange",  linewidth=0.8, label="D")
+        ax_kdj.plot(x, kdj_j, color="#26a69a", linewidth=0.8, label="J")
         for lvl, c in [(80, "red"), (20, "green"), (50, "gray")]:
             ax_kdj.axhline(y=lvl, color=c, linestyle="--", linewidth=0.6, alpha=0.5)
-        ax_kdj.set_ylabel("KDJ", fontsize=8)
+        ax_kdj.set_ylabel("KDJ", fontsize=8, color="white")
         ax_kdj.set_ylim(-10, 110)
-        ax_kdj.legend(loc="upper left", fontsize=6, framealpha=0.4)
-        ax_kdj.tick_params(labelbottom=False)
+        ax_kdj.legend(loc="upper left", fontsize=6, framealpha=0.4,
+                      facecolor="#1e2330", edgecolor="#444", labelcolor="white")
+        ax_kdj.tick_params(labelbottom=False, colors="white")
 
         # ── RSI7 per TF (row 2) ───────────────────────────────────────────
         for i, stf in enumerate(stoch_tfs):
@@ -226,10 +255,10 @@ def generate_chart(
             ax.set_ylim(0, 100)
             ax.set_title(stf, fontsize=8, color=color, fontweight="bold", pad=2)
             if i == 0:
-                ax.set_ylabel("RSI7", fontsize=8)
+                ax.set_ylabel("RSI7", fontsize=8, color="white")
             else:
                 ax.tick_params(labelleft=False)
-            ax.tick_params(labelbottom=False, labelsize=6)
+            ax.tick_params(labelbottom=False, colors="white", labelsize=6)
 
         # ── StochRSI + MaStochRSI per TF (row 3) ─────────────────────────
         for i, stf in enumerate(stoch_tfs):
@@ -250,13 +279,13 @@ def generate_chart(
                 fontsize=7, color=color, fontweight="bold", pad=2,
             )
             if i == 0:
-                ax.set_ylabel("sRSI", fontsize=8)
+                ax.set_ylabel("sRSI", fontsize=8, color="white")
             else:
                 ax.tick_params(labelleft=False)
-            ax.tick_params(labelbottom=False, labelsize=6)
+            ax.tick_params(labelbottom=False, colors="white", labelsize=6)
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+        fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor=_BG)
         plt.close(fig)
         buf.seek(0)
         return buf.read()

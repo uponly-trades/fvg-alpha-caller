@@ -8,7 +8,7 @@ from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
-from trade_combo import evaluate_trade_setup, evaluate_for_mode, COMBO_TIMEFRAMES, build_trade_from_kronos
+from trade_combo import evaluate_trade_setup, build_trade_from_kronos
 import kronos_client
 from websocket_client import BinanceKlineWS
 from telegram import (
@@ -83,17 +83,17 @@ class AlphaCaller:
             logger.error("chart save failed: %s", e)
             return ""
 
-    def _store_fvg_all_modes(self, zone, chart_path: str, current_price: float) -> None:
-        """Save FVG record + simulate all 3 modes regardless of zone.tf."""
+    async def _store_fvg_all_modes(self, zone, chart_path: str, current_price: float) -> None:
+        """Save FVG record + simulate trade via Kronos (fallback: StochRSI combo)."""
         self.sim_store.add_fvg(zone, chart_path=chart_path or None)
         bars_by_tf = self._timeframe_bars(zone.symbol)
         buf_summary = {tf: len(b) for tf, b in bars_by_tf.items()}
         logger.info("store_fvg_all_modes %s | bars=%s", zone.symbol, buf_summary)
-        for mode in COMBO_TIMEFRAMES:
-            setup = evaluate_for_mode(zone, mode, current_price, bars_by_tf)
-            logger.info("  mode=%s status=%s", mode, setup.status)
-            if setup.valid:
-                self.sim_store.add_sim_trade(zone, setup, zone.born_time)
+        # Use Kronos for sim trade (same path as alert)
+        setup = await self._evaluate_setup_async(zone, current_price)
+        logger.info("  kronos/combo status=%s valid=%s", setup.status, setup.valid)
+        if setup.valid:
+            self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
     def _maybe_send_recap(self, now=None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -169,7 +169,7 @@ class AlphaCaller:
             )
 
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
-            self._store_fvg_all_modes(new_zone, chart_path, price)
+            await self._store_fvg_all_modes(new_zone, chart_path, price)
 
             send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
             logger.info(
