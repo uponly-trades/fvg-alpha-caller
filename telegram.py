@@ -1,7 +1,7 @@
 import io
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import List, Optional
 
 import requests
 
@@ -46,15 +46,40 @@ def _confidence_label(score: int) -> str:
     return "❌ Low"
 
 
+def _rev_check_lines(timeframe_bars: dict) -> List[str]:
+    """Detect recent swing highs/lows per TF using pivot_highs/pivot_lows."""
+    try:
+        from indicator_context import pivot_highs, pivot_lows
+    except ImportError:
+        return []
+    lines = []
+    tf_order = ("15m", "30m", "1h", "2h", "4h")
+    for tf in tf_order:
+        bars = timeframe_bars.get(tf, [])
+        if len(bars) < 25:
+            continue
+        highs = [float(b.high) for b in bars]
+        lows = [float(b.low) for b in bars]
+        ph = pivot_highs(highs, left=5, right=5)
+        pl = pivot_lows(lows, left=5, right=5)
+        if ph:
+            last_top = highs[ph[-1]]
+            lines.append(f"✅ Rev. Top    — {tf}  ({_fmt_price(last_top)})")
+        if pl:
+            last_bot = lows[pl[-1]]
+            lines.append(f"✅ Rev. Bottom — {tf}  ({_fmt_price(last_bot)})")
+    return lines
+
+
 def _trade_title(zone, trade_setup, prefix: str = None) -> str:
     status = prefix if prefix else trade_setup.status
     return f"{status} | {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
 
 
-def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = None) -> str:
+def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = None, timeframe_bars: dict = None) -> str:
     tv_url = _tv_link(zone.symbol, zone.tf)
     lines = [f"<b>{_trade_title(zone, trade_setup, prefix)}</b>", ""]
-    if trade_setup.trade is not None:
+    if trade_setup is not None and trade_setup.trade is not None:
         trade = trade_setup.trade
         lines.extend([
             f"Entry : <b>{_fmt_price(trade.entry)}</b>",
@@ -64,75 +89,38 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
             "RR    : 1:2",
         ])
     else:
-        lines.append(f"Price: {current_price}")
-        lines.append(f"Skip Reason: {trade_setup.reason}")
+        lines.append(f"Price: {_fmt_price(current_price)}")
+        if trade_setup is not None:
+            lines.append(f"Skip Reason: {trade_setup.reason}")
 
     rsi_val = getattr(zone, "rsi", None)
     rsi_str = f"{_rsi_emoji(rsi_val)} RSI: {rsi_val:.1f}" if rsi_val is not None else ""
+    mode = trade_setup.mode if trade_setup is not None else "—"
     lines.extend([
-        f"Mode: {trade_setup.mode}",
-        f"Zone: {zone.bottom} — {zone.top}",
+        f"Mode: {mode}",
+        f"Zone: {_fmt_price(zone.bottom)} — {_fmt_price(zone.top)}",
         f"Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)",
     ])
     if rsi_str:
         lines.append(rsi_str)
-    if trade_setup.trade is not None:
+    if trade_setup is not None and trade_setup.trade is not None:
         lines.append(f"Reason: {trade_setup.reason}")
-    lines.append("")
-    lines.append(f"<a href='{tv_url}'>Open TradingView</a>")
+
+    rev_lines = _rev_check_lines(timeframe_bars or {})
+    if rev_lines:
+        lines.append("")
+        lines.extend(rev_lines)
+
+    lines.extend(["", f"<a href='{tv_url}'>Open TradingView</a>"])
     return "\n".join(lines)
 
 
-def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
-    if trade_setup is not None:
-        msg = _format_trade_alert(zone, getattr(zone, "price", 0.0), trade_setup, prefix="NEW FVG")
-        if chart_png:
-            return _send_photo(msg, chart_png)
-        return _send(msg)
-
-    emoji = "🟢" if zone.direction == 1 else "🔴"
-    dir_text = "Bullish" if zone.direction == 1 else "Bearish"
-    tv_url = _tv_link(zone.symbol, zone.tf)
-    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
-    price_icon = "🟢" if zone.price_change_pct > 0 else "🔴"
-
-    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
-    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
-    disp_text = "YES" if zone.displacement_ok else "NO"
-    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
-    invalid_text = f"\n❌ Invalid: {zone.invalid_reason}" if getattr(zone, "invalidated", False) and zone.invalid_reason else ""
-    rsi_icon = _rsi_emoji(zone.rsi)
-    caption = (
-        f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
-        f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
-        f"💰 Price : {zone.price}\n"
-        f"📏 Zone  : {zone.bottom} — {zone.top}\n"
-        f"📐 Size  : {zone.size:.4f}\n\n"
-        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n"
-        f"   • Bull: {zone.bull_strength}% | Bear: {zone.bear_strength}%\n"
-        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
-        f"📊 ATR(14) : {zone.atr}\n\n"
-        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"{price_icon} Bar Change: {zone.price_change_pct:+.2f}%\n"
-        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
-        f"📊 Candle Body: {zone.candle_body_pct:.1f}%\n"
-        f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
-        f"₿ BTC Trend: {btc_text} ({zone.btc_trend:+.4f})\n"
-        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label})\n"
-        f"• Vol Spike: {zone.volume_spike_ratio:.2f}x\n"
-        f"• Confluence: {zone.confluence_tf_count} TF\n"
-        f"• Displacement: {disp_text}\n"
-        f"• BTC Align: {btc_align_text}{invalid_text}\n\n"
-        f"🛑 SL : {zone.sl}\n"
-        f"🎯 TP1: {zone.tp1} (1.5×)\n"
-        f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
-        f"🔗 <a href='{tv_url}'>Open TradingView</a>"
-    )
-
+def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None, timeframe_bars: dict = None) -> bool:
+    msg = _format_trade_alert(zone, getattr(zone, "price", 0.0), trade_setup,
+                              prefix="NEW FVG", timeframe_bars=timeframe_bars or {})
     if chart_png:
-        return _send_photo(caption, chart_png)
-    return _send(caption)
+        return _send_photo(msg, chart_png)
+    return _send(msg)
 
 
 def send_mitigated_alert(zone) -> bool:
@@ -148,80 +136,17 @@ def send_mitigated_alert(zone) -> bool:
     return _send(msg)
 
 
-def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
-    if trade_setup is not None:
-        msg = _format_trade_alert(zone, current_price, trade_setup)
-        if chart_png:
-            return _send_photo(msg, chart_png)
-        return _send(msg)
-
-    emoji = "🟢" if zone.direction == 1 else "🔴"
-    dir_text = "Bullish" if zone.direction == 1 else "Bearish"
-    tv_url = _tv_link(zone.symbol, zone.tf)
-    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
-    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
-    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
-    disp_text = "YES" if zone.displacement_ok else "NO"
-    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
-    rsi_icon = _rsi_emoji(zone.rsi)
-    msg = (
-        f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
-        f"{emoji} {zone.label}\n"
-        f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
-        f"💰 Price : {current_price}\n"
-        f"📏 Zone  : {zone.bottom} — {zone.top}\n"
-        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n\n"
-        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n"
-        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
-        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
-        f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
-        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
-        f"🛑 SL : {zone.sl}\n"
-        f"🎯 TP1: {zone.tp1} (1.5×)\n"
-        f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
-        f"🔗 <a href='{tv_url}'>Open TradingView</a>"
-    )
+def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None, timeframe_bars: dict = None) -> bool:
+    msg = _format_trade_alert(zone, current_price, trade_setup,
+                              timeframe_bars=timeframe_bars or {})
     if chart_png:
         return _send_photo(msg, chart_png)
     return _send(msg)
 
 
-def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
-    if trade_setup is not None:
-        msg = _format_trade_alert(zone, current_price, trade_setup)
-        if chart_png:
-            return _send_photo(msg, chart_png)
-        return _send(msg)
-
-    emoji = "🟢" if zone.direction == 1 else "🔴"
-    dir_text = "Bullish" if zone.direction == 1 else "Bearish"
-    tv_url = _tv_link(zone.symbol, zone.tf)
-    vol_icon = "🟢" if zone.vol_change_pct > 0 else "🔴"
-    dom_text = {"ALT": "🟢 Alt Season", "BTC": "🔴 BTC Season", "NEUTRAL": "Neutral"}.get(zone.dominance_state, "Neutral")
-    btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
-    disp_text = "YES" if zone.displacement_ok else "NO"
-    btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
-    rsi_icon = _rsi_emoji(zone.rsi)
-    msg = (
-        f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
-        f"{emoji} {zone.label}\n"
-        f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
-        f"💰 Price : {current_price}\n"
-        f"📏 Zone  : {zone.bottom} — {zone.top}\n"
-        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n"
-        f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
-        f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
-        f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
-        f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
-        f"⚡ Confirm: {zone.confirm_score} ({zone.confirm_label}) | Vol {zone.volume_spike_ratio:.2f}x | Conf {zone.confluence_tf_count}TF | Disp {disp_text} | BTC {btc_align_text}\n\n"
-        f"🛑 SL : {zone.sl}\n"
-        f"🎯 TP1: {zone.tp1} (1.5×)\n"
-        f"🎯 TP2: {zone.tp2} (2.5×)\n\n"
-        f"🔗 <a href='{tv_url}'>Open TradingView</a>"
-    )
+def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = None, trade_setup=None, timeframe_bars: dict = None) -> bool:
+    msg = _format_trade_alert(zone, current_price, trade_setup,
+                              timeframe_bars=timeframe_bars or {})
     if chart_png:
         return _send_photo(msg, chart_png)
     return _send(msg)

@@ -305,7 +305,7 @@ def test_trade_plan_alert_uses_reduced_trade_content(monkeypatch):
     assert "102.2" in text
     assert "RR" in text
     assert "Mode: scalping" in text
-    assert "Zone: 99.0 — 101.0" in text
+    assert "Zone: 99.0000 — 101.0000" in text
     assert "Confidence:" in text
     assert "80%" in text
     assert "Reason: long FVG with aligned StochRSI combo" in text
@@ -573,3 +573,55 @@ def test_build_trade_from_kronos_ranging():
     assert result.status == "SKIP: RANGING"
     assert result.valid is False
     assert result.trade is None
+
+
+def test_new_fvg_alert_always_uses_format_trade_alert(monkeypatch):
+    """send_new_fvg_alert without trade_setup uses _format_trade_alert (no old caption block)."""
+    import telegram
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+
+    class Zone:
+        symbol = "ETHUSDT"; tf = "1h"; direction = 1; main_strength = 65
+        rsi = 48.0; price = 2500.0; top = 2510.0; bottom = 2490.0
+        alerted = False; born_time = 1000000
+
+    telegram.send_new_fvg_alert(Zone(), trade_setup=None)
+    text = sent["text"]
+    assert "Vol Change" not in text
+    assert "BTCDOM" not in text
+    assert "Confluence" not in text
+    assert "ETHUSDT" in text
+    assert "1h" in text
+
+
+def test_alert_contains_rev_top_bottom(monkeypatch):
+    """Alert includes Rev. Top / Rev. Bottom lines when pivots found."""
+    import telegram
+    sent = {}
+    monkeypatch.setattr(telegram, "_send", lambda text: sent.setdefault("text", text) or True)
+    monkeypatch.setattr(telegram, "_send_photo", lambda msg, png: sent.setdefault("text", msg) or True)
+
+    # Bars: go up 100→120 then back down 120→100 — clear swing high at peak
+    prices_up = list(range(100, 121))
+    prices_down = list(range(120, 99, -1))
+    prices = prices_up + prices_down
+    bars = make_bars(prices)
+
+    class Zone:
+        symbol = "BTCUSDT"; tf = "1h"; direction = 1; main_strength = 80
+        rsi = 45.0; price = 100.0; top = 105.0; bottom = 95.0
+        alerted = False; born_time = 1000000
+
+    from types import SimpleNamespace
+    trade_setup = SimpleNamespace(
+        status="LONG VALID", valid=True, mode="intraday",
+        reason="Kronos long signal",
+        trade=SimpleNamespace(direction="long", entry=100.0, sl=98.0, tp1=102.0, tp2=104.0, rr=2.0),
+        combo_states={}, sparklines={},
+    )
+    timeframe_bars = {"1h": bars, "4h": bars}
+
+    telegram.send_new_fvg_alert(Zone(), trade_setup=trade_setup, timeframe_bars=timeframe_bars)
+    text = sent["text"]
+    assert "Rev." in text
