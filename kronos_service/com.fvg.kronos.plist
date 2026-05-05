@@ -22,6 +22,8 @@
   <dict>
     <key>KRONOS_DEVICE</key>
     <string>mps</string>
+    <key>PYTHONDONTWRITEBYTECODE</key>
+    <string>1</string>
     <key>PATH</key>
     <string>/Users/liko/kronos_env/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
