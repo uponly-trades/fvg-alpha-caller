@@ -52,7 +52,7 @@ def fetch_klines(symbol: str, interval: str, limit: int = 1500) -> List[Bar]:
     remaining = limit
 
     while remaining > 0:
-        fetch_n = min(remaining, 1500)
+        fetch_n = min(remaining, 1499)  # +1 to drop open candle, must stay ≤ 1500
         params = {"symbol": symbol, "interval": interval, "limit": fetch_n + 1}
         if end_time:
             params["endTime"] = end_time
