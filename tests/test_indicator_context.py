@@ -298,7 +298,7 @@ def test_trade_plan_alert_uses_reduced_trade_content(monkeypatch):
     telegram.send_new_fvg_alert(Zone(), trade_setup=setup)
 
     text = sent["text"]
-    assert "LONG VALID - BULLISH FVG | BTCUSDT | 30m" in text
+    assert "NEW FVG | BULLISH FVG | BTCUSDT | 30m" in text
     assert "Entry: 100.0" in text
     assert "SL: 98.9" in text
     assert "TP1: 101.1" in text
@@ -326,7 +326,7 @@ def test_skipped_trade_alert_renders_skip_reason(monkeypatch):
     telegram.send_touch_alert(zone, 100.0, trade_setup=setup)
 
     text = sent["text"]
-    assert "SKIP: MIXED COMBO - BEARISH FVG | ETHUSDT | 2h" in text
+    assert "SKIP: MIXED COMBO | BEARISH FVG | ETHUSDT | 2h" in text
     assert "Entry:" not in text
     assert "Skip Reason: combo timeframes are mixed" in text
     assert "interval=120" in text
@@ -480,7 +480,7 @@ def test_trade_alert_text_has_no_ascii_sparkline(monkeypatch):
     # sparklines now only in PNG chart, not in text
     assert "<code>" not in text
     assert "▁▂▃▄▅▆▇▆▅▄" not in text
-    assert "LONG VALID - BULLISH FVG | SOLUSDT | 15m" in text
+    assert "NEW FVG | BULLISH FVG | SOLUSDT | 15m" in text
     assert "Entry: 100.0" in text
 
 

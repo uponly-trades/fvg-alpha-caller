@@ -45,13 +45,14 @@ def _confidence_label(score: int) -> str:
     return "❌ Low"
 
 
-def _trade_title(zone, trade_setup) -> str:
-    return f"{trade_setup.status} - {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
+def _trade_title(zone, trade_setup, prefix: str = None) -> str:
+    status = prefix if prefix else trade_setup.status
+    return f"{status} | {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
 
 
-def _format_trade_alert(zone, current_price: float, trade_setup) -> str:
+def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = None) -> str:
     tv_url = _tv_link(zone.symbol, zone.tf)
-    lines = [f"<b>{_trade_title(zone, trade_setup)}</b>", ""]
+    lines = [f"<b>{_trade_title(zone, trade_setup, prefix)}</b>", ""]
     if trade_setup.trade is not None:
         trade = trade_setup.trade
         lines.extend([
@@ -83,7 +84,7 @@ def _format_trade_alert(zone, current_price: float, trade_setup) -> str:
 
 def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None) -> bool:
     if trade_setup is not None:
-        msg = _format_trade_alert(zone, getattr(zone, "price", 0.0), trade_setup)
+        msg = _format_trade_alert(zone, getattr(zone, "price", 0.0), trade_setup, prefix="NEW FVG")
         if chart_png:
             return _send_photo(msg, chart_png)
         return _send(msg)
