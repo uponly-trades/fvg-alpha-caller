@@ -155,13 +155,16 @@ class SimTradeStore:
         try:
             with _cursor() as cur:
                 cur.execute(
-                    "SELECT id, direction, sl, tp1, tp2, status FROM sim_trades "
+                    "SELECT id, direction, sl, tp1, tp2, status, created_at FROM sim_trades "
                     "WHERE symbol = %s AND status IN ('open', 'tp1_hit')",
                     (symbol,),
                 )
                 rows = cur.fetchall()
                 updated = 0
+                bar_time = int(bar.open_time)
                 for row in rows:
+                    if bar_time < int(row["created_at"]):
+                        continue
                     new_status = _next_status(dict(row), bar)
                     if new_status and new_status != row["status"]:
                         closed_at = int(bar.open_time) if new_status in {"win", "loss"} else None
