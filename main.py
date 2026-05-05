@@ -92,6 +92,7 @@ class AlphaCaller:
         # Use Kronos for sim trade (same path as alert)
         setup = await self._evaluate_setup_async(zone, current_price)
         logger.info("  kronos/combo status=%s valid=%s", setup.status, setup.valid)
+        self.sim_store.add_kronos_decision(zone, setup, current_price, "new_fvg")
         if setup.valid:
             self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
@@ -143,9 +144,11 @@ class AlphaCaller:
                 trade_plan=trade_setup.trade,
             )
             if event["type"] == "approaching":
+                self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
                 send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
             elif event["type"] == "touch":
+                self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
                 send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
 

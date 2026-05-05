@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -49,6 +50,33 @@ CREATE INDEX IF NOT EXISTS idx_sim_trades_symbol ON sim_trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_sim_trades_status ON sim_trades(status);
 CREATE INDEX IF NOT EXISTS idx_sim_trades_date ON sim_trades(date);
 CREATE INDEX IF NOT EXISTS idx_fvg_zones_date ON fvg_zones(date);
+
+CREATE TABLE IF NOT EXISTS kronos_decisions (
+    id           TEXT PRIMARY KEY,
+    fvg_id       TEXT NOT NULL,
+    created_at   BIGINT NOT NULL,
+    date         DATE NOT NULL,
+    symbol       TEXT NOT NULL,
+    tf           TEXT NOT NULL,
+    event_type   TEXT NOT NULL,          -- 'new_fvg' | 'approach' | 'touch'
+    zone_dir     SMALLINT NOT NULL,      -- 1=long, -1=short
+    current_price DOUBLE PRECISION NOT NULL,
+    source       TEXT NOT NULL,          -- 'kronos' | 'combo'
+    status       TEXT NOT NULL,          -- e.g. 'LONG VALID', 'SKIP: RANGING', ...
+    valid        BOOLEAN NOT NULL,
+    mode         TEXT,
+    reason       TEXT,
+    direction    TEXT,                   -- 'long' | 'short' | null
+    entry        DOUBLE PRECISION,
+    sl           DOUBLE PRECISION,
+    tp1          DOUBLE PRECISION,
+    tp2          DOUBLE PRECISION,
+    kronos_raw   JSONB                   -- full Kronos response, null if combo fallback
+);
+
+CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
+CREATE INDEX IF NOT EXISTS idx_kronos_decisions_date ON kronos_decisions(date);
+CREATE INDEX IF NOT EXISTS idx_kronos_decisions_valid ON kronos_decisions(valid);
 """
 
 
@@ -145,6 +173,52 @@ class SimTradeStore:
             return True
         except Exception as e:
             logger.error("add_sim_trade failed: %s", e)
+            return False
+
+    def add_kronos_decision(self, zone, setup, current_price: float, event_type: str) -> bool:
+        """Log every Kronos/combo decision (valid or skip) for ML training."""
+        fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
+        decision_id = f"{fvg_id}-{event_type}-{int(zone.born_time)}-{int(current_price * 1000)}"
+        now = datetime.now(timezone.utc)
+        trade = getattr(setup, "trade", None)
+        kronos_raw = getattr(setup, "kronos_raw", None)
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (decision_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO kronos_decisions
+                       (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
+                        current_price, source, status, valid, mode, reason,
+                        direction, entry, sl, tp1, tp2, kronos_raw)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        decision_id,
+                        fvg_id,
+                        int(zone.born_time),
+                        now.date(),
+                        zone.symbol,
+                        zone.tf,
+                        event_type,
+                        int(zone.direction),
+                        float(current_price),
+                        getattr(setup, "source", "combo"),
+                        setup.status,
+                        bool(setup.valid),
+                        setup.mode,
+                        setup.reason,
+                        trade.direction if trade else None,
+                        float(trade.entry) if trade else None,
+                        float(trade.sl) if trade else None,
+                        float(trade.tp1) if trade else None,
+                        float(trade.tp2) if trade else None,
+                        json.dumps(kronos_raw) if kronos_raw else None,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_kronos_decision failed: %s", e)
             return False
 
     # Legacy compat for existing main.py and tests

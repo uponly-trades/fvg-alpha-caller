@@ -49,6 +49,8 @@ class TradeSetupResult:
     trade: Optional[TradeLevels]
     combo_states: Dict[str, str]
     sparklines: Dict[str, str] = None
+    source: str = "combo"          # "kronos" | "combo"
+    kronos_raw: Optional[dict] = None  # raw Kronos response for ML logging
 
 
 def classify_mode(tf: str) -> Optional[str]:
@@ -156,7 +158,7 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
         return TradeSetupResult(
             "SKIP: RANGING", False, mode,
             f"Kronos ranging (conf {confidence}%)",
-            None, {}, {},
+            None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
     # Must align with FVG zone direction
@@ -165,7 +167,7 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
         return TradeSetupResult(
             "SKIP: KRONOS CONFLICT", False, mode,
             f"Kronos {direction} conflicts with {expected} FVG zone (conf {confidence}%)",
-            None, {}, {},
+            None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
     trade = TradeLevels(
@@ -178,7 +180,7 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
     )
     status = f"{direction} VALID"
     reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"
-    return TradeSetupResult(status, True, mode, reason, trade, {}, {})
+    return TradeSetupResult(status, True, mode, reason, trade, {}, {}, source="kronos", kronos_raw=kronos)
 
 
 def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
