@@ -625,3 +625,57 @@ def test_alert_contains_rev_top_bottom(monkeypatch):
     telegram.send_new_fvg_alert(Zone(), trade_setup=trade_setup, timeframe_bars=timeframe_bars)
     text = sent["text"]
     assert "Rev." in text
+
+
+@pytest.mark.asyncio
+async def test_on_bar_close_calls_kronos_and_uses_result(monkeypatch):
+    """_on_bar_close calls kronos_client.predict when a new FVG fires."""
+    import main as main_module
+    import kronos_client
+
+    bars = make_bars(list(range(100, 160)))
+    kronos_response = {
+        "direction": "LONG", "timeframe": "INTRADAY",
+        "entry": 159.0, "sl": 157.0, "tp1": 161.0, "tp2": 163.0, "confidence": 78,
+    }
+
+    kronos_calls = {}
+
+    async def fake_predict(*a, **kw):
+        kronos_calls["called"] = True
+        return kronos_response
+
+    monkeypatch.setattr(kronos_client, "predict", fake_predict)
+
+    zone = SimpleNamespace(
+        symbol="BTCUSDT", tf="1h", direction=1,
+        top=140.0, bottom=130.0, rsi=55.0, main_strength=80,
+        price=159.0, atr=2.0, born_time=1000000, alerted=False,
+    )
+
+    caller = object.__new__(main_module.AlphaCaller)
+    caller.tracker = SimpleNamespace(
+        buffers={},
+        update_buffer=lambda *a: None,
+        check_mitigation=lambda *a: [],
+        check_interaction=lambda *a: [],
+        check_new_fvg=lambda symbol, tf: zone,
+    )
+    caller.poller = SimpleNamespace(_buffers={})
+    caller.sim_store = SimpleNamespace(
+        update_open_trades=lambda *a: 0,
+        add_fvg=lambda *a, **kw: True,
+        add_sim_trade=lambda *a: True,
+        daily_recap=lambda *a: {"open": 0, "tp1": 0, "win": 0, "loss": 0, "closed_winrate": 0.0, "recent": []},
+    )
+    caller._last_recap_key = None
+
+    monkeypatch.setattr(main_module, "generate_chart", lambda **kw: b"png")
+    monkeypatch.setattr(main_module, "send_new_fvg_alert", lambda *a, **kw: True)
+    monkeypatch.setattr(main_module, "send_trade_recap", lambda *a: True)
+    monkeypatch.setattr(main_module.AlphaCaller, "_save_chart_png", lambda self, zone, png: "/tmp/test.png")
+
+    await caller._on_bar_close("BTCUSDT", "1h", bars)
+
+    assert zone.alerted is True
+    assert kronos_calls.get("called") is True

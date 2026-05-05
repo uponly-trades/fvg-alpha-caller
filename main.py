@@ -8,7 +8,8 @@ from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
-from trade_combo import evaluate_trade_setup, evaluate_for_mode, COMBO_TIMEFRAMES
+from trade_combo import evaluate_trade_setup, evaluate_for_mode, COMBO_TIMEFRAMES, build_trade_from_kronos
+import kronos_client
 from websocket_client import BinanceKlineWS
 from telegram import (
     send_approach_alert,
@@ -46,6 +47,29 @@ class AlphaCaller:
 
     def _evaluate_setup(self, zone, current_price: float):
         return evaluate_trade_setup(zone, current_price, self._timeframe_bars(zone.symbol))
+
+    async def _evaluate_setup_async(self, zone, current_price: float):
+        """Try Kronos first; fall back to StochRSI combo on failure."""
+        bars_by_tf = self._timeframe_bars(zone.symbol)
+        tf_bars = bars_by_tf.get(zone.tf, [])
+        ohlcv = [
+            {"open": float(b.open), "high": float(b.high), "low": float(b.low),
+             "close": float(b.close), "volume": float(b.volume)}
+            for b in tf_bars
+        ]
+        atr = float(getattr(zone, "atr", 0.0) or 0.0)
+
+        kronos = await kronos_client.predict(
+            bars=ohlcv,
+            current_price=float(current_price),
+            atr=atr,
+            zone_direction=int(zone.direction),
+            symbol=zone.symbol,
+            tf=zone.tf,
+        )
+        if kronos is not None:
+            return build_trade_from_kronos(kronos)
+        return evaluate_trade_setup(zone, current_price, bars_by_tf)
 
     def _save_chart_png(self, zone, chart_png: bytes) -> str:
         """Persist chart PNG to disk, return path string."""
@@ -106,7 +130,7 @@ class AlphaCaller:
         for event in interactions:
             zone = event["zone"]
             price = bars[-1].close
-            trade_setup = self._evaluate_setup(zone, price)
+            trade_setup = await self._evaluate_setup_async(zone, price)
             chart_png = generate_chart(
                 bars=bars,
                 zone_top=zone.top,
@@ -130,7 +154,7 @@ class AlphaCaller:
         if new_zone and not new_zone.alerted:
             new_zone.alerted = True
             price = bars[-1].close
-            trade_setup = self._evaluate_setup(new_zone, price)
+            trade_setup = await self._evaluate_setup_async(new_zone, price)
 
             chart_png = generate_chart(
                 bars=bars,
