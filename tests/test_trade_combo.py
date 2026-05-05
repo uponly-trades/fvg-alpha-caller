@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
+os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 
 import pytest
 

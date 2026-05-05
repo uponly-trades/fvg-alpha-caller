@@ -2,12 +2,13 @@ import asyncio
 import logging
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
-from trade_combo import evaluate_trade_setup
+from trade_combo import evaluate_trade_setup, evaluate_for_mode, COMBO_TIMEFRAMES
 from websocket_client import BinanceKlineWS
 from telegram import (
     send_approach_alert,
@@ -23,6 +24,8 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("alpha")
+
+CHART_DIR = Path("/app/data/charts")
 
 
 class AlphaCaller:
@@ -44,9 +47,26 @@ class AlphaCaller:
     def _evaluate_setup(self, zone, current_price: float):
         return evaluate_trade_setup(zone, current_price, self._timeframe_bars(zone.symbol))
 
-    def _maybe_save_trade(self, zone, setup, created_at: int) -> None:
-        if setup.valid:
-            self.sim_store.add_trade(zone, setup, created_at)
+    def _save_chart_png(self, zone, chart_png: bytes) -> str:
+        """Persist chart PNG to disk, return path string."""
+        try:
+            CHART_DIR.mkdir(parents=True, exist_ok=True)
+            fname = f"{zone.symbol}_{zone.tf}_{int(zone.born_time)}.png"
+            path = CHART_DIR / fname
+            path.write_bytes(chart_png)
+            return str(path)
+        except Exception as e:
+            logger.error("chart save failed: %s", e)
+            return ""
+
+    def _store_fvg_all_modes(self, zone, chart_path: str, current_price: float) -> None:
+        """Save FVG record + simulate all 3 modes regardless of zone.tf."""
+        self.sim_store.add_fvg(zone, chart_path=chart_path or None)
+        bars_by_tf = self._timeframe_bars(zone.symbol)
+        for mode in COMBO_TIMEFRAMES:
+            setup = evaluate_for_mode(zone, mode, current_price, bars_by_tf)
+            if setup.valid:
+                self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
     def _maybe_send_recap(self, now=None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -108,7 +128,6 @@ class AlphaCaller:
             new_zone.alerted = True
             price = bars[-1].close
             trade_setup = self._evaluate_setup(new_zone, price)
-            self._maybe_save_trade(new_zone, trade_setup, new_zone.born_time)
 
             chart_png = generate_chart(
                 bars=bars,
@@ -121,6 +140,9 @@ class AlphaCaller:
                 timeframe_bars=self._timeframe_bars(new_zone.symbol),
                 trade_plan=trade_setup.trade,
             )
+
+            chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
+            self._store_fvg_all_modes(new_zone, chart_path, price)
 
             send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup)
             logger.info(

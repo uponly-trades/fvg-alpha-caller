@@ -1,90 +1,198 @@
-import json
+import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, List, Optional
 
-DEFAULT_SIM_TRADES_PATH = Path("/app/data/sim_trades.json")
+import psycopg2
+import psycopg2.extras
+
+from config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
+
+_CREATE_TABLES = """
+CREATE TABLE IF NOT EXISTS fvg_zones (
+    id          TEXT PRIMARY KEY,
+    created_at  BIGINT NOT NULL,
+    date        DATE NOT NULL,
+    symbol      TEXT NOT NULL,
+    tf          TEXT NOT NULL,
+    direction   SMALLINT NOT NULL,
+    zone_top    DOUBLE PRECISION NOT NULL,
+    zone_bottom DOUBLE PRECISION NOT NULL,
+    price       DOUBLE PRECISION NOT NULL,
+    strength    SMALLINT NOT NULL,
+    rsi         DOUBLE PRECISION,
+    atr         DOUBLE PRECISION,
+    chart_path  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sim_trades (
+    id          TEXT PRIMARY KEY,
+    fvg_id      TEXT NOT NULL REFERENCES fvg_zones(id),
+    created_at  BIGINT NOT NULL,
+    date        DATE NOT NULL,
+    symbol      TEXT NOT NULL,
+    tf          TEXT NOT NULL,
+    mode        TEXT NOT NULL,
+    direction   TEXT NOT NULL,
+    entry       DOUBLE PRECISION NOT NULL,
+    sl          DOUBLE PRECISION NOT NULL,
+    tp1         DOUBLE PRECISION NOT NULL,
+    tp2         DOUBLE PRECISION NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open',
+    closed_at   BIGINT,
+    reason      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_trades_symbol ON sim_trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_status ON sim_trades(status);
+CREATE INDEX IF NOT EXISTS idx_sim_trades_date ON sim_trades(date);
+CREATE INDEX IF NOT EXISTS idx_fvg_zones_date ON fvg_zones(date);
+"""
+
+
+@contextmanager
+def _cursor():
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                yield cur
+    finally:
+        conn.close()
+
+
+def _init_db() -> None:
+    with _cursor() as cur:
+        cur.execute(_CREATE_TABLES)
 
 
 class SimTradeStore:
-    def __init__(self, path: Path = DEFAULT_SIM_TRADES_PATH):
-        self.path = Path(path)
+    def __init__(self):
+        try:
+            _init_db()
+        except Exception as e:
+            logger.error("DB init failed: %s", e)
 
-    def load(self) -> List[Dict]:
-        if not self.path.exists():
-            return []
-        with self.path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, list):
-            return []
-        return data
+    def add_fvg(self, zone, chart_path: Optional[str] = None) -> bool:
+        fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
+        created_dt = datetime.fromtimestamp(int(zone.born_time) / 1000, tz=timezone.utc)
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT id FROM fvg_zones WHERE id = %s", (fvg_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO fvg_zones
+                       (id, created_at, date, symbol, tf, direction, zone_top, zone_bottom,
+                        price, strength, rsi, atr, chart_path)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        fvg_id,
+                        int(zone.born_time),
+                        created_dt.date(),
+                        zone.symbol,
+                        zone.tf,
+                        int(zone.direction),
+                        float(zone.top),
+                        float(zone.bottom),
+                        float(getattr(zone, "price", 0.0)),
+                        int(getattr(zone, "main_strength", 0)),
+                        float(zone.rsi) if getattr(zone, "rsi", None) is not None else None,
+                        float(zone.atr) if getattr(zone, "atr", None) is not None else None,
+                        chart_path,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_fvg failed: %s", e)
+            return False
 
-    def save(self, records: List[Dict]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(".tmp")
-        with tmp_path.open("w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2, sort_keys=True)
-        tmp_path.replace(self.path)
-
-    def add_trade(self, zone, setup, created_at: int) -> bool:
+    def add_sim_trade(self, zone, setup, created_at: int) -> bool:
         trade = getattr(setup, "trade", None)
         if trade is None or not getattr(setup, "valid", False):
             return False
-
-        trade_id = f"{zone.symbol}-{zone.tf}-{int(created_at)}"
-        records = self.load()
-        if any(record.get("id") == trade_id for record in records):
+        fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
+        trade_id = f"{fvg_id}-{setup.mode}"
+        created_dt = datetime.fromtimestamp(int(created_at) / 1000, tz=timezone.utc)
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT id FROM sim_trades WHERE id = %s", (trade_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO sim_trades
+                       (id, fvg_id, created_at, date, symbol, tf, mode, direction,
+                        entry, sl, tp1, tp2, status, reason)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open', %s)""",
+                    (
+                        trade_id,
+                        fvg_id,
+                        int(created_at),
+                        created_dt.date(),
+                        zone.symbol,
+                        zone.tf,
+                        setup.mode,
+                        trade.direction,
+                        float(trade.entry),
+                        float(trade.sl),
+                        float(trade.tp1),
+                        float(trade.tp2),
+                        setup.reason,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_sim_trade failed: %s", e)
             return False
 
-        created_dt = datetime.fromtimestamp(int(created_at) / 1000, tz=timezone.utc)
-        records.append({
-            "id": trade_id,
-            "date": created_dt.date().isoformat(),
-            "symbol": zone.symbol,
-            "mode": setup.mode,
-            "tf": zone.tf,
-            "direction": trade.direction,
-            "entry": trade.entry,
-            "sl": trade.sl,
-            "tp1": trade.tp1,
-            "tp2": trade.tp2,
-            "status": "open",
-            "created_at": int(created_at),
-            "closed_at": None,
-            "reason": setup.reason,
-        })
-        self.save(records)
-        return True
+    # Legacy compat for existing main.py and tests
+    def add_trade(self, zone, setup, created_at: int) -> bool:
+        return self.add_sim_trade(zone, setup, created_at)
 
     def update_open_trades(self, symbol: str, bar) -> int:
-        records = self.load()
-        updated = 0
-        for record in records:
-            if record.get("symbol") != symbol:
-                continue
-            if record.get("status") not in {"open", "tp1_hit"}:
-                continue
-            new_status = _next_status(record, bar)
-            if new_status and new_status != record["status"]:
-                record["status"] = new_status
-                if new_status in {"win", "loss"}:
-                    record["closed_at"] = int(bar.open_time)
-                updated += 1
-        if updated:
-            self.save(records)
-        return updated
+        try:
+            with _cursor() as cur:
+                cur.execute(
+                    "SELECT id, direction, sl, tp1, tp2, status FROM sim_trades "
+                    "WHERE symbol = %s AND status IN ('open', 'tp1_hit')",
+                    (symbol,),
+                )
+                rows = cur.fetchall()
+                updated = 0
+                for row in rows:
+                    new_status = _next_status(dict(row), bar)
+                    if new_status and new_status != row["status"]:
+                        closed_at = int(bar.open_time) if new_status in {"win", "loss"} else None
+                        cur.execute(
+                            "UPDATE sim_trades SET status = %s, closed_at = %s WHERE id = %s",
+                            (new_status, closed_at, row["id"]),
+                        )
+                        updated += 1
+            return updated
+        except Exception as e:
+            logger.error("update_open_trades failed: %s", e)
+            return 0
 
     def daily_recap(self, date: Optional[str] = None) -> Dict:
         if date is None:
             date = datetime.now(timezone.utc).date().isoformat()
-        records = [record for record in self.load() if record.get("date") == date]
-        open_count = sum(1 for record in records if record.get("status") == "open")
-        tp1_count = sum(1 for record in records if record.get("status") == "tp1_hit")
-        win_count = sum(1 for record in records if record.get("status") == "win")
-        loss_count = sum(1 for record in records if record.get("status") == "loss")
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT * FROM sim_trades WHERE date = %s", (date,))
+                records = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error("daily_recap failed: %s", e)
+            records = []
+
+        open_count = sum(1 for r in records if r["status"] == "open")
+        tp1_count = sum(1 for r in records if r["status"] == "tp1_hit")
+        win_count = sum(1 for r in records if r["status"] == "win")
+        loss_count = sum(1 for r in records if r["status"] == "loss")
         closed = win_count + loss_count
         winrate = round((win_count / closed) * 100, 1) if closed else 0.0
-        recent = sorted(records, key=lambda record: record.get("created_at", 0), reverse=True)[:5]
+        recent = sorted(records, key=lambda r: r.get("created_at", 0), reverse=True)[:5]
         return {
             "date": date,
             "open": open_count,

@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
+os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 
 import indicator_context
 import chart_generator
@@ -425,10 +426,12 @@ async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch)
         check_new_fvg=lambda symbol, tf: zone,
     )
     caller.poller = SimpleNamespace(_buffers={})
-    saved = []
+    fvg_saved = []
+    sim_saved = []
     caller.sim_store = SimpleNamespace(
         update_open_trades=lambda symbol, bar: 0,
-        add_trade=lambda zone, setup, created_at: saved.append((zone, setup, created_at)) or True,
+        add_fvg=lambda z, chart_path=None: fvg_saved.append(z) or True,
+        add_sim_trade=lambda z, setup, created_at: sim_saved.append((z, setup, created_at)) or True,
         daily_recap=lambda date: {"open": 0, "tp1": 0, "win": 0, "loss": 0, "closed_winrate": 0.0, "recent": []},
     )
     caller._last_recap_key = None
@@ -442,9 +445,11 @@ async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch)
     )
     calls = {}
     monkeypatch.setattr(main, "evaluate_trade_setup", lambda zone, current_price, bars_by_tf: calls.setdefault("setup", setup))
+    monkeypatch.setattr(main, "evaluate_for_mode", lambda zone, mode, price, bars_by_tf: setup)
     monkeypatch.setattr(main, "generate_chart", lambda **kwargs: calls.setdefault("trade_plan", kwargs.get("trade_plan")) or b"png")
     monkeypatch.setattr(main, "send_new_fvg_alert", lambda zone, chart_png=None, trade_setup=None: calls.setdefault("sent_setup", trade_setup) or True)
     monkeypatch.setattr(main, "send_trade_recap", lambda session, recap: True)
+    monkeypatch.setattr(main.AlphaCaller, "_save_chart_png", lambda self, zone, png: "/app/data/charts/test.png")
 
     await caller._on_bar_close("BTCUSDT", "15m", bars)
 
@@ -452,7 +457,10 @@ async def test_alpha_caller_evaluates_and_saves_valid_new_fvg_trade(monkeypatch)
     assert calls["setup"] is setup
     assert calls["trade_plan"] is setup.trade
     assert calls["sent_setup"] is setup
-    assert saved == [(zone, setup, 1777899600000)]
+    assert fvg_saved == [zone]
+    # 3 modes × valid setup → 3 sim_trade saves
+    assert len(sim_saved) == 3
+    assert all(s[0] is zone for s in sim_saved)
 
 
 def test_trade_alert_text_has_no_ascii_sparkline(monkeypatch):

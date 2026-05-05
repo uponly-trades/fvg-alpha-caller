@@ -139,10 +139,10 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
     )
 
 
-def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
-    mode = classify_mode(zone.tf)
-    if mode is None:
-        return TradeSetupResult("SKIP: MISSING DATA", False, None, "unsupported timeframe", None, {}, {})
+def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
+    """Evaluate a specific trade mode regardless of zone.tf. Used to simulate all modes per FVG."""
+    if mode not in COMBO_TIMEFRAMES:
+        return TradeSetupResult("SKIP: MISSING DATA", False, mode, "unsupported mode", None, {}, {})
 
     if int(getattr(zone, "main_strength", 0)) < MIN_STRENGTH_TO_ALERT:
         return TradeSetupResult("SKIP: WEAK FVG", False, mode, "FVG strength below alert threshold", None, {}, {})
@@ -157,13 +157,8 @@ def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]
         if tf in required_tfs:
             if state is None:
                 return TradeSetupResult(
-                    "SKIP: MISSING DATA",
-                    False,
-                    mode,
-                    f"missing StochRSI data for {tf}",
-                    None,
-                    combo_states,
-                    sparklines,
+                    "SKIP: MISSING DATA", False, mode,
+                    f"missing StochRSI data for {tf}", None, combo_states, sparklines,
                 )
             combo_states[tf] = state
 
@@ -183,3 +178,10 @@ def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]
     direction_text = "LONG" if int(zone.direction) == 1 else "SHORT"
     reason = f"{desired} FVG with aligned StochRSI combo"
     return TradeSetupResult(f"{direction_text} VALID", True, mode, reason, trade, combo_states, sparklines)
+
+
+def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
+    mode = classify_mode(zone.tf)
+    if mode is None:
+        return TradeSetupResult("SKIP: MISSING DATA", False, None, "unsupported timeframe", None, {}, {})
+    return evaluate_for_mode(zone, mode, current_price, bars_by_tf)

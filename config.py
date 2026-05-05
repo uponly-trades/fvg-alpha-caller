@@ -100,5 +100,8 @@ KLINES_LIMIT = 100
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 
+# Postgres
+DATABASE_URL = os.environ["DATABASE_URL"]
+
 # Binance
 BASE_URL = "https://fapi.binance.com"
