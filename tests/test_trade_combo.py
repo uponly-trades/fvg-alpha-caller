@@ -96,7 +96,7 @@ def test_missing_required_indicator_data_skips_trade_setup():
 
 
 def test_bullish_fvg_with_aligned_combo_builds_long_risk_plan(monkeypatch):
-    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: "long")
+    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: ("long", []))
 
     result = trade_combo.evaluate_trade_setup(
         zone(tf="15m", direction=1, top=101.0, bottom=99.0, atr=1.0),
@@ -116,7 +116,7 @@ def test_bullish_fvg_with_aligned_combo_builds_long_risk_plan(monkeypatch):
 
 
 def test_bearish_fvg_with_aligned_combo_builds_short_risk_plan(monkeypatch):
-    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: "short")
+    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: ("short", []))
 
     result = trade_combo.evaluate_trade_setup(
         zone(tf="1h", direction=-1, top=101.0, bottom=99.0, atr=1.0),
@@ -140,8 +140,9 @@ def test_bearish_fvg_with_aligned_combo_builds_short_risk_plan(monkeypatch):
 
 
 def test_mixed_combo_skips_trade(monkeypatch):
-    states = iter(["long", "short", "neutral"])
-    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: next(states))
+    # 5 TFs now computed (15m/30m/1h/2h/4h); scalping required = 15m/30m/1h
+    states = iter(["long", "short", "neutral", "neutral", "neutral"])
+    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: (next(states), []))
 
     result = trade_combo.evaluate_trade_setup(
         zone(tf="15m", direction=1),
@@ -154,7 +155,7 @@ def test_mixed_combo_skips_trade(monkeypatch):
 
 
 def test_far_from_fvg_skips_trade(monkeypatch):
-    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: "long")
+    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: ("long", []))
 
     result = trade_combo.evaluate_trade_setup(
         zone(tf="15m", direction=1, top=101.0, bottom=99.0),
@@ -176,7 +177,7 @@ def test_weak_fvg_skips_before_combo_validation():
 
 
 def test_invalid_risk_skips_trade(monkeypatch):
-    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: "long")
+    monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: ("long", []))
 
     result = trade_combo.evaluate_trade_setup(
         zone(tf="15m", direction=1, top=101.0, bottom=100.0, atr=0.0),

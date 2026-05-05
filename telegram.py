@@ -27,9 +27,17 @@ def _trade_title(zone, trade_setup) -> str:
     return f"{trade_setup.status} - {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
 
 
+def _spark_row(trade_setup) -> str:
+    tfs = ("15m", "30m", "1h", "2h", "4h")
+    sparks = getattr(trade_setup, "sparklines", None) or {}
+    header = "  ".join(f"{tf:<4}" for tf in tfs)
+    bars   = "  ".join(sparks.get(tf, "──────────") for tf in tfs)
+    return f"<code>{header}\n{bars}</code>"
+
+
 def _format_trade_alert(zone, current_price: float, trade_setup) -> str:
     tv_url = _tv_link(zone.symbol, zone.tf)
-    lines = [f"<b>{_trade_title(zone, trade_setup)}</b>", ""]
+    lines = [_spark_row(trade_setup), "", f"<b>{_trade_title(zone, trade_setup)}</b>", ""]
     if trade_setup.trade is not None:
         trade = trade_setup.trade
         lines.extend([

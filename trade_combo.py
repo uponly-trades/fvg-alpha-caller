@@ -28,6 +28,18 @@ class TradeLevels:
     rr: float
 
 
+_SPARK_CHARS = " ▁▂▃▄▅▆▇█"
+
+def _sparkline(values: List[Optional[float]], n: int = 10) -> str:
+    vals = [v for v in values if v is not None][-n:]
+    if not vals:
+        return "─" * n
+    lo, hi = min(vals), max(vals)
+    span = hi - lo or 1.0
+    chars = [_SPARK_CHARS[round((v - lo) / span * (len(_SPARK_CHARS) - 1))] for v in vals]
+    return "".join(chars).ljust(n)
+
+
 @dataclass(frozen=True)
 class TradeSetupResult:
     status: str
@@ -36,6 +48,7 @@ class TradeSetupResult:
     reason: str
     trade: Optional[TradeLevels]
     combo_states: Dict[str, str]
+    sparklines: Dict[str, str] = None
 
 
 def classify_mode(tf: str) -> Optional[str]:
@@ -45,30 +58,30 @@ def classify_mode(tf: str) -> Optional[str]:
     return None
 
 
-def _latest_stoch_state(bars, direction: int) -> Optional[str]:
+def _latest_stoch_state(bars, direction: int):
     closes = [float(bar.close) for bar in bars]
     k_values, d_values = stochrsi_series(closes)
     pairs = [(k, d) for k, d in zip(k_values, d_values) if k is not None and d is not None]
     if len(pairs) < 2:
-        return None
+        return None, k_values
 
     prev_k, prev_d = pairs[-2]
     k, d = pairs[-1]
     if direction == 1:
         if k <= 30 and d <= 30:
-            return "long"
+            return "long", k_values
         if prev_k <= prev_d and k > d and min(prev_k, prev_d, k, d) <= 40:
-            return "long"
+            return "long", k_values
         if k >= 70 and d >= 70:
-            return "short"
+            return "short", k_values
     else:
         if k >= 70 and d >= 70:
-            return "short"
+            return "short", k_values
         if prev_k >= prev_d and k < d and max(prev_k, prev_d, k, d) >= 60:
-            return "short"
+            return "short", k_values
         if k <= 30 and d <= 30:
-            return "long"
-    return "neutral"
+            return "long", k_values
+    return "neutral", k_values
 
 
 def _price_too_far(zone, current_price: float) -> bool:
@@ -129,39 +142,44 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
 def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
     mode = classify_mode(zone.tf)
     if mode is None:
-        return TradeSetupResult("SKIP: MISSING DATA", False, None, "unsupported timeframe", None, {})
+        return TradeSetupResult("SKIP: MISSING DATA", False, None, "unsupported timeframe", None, {}, {})
 
     if int(getattr(zone, "main_strength", 0)) < MIN_STRENGTH_TO_ALERT:
-        return TradeSetupResult("SKIP: WEAK FVG", False, mode, "FVG strength below alert threshold", None, {})
+        return TradeSetupResult("SKIP: WEAK FVG", False, mode, "FVG strength below alert threshold", None, {}, {})
 
     required_tfs = COMBO_TIMEFRAMES[mode]
+    all_tfs = ("15m", "30m", "1h", "2h", "4h")
     combo_states = {}
-    for tf in required_tfs:
-        state = _latest_stoch_state(bars_by_tf.get(tf, []), int(zone.direction))
-        if state is None:
-            return TradeSetupResult(
-                "SKIP: MISSING DATA",
-                False,
-                mode,
-                f"missing StochRSI data for {tf}",
-                None,
-                combo_states,
-            )
-        combo_states[tf] = state
+    sparklines = {}
+    for tf in all_tfs:
+        state, k_vals = _latest_stoch_state(bars_by_tf.get(tf, []), int(zone.direction))
+        sparklines[tf] = _sparkline(k_vals)
+        if tf in required_tfs:
+            if state is None:
+                return TradeSetupResult(
+                    "SKIP: MISSING DATA",
+                    False,
+                    mode,
+                    f"missing StochRSI data for {tf}",
+                    None,
+                    combo_states,
+                    sparklines,
+                )
+            combo_states[tf] = state
 
     desired = "long" if int(zone.direction) == 1 else "short"
     matches = sum(1 for state in combo_states.values() if state == desired)
     conflicts = sum(1 for state in combo_states.values() if state not in {desired, "neutral"})
     if conflicts or matches < max(2, len(required_tfs) - 1):
-        return TradeSetupResult("SKIP: MIXED COMBO", False, mode, "combo timeframes are mixed", None, combo_states)
+        return TradeSetupResult("SKIP: MIXED COMBO", False, mode, "combo timeframes are mixed", None, combo_states, sparklines)
 
     if _price_too_far(zone, current_price):
-        return TradeSetupResult("SKIP: FAR FROM FVG", False, mode, "price is too far from FVG zone", None, combo_states)
+        return TradeSetupResult("SKIP: FAR FROM FVG", False, mode, "price is too far from FVG zone", None, combo_states, sparklines)
 
     trade = _build_trade_levels(zone, current_price)
     if trade is None:
-        return TradeSetupResult("SKIP: INVALID RISK", False, mode, "risk is zero or invalid", None, combo_states)
+        return TradeSetupResult("SKIP: INVALID RISK", False, mode, "risk is zero or invalid", None, combo_states, sparklines)
 
     direction_text = "LONG" if int(zone.direction) == 1 else "SHORT"
     reason = f"{desired} FVG with aligned StochRSI combo"
-    return TradeSetupResult(f"{direction_text} VALID", True, mode, reason, trade, combo_states)
+    return TradeSetupResult(f"{direction_text} VALID", True, mode, reason, trade, combo_states, sparklines)
