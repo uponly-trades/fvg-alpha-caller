@@ -178,6 +178,8 @@ def _zone_exists(cur, fvg_id: str) -> bool:
 
 def _insert_fvg(cur, fvg_id: str, zone: FVGZone, strength: dict):
     created_dt = datetime.fromtimestamp(zone.born_time / 1000, tz=timezone.utc)
+    rsi_val = strength.get("rsi")
+    atr_val = strength.get("atr")
     cur.execute(
         """INSERT INTO fvg_zones
            (id, created_at, date, symbol, tf, direction, zone_top, zone_bottom, price, strength, rsi, atr, chart_path)
@@ -185,17 +187,17 @@ def _insert_fvg(cur, fvg_id: str, zone: FVGZone, strength: dict):
            ON CONFLICT (id) DO NOTHING""",
         (
             fvg_id,
-            zone.born_time,
+            int(zone.born_time),
             created_dt.date(),
             zone.symbol,
             zone.tf,
-            zone.direction,
-            zone.top,
-            zone.bottom,
-            strength.get("price", 0.0),
-            strength.get("main_strength", 0),
-            strength.get("rsi"),
-            strength.get("atr"),
+            int(zone.direction),
+            float(zone.top),
+            float(zone.bottom),
+            float(strength.get("price", 0.0)),
+            int(strength.get("main_strength", 0)),
+            float(rsi_val) if rsi_val is not None else None,
+            float(atr_val) if atr_val is not None else None,
         ),
     )
 
@@ -213,16 +215,16 @@ def _insert_sim_trade(cur, fvg_id: str, zone: FVGZone, mode: str,
         (
             trade_id,
             fvg_id,
-            zone.born_time,
+            int(zone.born_time),
             created_dt.date(),
             zone.symbol,
             zone.tf,
             mode,
             trade_direction,
-            entry,
-            sl,
-            tp1,
-            tp2,
+            float(entry),
+            float(sl),
+            float(tp1),
+            float(tp2),
             status,
             reason,
         ),
