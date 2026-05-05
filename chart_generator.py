@@ -7,11 +7,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
-from matplotlib.collections import LineCollection
+import mplfinance as mpf
 import numpy as np
 import pandas as pd
 
-from indicator_context import kdj_series, pivot_highs, pivot_lows, rsi_series, stochrsi_series
+from indicator_context import divergence_state, kdj_series, pivot_highs, pivot_lows, rsi_series, stochrsi_series
 
 logger = logging.getLogger(__name__)
 
@@ -156,15 +156,7 @@ def generate_chart(
         # Row 2: RSI7 per TF (5 cols)
         # Row 3: StochRSI+MaStochRSI per TF (5 cols)
         ncols = len(stoch_tfs)
-        plt.rcParams.update({
-            "figure.facecolor": "#131722",
-            "axes.facecolor": "#131722",
-            "axes.edgecolor": "#333",
-            "text.color": "white",
-            "xtick.color": "white",
-            "ytick.color": "white",
-        })
-        fig = plt.figure(figsize=(14, 12), facecolor="#131722")
+        fig = plt.figure(figsize=(14, 12))
         gs = GridSpec(
             4, ncols,
             figure=fig,
@@ -178,34 +170,15 @@ def generate_chart(
         rsi_axes   = [fig.add_subplot(gs[2, i]) for i in range(ncols)]
         stoch_axes = [fig.add_subplot(gs[3, i]) for i in range(ncols)]
 
-        # ── Candles (manual — avoids mplfinance clobbering GridSpec) ─────
-        x = np.arange(len(df))
-        c_open  = df["Open"].values
-        c_close = df["Close"].values
-        c_high  = df["High"].values
-        c_low   = df["Low"].values
-        up   = c_close >= c_open
-        down = ~up
-        w = 0.4
-        for idx in x[up]:
-            ax_main.bar(idx, c_close[idx]-c_open[idx], w, bottom=c_open[idx], color="#26a69a", edgecolor="#26a69a")
-            ax_main.plot([idx, idx], [c_low[idx], c_open[idx]],   color="#26a69a", linewidth=0.8)
-            ax_main.plot([idx, idx], [c_close[idx], c_high[idx]], color="#26a69a", linewidth=0.8)
-        for idx in x[down]:
-            ax_main.bar(idx, c_open[idx]-c_close[idx], w, bottom=c_close[idx], color="#ef5350", edgecolor="#ef5350")
-            ax_main.plot([idx, idx], [c_low[idx], c_close[idx]],  color="#ef5350", linewidth=0.8)
-            ax_main.plot([idx, idx], [c_open[idx], c_high[idx]], color="#ef5350", linewidth=0.8)
-        ax_main.set_facecolor("#131722")
-        ax_main.figure.patch.set_facecolor("#131722")
-
+        # ── Candles ───────────────────────────────────────────────────────
+        mpf.plot(df, type="candle", style="charles", ax=ax_main, volume=False)
         title_str = f"{symbol}  {tf}  |  RSI7: {rsi_value:.1f}" if rsi_value else f"{symbol}  {tf}"
-        ax_main.set_title(title_str, fontsize=11, fontweight="bold", color="white")
-        ax_main.set_ylabel("Price", color="white")
-        ax_main.tick_params(colors="white")
-        ax_main.spines[:].set_color("#333")
+        ax_main.set_title(title_str, fontsize=11, fontweight="bold")
+        ax_main.set_ylabel("Price")
 
+        x = range(len(df))
         ax_main.plot(x, ema20, color="orange", linewidth=0.9, label="EMA20")
-        ax_main.plot(x, ema50, color="#5599ff", linewidth=0.9, label="EMA50")
+        ax_main.plot(x, ema50, color="blue",   linewidth=0.9, label="EMA50")
         ax_main.legend(loc="upper left", fontsize=7, framealpha=0.5)
 
         xlim = ax_main.get_xlim()
