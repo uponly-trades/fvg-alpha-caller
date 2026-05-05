@@ -127,140 +127,133 @@ def generate_chart(
         timeframe_bars = timeframe_bars or {tf: bars}
 
         stoch_tfs = ("15m", "30m", "1h", "2h", "4h")
-        stoch_colors = {"15m": "#00bfff", "30m": "#00e676", "1h": "#ff9800", "2h": "#e040fb", "4h": "#ff1744"}
+        tf_colors = {"15m": "#00bfff", "30m": "#00e676", "1h": "#ff9800", "2h": "#e040fb", "4h": "#ff1744"}
 
-        # Compute StochRSI K/D per TF — raw values, no alignment needed (own x)
-        stoch_data: Dict[str, Tuple[List, List]] = {}
-        for stoch_tf in stoch_tfs:
-            tf_bars = timeframe_bars.get(stoch_tf, [])
-            tf_closes = [float(b.close) for b in tf_bars]
-            k_vals, d_vals = stochrsi_series(tf_closes)
+        # Compute per-TF data (own x, not aligned to main)
+        tf_data: Dict[str, dict] = {}
+        for stf in stoch_tfs:
+            tf_bars_list = timeframe_bars.get(stf, [])
+            tf_closes = [float(b.close) for b in tf_bars_list]
+            tf_highs = [float(b.high) for b in tf_bars_list]
+            tf_lows = [float(b.low) for b in tf_bars_list]
             n = len(tf_closes)
-            k_clean = _align_series(k_vals, n)
-            d_clean = _align_series(d_vals, n)
-            stoch_data[stoch_tf] = (k_clean, d_clean)
+            k_vals, d_vals = stochrsi_series(tf_closes)
+            rsi7_tf = rsi_series(tf_closes, 7) if n >= 8 else [50.0] * n
+            tf_data[stf] = {
+                "k": _align_series(k_vals, n),
+                "d": _align_series(d_vals, n),
+                "rsi7": rsi7_tf if len(rsi7_tf) == n else [50.0] * n,
+                "highs": tf_highs,
+                "lows": tf_lows,
+                "n": n,
+            }
 
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
 
-        # ── Layout ─────────────────────────────────────────────────────────
-        # Rows: 0=candle, 1=RSI7, 2=KDJ, 3=StochRSI cols header label
-        # Cols for StochRSI: 5 equal columns (row 3)
-        # Use GridSpec: 4 rows × 5 cols
-        # Row heights: candle tall, RSI7 medium, KDJ medium, StochRSI medium
-        n_stoch_cols = len(stoch_tfs)
-        fig = plt.figure(figsize=(14, 11))
+        # ── Layout: 5 rows × 5 cols ────────────────────────────────────────
+        # Row 0: Candle (full width)
+        # Row 1: KDJ   (full width)
+        # Row 2: RSI7 per TF (5 cols)
+        # Row 3: StochRSI+MaStochRSI per TF (5 cols)
+        ncols = len(stoch_tfs)
+        fig = plt.figure(figsize=(14, 12))
         gs = GridSpec(
-            4, n_stoch_cols,
+            4, ncols,
             figure=fig,
-            height_ratios=[4, 1.1, 1.1, 1.3],
-            hspace=0.08,
-            wspace=0.15,
+            height_ratios=[4, 1.1, 1.0, 1.2],
+            hspace=0.10,
+            wspace=0.12,
         )
 
-        # Candle + RSI7 + KDJ span all 5 columns
         ax_main = fig.add_subplot(gs[0, :])
-        ax_rsi = fig.add_subplot(gs[1, :], sharex=ax_main)
-        ax_kdj = fig.add_subplot(gs[2, :], sharex=ax_main)
+        ax_kdj  = fig.add_subplot(gs[1, :], sharex=ax_main)
+        rsi_axes   = [fig.add_subplot(gs[2, i]) for i in range(ncols)]
+        stoch_axes = [fig.add_subplot(gs[3, i]) for i in range(ncols)]
 
-        # StochRSI: 5 individual axes, one per TF (no shared x — each shows own TF)
-        stoch_axes = []
-        for col, stoch_tf in enumerate(stoch_tfs):
-            ax = fig.add_subplot(gs[3, col])
-            stoch_axes.append((stoch_tf, ax))
-
-        # ── Candles via mplfinance on ax_main ──────────────────────────────
-        mpf.plot(
-            df,
-            type="candle",
-            style="charles",
-            ax=ax_main,
-            volume=False,
-        )
-        title_str = f"{symbol}  {tf}  |  RSI: {rsi_value:.1f}" if rsi_value else f"{symbol}  {tf}"
+        # ── Candles ───────────────────────────────────────────────────────
+        mpf.plot(df, type="candle", style="charles", ax=ax_main, volume=False)
+        title_str = f"{symbol}  {tf}  |  RSI7: {rsi_value:.1f}" if rsi_value else f"{symbol}  {tf}"
         ax_main.set_title(title_str, fontsize=11, fontweight="bold")
         ax_main.set_ylabel("Price")
 
-        # EMAs
         x = range(len(df))
         ax_main.plot(x, ema20, color="orange", linewidth=0.9, label="EMA20")
-        ax_main.plot(x, ema50, color="blue", linewidth=0.9, label="EMA50")
+        ax_main.plot(x, ema50, color="blue",   linewidth=0.9, label="EMA50")
         ax_main.legend(loc="upper left", fontsize=7, framealpha=0.5)
 
-        # FVG zone
         xlim = ax_main.get_xlim()
-        rect = mpatches.Rectangle(
-            (xlim[0], zone_bottom),
-            xlim[1] - xlim[0],
-            zone_top - zone_bottom,
-            facecolor=zone_color,
-            alpha=0.15,
-            edgecolor=zone_color,
-            linewidth=1.5,
-            linestyle="--",
-        )
-        ax_main.add_patch(rect)
+        ax_main.add_patch(mpatches.Rectangle(
+            (xlim[0], zone_bottom), xlim[1] - xlim[0], zone_top - zone_bottom,
+            facecolor=zone_color, alpha=0.15, edgecolor=zone_color, linewidth=1.5, linestyle="--",
+        ))
 
-        # Trade plan overlays
         if trade_plan is not None:
-            overlay_levels = [
-                ("Entry", float(trade_plan.entry), "#1f77b4"),
-                ("SL", float(trade_plan.sl), "#d62728"),
-                ("TP1", float(trade_plan.tp1), "#2ca02c"),
-                ("TP2", float(trade_plan.tp2), "#006400"),
-            ]
             x_text = xlim[0] + (xlim[1] - xlim[0]) * 0.02
-            for label, price, color in overlay_levels:
+            for label, price, color in [
+                ("Entry", float(trade_plan.entry), "#1f77b4"),
+                ("SL",    float(trade_plan.sl),    "#d62728"),
+                ("TP1",   float(trade_plan.tp1),   "#2ca02c"),
+                ("TP2",   float(trade_plan.tp2),   "#006400"),
+            ]:
                 ax_main.axhline(y=price, color=color, linestyle="-", linewidth=1.2, alpha=0.9)
-                ax_main.text(
-                    x_text, price, f" {label} {price:g} ",
-                    color="white", fontsize=8, va="center",
-                    bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color},
-                )
+                ax_main.text(x_text, price, f" {label} {price:g} ",
+                             color="white", fontsize=8, va="center",
+                             bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color})
 
-        # ── RSI7 ──────────────────────────────────────────────────────────
-        ax_rsi.plot(x, rsi7, color="purple", linewidth=0.8)
-        ax_rsi.axhline(y=70, color="red", linestyle="--", linewidth=0.7, alpha=0.7)
-        ax_rsi.axhline(y=30, color="green", linestyle="--", linewidth=0.7, alpha=0.7)
-        ax_rsi.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
-        ax_rsi.set_ylabel("RSI7", fontsize=8)
-        ax_rsi.set_ylim(0, 100)
-        ax_rsi.tick_params(labelbottom=False)
-        _draw_divergence(ax_rsi, highs, lows, rsi7)
+        ax_main.tick_params(labelbottom=False)
 
         # ── KDJ ───────────────────────────────────────────────────────────
-        ax_kdj.plot(x, kdj_k, color="blue", linewidth=0.8, label="K")
+        ax_kdj.plot(x, kdj_k, color="blue",   linewidth=0.8, label="K")
         ax_kdj.plot(x, kdj_d, color="orange", linewidth=0.8, label="D")
-        ax_kdj.plot(x, kdj_j, color="green", linewidth=0.8, label="J")
-        ax_kdj.axhline(y=80, color="red", linestyle="--", linewidth=0.7, alpha=0.5)
-        ax_kdj.axhline(y=20, color="green", linestyle="--", linewidth=0.7, alpha=0.5)
-        ax_kdj.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.4)
+        ax_kdj.plot(x, kdj_j, color="green",  linewidth=0.8, label="J")
+        for lvl, c in [(80, "red"), (20, "green"), (50, "gray")]:
+            ax_kdj.axhline(y=lvl, color=c, linestyle="--", linewidth=0.6, alpha=0.5)
         ax_kdj.set_ylabel("KDJ", fontsize=8)
         ax_kdj.set_ylim(-10, 110)
         ax_kdj.legend(loc="upper left", fontsize=6, framealpha=0.4)
         ax_kdj.tick_params(labelbottom=False)
 
-        # ── StochRSI per-TF columns ────────────────────────────────────────
-        for col_idx, (stoch_tf, ax) in enumerate(stoch_axes):
-            k_vals, d_vals = stoch_data[stoch_tf]
-            color = stoch_colors[stoch_tf]
-            xs = range(len(k_vals))
-            ax.plot(xs, k_vals, color=color, linewidth=0.9)
-            ax.plot(xs, d_vals, color=color, linewidth=0.7, linestyle="--", alpha=0.7)
-            ax.axhline(y=80, color="red", linestyle="--", linewidth=0.6, alpha=0.5)
-            ax.axhline(y=20, color="green", linestyle="--", linewidth=0.6, alpha=0.5)
-            ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.3)
+        # ── RSI7 per TF (row 2) ───────────────────────────────────────────
+        for i, stf in enumerate(stoch_tfs):
+            ax = rsi_axes[i]
+            color = tf_colors[stf]
+            d = tf_data[stf]
+            xs = range(d["n"])
+            ax.plot(xs, d["rsi7"], color=color, linewidth=0.9)
+            _draw_divergence(ax, d["highs"], d["lows"], d["rsi7"])
+            for lvl, c in [(70, "red"), (30, "green"), (50, "gray")]:
+                ax.axhline(y=lvl, color=c, linestyle="--", linewidth=0.6, alpha=0.5)
             ax.set_ylim(0, 100)
-            ax.set_title(stoch_tf, fontsize=8, color=color, fontweight="bold", pad=2)
-            if col_idx == 0:
-                ax.set_ylabel("sRSI", fontsize=8)
+            ax.set_title(stf, fontsize=8, color=color, fontweight="bold", pad=2)
+            if i == 0:
+                ax.set_ylabel("RSI7", fontsize=8)
             else:
                 ax.tick_params(labelleft=False)
             ax.tick_params(labelbottom=False, labelsize=6)
 
-        # Hide x tick labels on main/rsi/kdj (shared x, only bottom row matters)
-        ax_main.tick_params(labelbottom=False)
-
-        plt.setp(ax_rsi.get_xticklabels(), visible=False)
+        # ── StochRSI + MaStochRSI per TF (row 3) ─────────────────────────
+        for i, stf in enumerate(stoch_tfs):
+            ax = stoch_axes[i]
+            color = tf_colors[stf]
+            d = tf_data[stf]
+            xs = range(d["n"])
+            k_last = d["k"][-1] if d["k"] else 0.0
+            ma_last = d["d"][-1] if d["d"] else 0.0
+            ax.plot(xs, d["k"], color="#f0c040",  linewidth=0.9, label="StochRSI")
+            ax.plot(xs, d["d"], color="#8888ff",  linewidth=0.9, label="MaStochRSI")
+            for lvl, c in [(80, "red"), (20, "green"), (50, "gray")]:
+                ax.axhline(y=lvl, color=c, linestyle="--", linewidth=0.6, alpha=0.5)
+            ax.set_ylim(0, 100)
+            # label with current values
+            ax.set_title(
+                f"{stf}  K:{k_last:.1f} MA:{ma_last:.1f}",
+                fontsize=7, color=color, fontweight="bold", pad=2,
+            )
+            if i == 0:
+                ax.set_ylabel("sRSI", fontsize=8)
+            else:
+                ax.tick_params(labelleft=False)
+            ax.tick_params(labelbottom=False, labelsize=6)
 
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")

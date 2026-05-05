@@ -136,8 +136,8 @@ def test_chart_generator_renders_30m_1h_2h_4h_stochrsi_without_divergence(monkey
 
     assert png is not None
     assert png.startswith(b"\x89PNG")
-    # StochRSI rendered as 5 separate column axes, divergence only on RSI7
-    assert len(divergence_calls) == 1
+    # Divergence drawn once per TF RSI7 axis (5 TFs)
+    assert len(divergence_calls) == 5
     assert divergence_calls[0][0].get_ylabel() == "RSI7"
 
 
