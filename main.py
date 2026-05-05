@@ -119,10 +119,10 @@ class AlphaCaller:
                 trade_plan=trade_setup.trade,
             )
             if event["type"] == "approaching":
-                send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup)
+                send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
             elif event["type"] == "touch":
-                send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup)
+                send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
 
         # Check new FVG
@@ -147,7 +147,7 @@ class AlphaCaller:
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
             self._store_fvg_all_modes(new_zone, chart_path, price)
 
-            send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup)
+            send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
             logger.info(
                 "New FVG alert %s %s | strength=%d rsi=%s",
                 symbol, tf, new_zone.main_strength, new_zone.rsi,
