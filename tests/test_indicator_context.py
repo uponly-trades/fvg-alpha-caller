@@ -120,17 +120,8 @@ def test_long_short_ratio_uses_binance_response_and_cache(monkeypatch):
 def test_chart_generator_renders_30m_1h_2h_4h_stochrsi_without_divergence(monkeypatch):
     bars = make_bars([10, 11, 12, 13, 14, 13, 12, 11, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 20, 19, 18, 19, 20, 21, 22, 23, 24, 23, 22, 24, 25, 26, 27, 28, 29, 28, 30, 31])
     divergence_calls = []
-    labels = []
 
     monkeypatch.setattr(chart_generator, "_draw_divergence", lambda *args, **kwargs: divergence_calls.append(args))
-
-    original_make_addplot = chart_generator.mpf.make_addplot
-    def spy_make_addplot(*args, **kwargs):
-        if "ylabel" in kwargs:
-            labels.append(kwargs["ylabel"])
-        return original_make_addplot(*args, **kwargs)
-
-    monkeypatch.setattr(chart_generator.mpf, "make_addplot", spy_make_addplot)
 
     png = chart_generator.generate_chart(
         bars=bars,
@@ -145,10 +136,7 @@ def test_chart_generator_renders_30m_1h_2h_4h_stochrsi_without_divergence(monkey
 
     assert png is not None
     assert png.startswith(b"\x89PNG")
-    # all StochRSI TFs now share one panel with a single "sRSI" ylabel
-    assert "sRSI" in labels
-    assert "sRSI 30m" not in labels
-    assert "sRSI 1h" not in labels
+    # StochRSI rendered as 5 separate column axes, divergence only on RSI7
     assert len(divergence_calls) == 1
     assert divergence_calls[0][0].get_ylabel() == "RSI7"
 
