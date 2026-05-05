@@ -306,7 +306,8 @@ def test_trade_plan_alert_uses_reduced_trade_content(monkeypatch):
     assert "RR: 1:2" in text
     assert "Mode: scalping" in text
     assert "Zone: 99.0 — 101.0" in text
-    assert "Strength: 80%" in text
+    assert "Confidence:" in text
+    assert "80%" in text
     assert "Reason: long FVG with aligned StochRSI combo" in text
     assert "interval=30" in text
     assert "StochRSI should not render" not in text

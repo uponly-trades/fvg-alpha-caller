@@ -23,6 +23,28 @@ def _fvg_direction_text(zone) -> str:
     return "BULLISH" if int(zone.direction) == 1 else "BEARISH"
 
 
+def _rsi_emoji(rsi: float) -> str:
+    if rsi >= 70:
+        return "🔥"
+    if rsi >= 55:
+        return "📈"
+    if rsi <= 30:
+        return "🧊"
+    if rsi <= 45:
+        return "📉"
+    return "↔️"
+
+
+def _confidence_label(score: int) -> str:
+    if score >= 85:
+        return "💎 Very High"
+    if score >= 70:
+        return "✅ High"
+    if score >= 55:
+        return "⚠️ Medium"
+    return "❌ Low"
+
+
 def _trade_title(zone, trade_setup) -> str:
     return f"{trade_setup.status} - {_fvg_direction_text(zone)} FVG | {zone.symbol} | {zone.tf}"
 
@@ -43,11 +65,15 @@ def _format_trade_alert(zone, current_price: float, trade_setup) -> str:
         lines.append(f"Price: {current_price}")
         lines.append(f"Skip Reason: {trade_setup.reason}")
 
+    rsi_val = getattr(zone, "rsi", None)
+    rsi_str = f"{_rsi_emoji(rsi_val)} RSI: {rsi_val:.1f}" if rsi_val is not None else ""
     lines.extend([
         f"Mode: {trade_setup.mode}",
         f"Zone: {zone.bottom} — {zone.top}",
-        f"Strength: {zone.main_strength}%",
+        f"Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)",
     ])
+    if rsi_str:
+        lines.append(rsi_str)
     if trade_setup.trade is not None:
         lines.append(f"Reason: {trade_setup.reason}")
     lines.append("")
@@ -73,15 +99,16 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
     invalid_text = f"\n❌ Invalid: {zone.invalid_reason}" if getattr(zone, "invalidated", False) and zone.invalid_reason else ""
+    rsi_icon = _rsi_emoji(zone.rsi)
     caption = (
         f"{emoji} <b>{dir_text.upper()} FVG — {zone.label}</b>\n\n"
         f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
         f"💰 Price : {zone.price}\n"
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
         f"📐 Size  : {zone.size:.4f}\n\n"
-        f"📈 Strength: {zone.main_strength}%\n"
+        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n"
         f"   • Bull: {zone.bull_strength}% | Bear: {zone.bear_strength}%\n"
-        f"📊 RSI(14) : {zone.rsi}\n"
+        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
         f"📊 ATR(14) : {zone.atr}\n\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"{price_icon} Bar Change: {zone.price_change_pct:+.2f}%\n"
@@ -134,16 +161,17 @@ def send_approach_alert(zone, current_price: float, chart_png: Optional[bytes] =
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
+    rsi_icon = _rsi_emoji(zone.rsi)
     msg = (
         f"⚡ <b>APPROACHING {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
         f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
         f"💰 Price : {current_price}\n"
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
-        f"📈 Strength: {zone.main_strength}%\n\n"
+        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
         f"📍 Dist to Zone: {zone.dist_to_zone:.4f}\n"
-        f"📊 RSI(14) : {zone.rsi}\n"
+        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
         f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
         f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
         f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
@@ -173,15 +201,16 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     btc_text = {"UP": "🟢 Uptrend", "DOWN": "🔴 Downtrend", "NEUTRAL": "Neutral"}.get(zone.btc_state, "Neutral")
     disp_text = "YES" if zone.displacement_ok else "NO"
     btc_align_text = "YES" if zone.btc_alignment_ok else "NO"
+    rsi_icon = _rsi_emoji(zone.rsi)
     msg = (
         f"🔥 <b>TOUCH — {dir_text.upper()} ZONE</b>\n\n"
         f"{emoji} {zone.label}\n"
         f"📊 <code>{zone.symbol}</code> | TF: <code>{zone.tf}</code>\n"
         f"💰 Price : {current_price}\n"
         f"📏 Zone  : {zone.bottom} — {zone.top}\n"
-        f"📈 Strength: {zone.main_strength}%\n"
+        f"🎯 Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)\n"
         f"{vol_icon} Vol Change: {zone.vol_change_pct:+.1f}%\n"
-        f"📊 RSI(14) : {zone.rsi}\n"
+        f"{rsi_icon} RSI(14) : {zone.rsi}\n"
         f"📆 24h Change: {zone.price_change_24h_pct:+.2f}%\n"
         f"🌐 BTCDOM: {dom_text} ({zone.dominance_bias:+.4f})\n"
         f"₿ BTC: {btc_text} ({zone.btc_trend:+.4f})\n"
