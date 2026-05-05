@@ -139,6 +139,39 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
     )
 
 
+_TIMEFRAME_MAP = {"SCALPING": "scalping", "INTRADAY": "intraday", "SWING": "swing"}
+
+
+def build_trade_from_kronos(kronos: dict) -> TradeSetupResult:
+    """
+    Convert Kronos prediction response into TradeSetupResult.
+    RANGING → SKIP. LONG/SHORT → valid trade with Kronos levels.
+    """
+    direction = kronos.get("direction", "RANGING")
+    timeframe = kronos.get("timeframe", "INTRADAY")
+    confidence = kronos.get("confidence", 0)
+    mode = _TIMEFRAME_MAP.get(timeframe, "intraday")
+
+    if direction == "RANGING":
+        return TradeSetupResult(
+            f"SKIP: RANGING", False, mode,
+            f"Kronos predicts ranging market (confidence {confidence}%)",
+            None, {}, {},
+        )
+
+    trade = TradeLevels(
+        direction=direction.lower(),
+        entry=float(kronos["entry"]),
+        sl=float(kronos["sl"]),
+        tp1=float(kronos["tp1"]),
+        tp2=float(kronos["tp2"]),
+        rr=2.0,
+    )
+    status = f"{direction} VALID"
+    reason = f"Kronos {direction.lower()} signal — {timeframe.lower()} (confidence {confidence}%)"
+    return TradeSetupResult(status, True, mode, reason, trade, {}, {})
+
+
 def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:
     """Evaluate a specific trade mode regardless of zone.tf. Used to simulate all modes per FVG."""
     if mode not in COMBO_TIMEFRAMES:
