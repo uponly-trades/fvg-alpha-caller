@@ -132,7 +132,7 @@ def generate_chart(
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             stoch_k, stoch_d = stochrsi_series(tf_closes)
-            df[f"StochRSI_{stoch_tf}"] = _align_series_to_index(stoch_k, tf_bars, df.index) if tf_bars else _align_series(stoch_k, len(df))
+            df[f"StochRSI_{stoch_tf}"] = _align_series(stoch_k, len(df))
 
         # Color for FVG zone
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
