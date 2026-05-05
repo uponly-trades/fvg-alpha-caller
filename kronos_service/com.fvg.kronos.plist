@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.fvg.kronos</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/liko/kronos_env/bin/python3</string>
+    <string>-m</string>
+    <string>uvicorn</string>
+    <string>kronos_service.main:app</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>8012</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/liko</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>KRONOS_DEVICE</key>
+    <string>mps</string>
+    <key>PATH</key>
+    <string>/Users/liko/kronos_env/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/liko/kronos_service.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/liko/kronos_service_err.log</string>
+</dict>
+</plist>
