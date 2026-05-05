@@ -129,16 +129,16 @@ def generate_chart(
         stoch_tfs = ("15m", "30m", "1h", "2h", "4h")
         stoch_colors = {"15m": "#00bfff", "30m": "#00e676", "1h": "#ff9800", "2h": "#e040fb", "4h": "#ff1744"}
 
-        # Compute StochRSI K/D per TF
+        # Compute StochRSI K/D per TF — raw values, no alignment needed (own x)
         stoch_data: Dict[str, Tuple[List, List]] = {}
         for stoch_tf in stoch_tfs:
             tf_bars = timeframe_bars.get(stoch_tf, [])
             tf_closes = [float(b.close) for b in tf_bars]
             k_vals, d_vals = stochrsi_series(tf_closes)
-            target_idx = pd.to_datetime([b.open_time for b in bars], unit="ms")
-            k_aligned = _align_series_to_index(k_vals, tf_bars, target_idx)
-            d_aligned = _align_series_to_index(d_vals, tf_bars, target_idx)
-            stoch_data[stoch_tf] = (k_aligned, d_aligned)
+            n = len(tf_closes)
+            k_clean = _align_series(k_vals, n)
+            d_clean = _align_series(d_vals, n)
+            stoch_data[stoch_tf] = (k_clean, d_clean)
 
         zone_color = "#1AD8C2" if zone_direction == 1 else "#D81A66"
 
@@ -162,10 +162,10 @@ def generate_chart(
         ax_rsi = fig.add_subplot(gs[1, :], sharex=ax_main)
         ax_kdj = fig.add_subplot(gs[2, :], sharex=ax_main)
 
-        # StochRSI: 5 individual axes, one per TF
+        # StochRSI: 5 individual axes, one per TF (no shared x — each shows own TF)
         stoch_axes = []
         for col, stoch_tf in enumerate(stoch_tfs):
-            ax = fig.add_subplot(gs[3, col], sharex=ax_main)
+            ax = fig.add_subplot(gs[3, col])
             stoch_axes.append((stoch_tf, ax))
 
         # ── Candles via mplfinance on ax_main ──────────────────────────────
@@ -243,8 +243,9 @@ def generate_chart(
         for col_idx, (stoch_tf, ax) in enumerate(stoch_axes):
             k_vals, d_vals = stoch_data[stoch_tf]
             color = stoch_colors[stoch_tf]
-            ax.plot(x, k_vals, color=color, linewidth=0.9)
-            ax.plot(x, d_vals, color=color, linewidth=0.7, linestyle="--", alpha=0.7)
+            xs = range(len(k_vals))
+            ax.plot(xs, k_vals, color=color, linewidth=0.9)
+            ax.plot(xs, d_vals, color=color, linewidth=0.7, linestyle="--", alpha=0.7)
             ax.axhline(y=80, color="red", linestyle="--", linewidth=0.6, alpha=0.5)
             ax.axhline(y=20, color="green", linestyle="--", linewidth=0.6, alpha=0.5)
             ax.axhline(y=50, color="gray", linestyle="-", linewidth=0.5, alpha=0.3)
