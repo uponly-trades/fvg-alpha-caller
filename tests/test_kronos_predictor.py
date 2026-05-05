@@ -60,3 +60,17 @@ def test_tp_sl_minimum_atr():
     result = derive_decision(predicted, current_price=100.0, atr=1.0, zone_direction=1, entry=100.0)
     risk = result["tp2"] - result["entry"]
     assert risk >= 0.5 * 1.0  # min 0.5x ATR
+
+
+def test_predict_request_schema():
+    """Verify PredictRequest is importable and has correct fields."""
+    from kronos_service.main import PredictRequest, PredictResponse
+    fields = PredictRequest.model_fields
+    assert "bars" in fields
+    assert "current_price" in fields
+    assert "atr" in fields
+    assert "zone_direction" in fields
+    resp_fields = PredictResponse.model_fields
+    assert "direction" in resp_fields
+    assert "timeframe" in resp_fields
+    assert "confidence" in resp_fields
