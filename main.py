@@ -63,8 +63,11 @@ class AlphaCaller:
         """Save FVG record + simulate all 3 modes regardless of zone.tf."""
         self.sim_store.add_fvg(zone, chart_path=chart_path or None)
         bars_by_tf = self._timeframe_bars(zone.symbol)
+        buf_summary = {tf: len(b) for tf, b in bars_by_tf.items()}
+        logger.info("store_fvg_all_modes %s | bars=%s", zone.symbol, buf_summary)
         for mode in COMBO_TIMEFRAMES:
             setup = evaluate_for_mode(zone, mode, current_price, bars_by_tf)
+            logger.info("  mode=%s status=%s", mode, setup.status)
             if setup.valid:
                 self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
