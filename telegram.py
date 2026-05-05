@@ -1,5 +1,6 @@
 import io
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -56,11 +57,11 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
     if trade_setup.trade is not None:
         trade = trade_setup.trade
         lines.extend([
-            f"Entry: {trade.entry}",
-            f"SL: {trade.sl}",
-            f"TP1: {trade.tp1}",
-            f"TP2: {trade.tp2}",
-            "RR: 1:2",
+            f"Entry : <b>{_fmt_price(trade.entry)}</b>",
+            f"SL    : {_fmt_price(trade.sl)}",
+            f"TP1   : {_fmt_price(trade.tp1)}",
+            f"TP2   : {_fmt_price(trade.tp2)}",
+            "RR    : 1:2",
         ])
     else:
         lines.append(f"Price: {current_price}")
@@ -226,27 +227,66 @@ def send_touch_alert(zone, current_price: float, chart_png: Optional[bytes] = No
     return _send(msg)
 
 
+def _fmt_price(v) -> str:
+    try:
+        f = float(v)
+        if f >= 1000:
+            return f"{f:,.2f}"
+        if f >= 1:
+            return f"{f:.4f}"
+        return f"{f:.6f}"
+    except Exception:
+        return str(v)
+
+
+def _fmt_ts(ts_ms) -> str:
+    try:
+        dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        return dt.strftime("%d %b %H:%M UTC")
+    except Exception:
+        return "—"
+
+
 def send_trade_recap(session_name: str, recap: dict) -> bool:
+    date_str = recap.get("date", "—")
+    open_c = recap["open"]
+    tp1_c = recap["tp1"]
+    win_c = recap["win"]
+    loss_c = recap["loss"]
+    wr = recap["closed_winrate"]
+    closed = win_c + loss_c
+
+    wr_emoji = "🔥" if wr >= 70 else "✅" if wr >= 50 else "⚠️" if wr >= 30 else "❌"
+
     lines = [
-        f"<b>Trade Recap — {session_name}</b>",
+        f"📊 <b>Trade Recap — {session_name}</b>",
+        f"📅 {date_str}",
         "",
-        f"Open: {recap['open']}",
-        f"TP1: {recap['tp1']}",
-        f"Win TP2: {recap['win']}",
-        f"Loss: {recap['loss']}",
-        f"Closed Winrate: {recap['closed_winrate']}%",
+        f"⏳ Open      : <b>{open_c}</b>",
+        f"🎯 TP1 Hit   : <b>{tp1_c}</b>",
+        f"✅ Win (TP2) : <b>{win_c}</b>",
+        f"❌ Loss      : <b>{loss_c}</b>",
+        f"📈 Closed    : <b>{closed}</b>  |  WR: {wr_emoji} <b>{wr}%</b>",
     ]
+
     recent = recap.get("recent", [])
     if recent:
-        lines.extend(["", "Recent:"])
-        for record in recent:
-            direction = "LONG" if record.get("direction") == "long" else "SHORT"
-            status = str(record.get("status", "")).upper().replace("TP1_HIT", "TP1")
+        lines.extend(["", "━━━━━━━━━━━━━━━━", "🕐 <b>Recent Trades</b>"])
+        status_emoji = {"win": "✅", "loss": "❌", "tp1_hit": "🎯", "open": "⏳"}
+        dir_emoji = {"long": "🟢 LONG", "short": "🔴 SHORT"}
+        for r in recent:
+            direction = dir_emoji.get(r.get("direction", ""), r.get("direction", "?").upper())
+            status = str(r.get("status", "open"))
+            s_emoji = status_emoji.get(status, "❓")
+            s_label = status.upper().replace("TP1_HIT", "TP1 HIT")
+            created = _fmt_ts(r.get("created_at", 0))
             lines.extend([
-                f"{direction} VALID - {record['symbol']} {record['tf']}",
-                f"Entry {record['entry']} | SL {record['sl']} | TP1 {record['tp1']} | TP2 {record['tp2']}",
-                f"Status: {status}",
+                "",
+                f"{direction} | <code>{r['symbol']}</code> {r['tf']} | {created}",
+                f"  Entry: <b>{_fmt_price(r['entry'])}</b>  SL: {_fmt_price(r['sl'])}  TP1: {_fmt_price(r['tp1'])}  TP2: {_fmt_price(r['tp2'])}",
+                f"  {s_emoji} {s_label}",
             ])
+
     return _send("\n".join(lines))
 
 

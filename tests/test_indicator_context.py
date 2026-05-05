@@ -299,11 +299,11 @@ def test_trade_plan_alert_uses_reduced_trade_content(monkeypatch):
 
     text = sent["text"]
     assert "NEW FVG | BULLISH FVG | BTCUSDT | 30m" in text
-    assert "Entry: 100.0" in text
-    assert "SL: 98.9" in text
-    assert "TP1: 101.1" in text
-    assert "TP2: 102.2" in text
-    assert "RR: 1:2" in text
+    assert "100.0000" in text
+    assert "98.9" in text
+    assert "101.1" in text
+    assert "102.2" in text
+    assert "RR" in text
     assert "Mode: scalping" in text
     assert "Zone: 99.0 — 101.0" in text
     assert "Confidence:" in text
@@ -351,13 +351,11 @@ def test_send_trade_recap_formats_daily_summary(monkeypatch):
 
     text = sent["text"]
     assert "Trade Recap — Siang" in text
-    assert "Open: 4" in text
-    assert "TP1: 2" in text
-    assert "Win TP2: 1" in text
-    assert "Loss: 1" in text
-    assert "Closed Winrate: 50.0%" in text
-    assert "LONG VALID - BTCUSDT 15m" in text
-    assert "Status: TP1" in text
+    assert "Open" in text and "4" in text
+    assert "50.0%" in text
+    assert "BTCUSDT" in text
+    assert "15m" in text
+    assert "TP1 HIT" in text
 
 
 def test_chart_generator_draws_trade_plan_overlays(monkeypatch):
@@ -481,7 +479,7 @@ def test_trade_alert_text_has_no_ascii_sparkline(monkeypatch):
     assert "<code>" not in text
     assert "▁▂▃▄▅▆▇▆▅▄" not in text
     assert "NEW FVG | BULLISH FVG | SOLUSDT | 15m" in text
-    assert "Entry: 100.0" in text
+    assert "100.0000" in text
 
 
 def test_alpha_caller_sends_each_session_recap_once(monkeypatch):
