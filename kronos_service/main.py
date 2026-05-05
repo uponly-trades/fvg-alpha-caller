@@ -11,7 +11,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from kronos_service.predictor import load_model, predict
+from kronos_service.predictor import load_model, predict, _run_kronos
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ class PredictResponse(BaseModel):
     tp1: float
     tp2: float
     confidence: int              # 0-100
+    predicted_bars: List[OHLCVBar] = []  # Kronos forecast candles for chart overlay
 
 
 @app.get("/health")
@@ -68,13 +69,16 @@ def predict_endpoint(req: PredictRequest):
         raise HTTPException(status_code=422, detail="Need at least 10 bars")
     bars_dicts = [b.model_dump() for b in req.bars]
     try:
-        result = predict(
-            bars=bars_dicts,
+        predicted_bars = _run_kronos(bars_dicts, tf=req.tf)
+        from kronos_service.predictor import derive_decision
+        result = derive_decision(
+            predicted=predicted_bars,
             current_price=req.current_price,
             atr=req.atr,
             zone_direction=req.zone_direction,
-            tf=req.tf,
+            entry=req.current_price,
         )
+        result["predicted_bars"] = predicted_bars
     except Exception as e:
         logger.error("Kronos predict failed for %s %s: %s", req.symbol, req.tf, e)
         raise HTTPException(status_code=500, detail=str(e))

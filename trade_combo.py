@@ -51,6 +51,7 @@ class TradeSetupResult:
     sparklines: Dict[str, str] = None
     source: str = "combo"          # "kronos" | "combo"
     kronos_raw: Optional[dict] = None  # raw Kronos response for ML logging
+    predicted_bars: Optional[list] = None  # Kronos forecast candles for chart
 
 
 def classify_mode(tf: str) -> Optional[str]:
@@ -180,7 +181,11 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
     )
     status = f"{direction} VALID"
     reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"
-    return TradeSetupResult(status, True, mode, reason, trade, {}, {}, source="kronos", kronos_raw=kronos)
+    return TradeSetupResult(
+        status, True, mode, reason, trade, {}, {},
+        source="kronos", kronos_raw=kronos,
+        predicted_bars=kronos.get("predicted_bars"),
+    )
 
 
 def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[str, List]) -> TradeSetupResult:

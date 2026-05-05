@@ -97,32 +97,46 @@ def _trade_title(zone, trade_setup, prefix: str = None) -> str:
 def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = None, timeframe_bars: dict = None) -> str:
     tv_url = _tv_link(zone.symbol, zone.tf)
     lines = [f"<b>{_trade_title(zone, trade_setup, prefix)}</b>", ""]
+    rsi_val = getattr(zone, "rsi", None)
+    rsi_str = f"{_rsi_emoji(rsi_val)} RSI: {rsi_val:.1f}" if rsi_val is not None else ""
+
     if trade_setup is not None and trade_setup.trade is not None:
         trade = trade_setup.trade
+        src = getattr(trade_setup, "source", "combo")
+        src_label = "🤖 Kronos" if src == "kronos" else "📊 Combo"
         lines.extend([
             f"Entry : <b>{_fmt_price(trade.entry)}</b>",
             f"SL    : {_fmt_price(trade.sl)}",
             f"TP1   : {_fmt_price(trade.tp1)}",
             f"TP2   : {_fmt_price(trade.tp2)}",
-            "RR    : 1:2",
+            f"RR    : 1:2  |  {src_label}",
         ])
     else:
-        lines.append(f"Price: {_fmt_price(current_price)}")
+        # Skip — show price + zone + why it was skipped
+        dir_emoji = "🟢" if int(zone.direction) == 1 else "🔴"
+        lines.extend([
+            f"Price : {_fmt_price(current_price)}",
+            f"Zone  : {dir_emoji} {_fmt_price(zone.bottom)} — {_fmt_price(zone.top)}",
+        ])
         if trade_setup is not None:
-            lines.append(f"Skip Reason: {trade_setup.reason}")
+            status = trade_setup.status  # e.g. "SKIP: MIXED COMBO"
+            skip_label = status.replace("SKIP: ", "").title()
+            lines.append(f"Skip  : {skip_label}")
+            # Show combo states if available
+            combo = getattr(trade_setup, "combo_states", {})
+            if combo:
+                desired = "long" if int(zone.direction) == 1 else "short"
+                state_icons = {"long": "🟢", "short": "🔴", "neutral": "⚪"}
+                combo_parts = [f"{tf}:{state_icons.get(s,'❓')}" for tf, s in combo.items()]
+                lines.append(f"Combo : {' '.join(combo_parts)}")
 
-    rsi_val = getattr(zone, "rsi", None)
-    rsi_str = f"{_rsi_emoji(rsi_val)} RSI: {rsi_val:.1f}" if rsi_val is not None else ""
-    mode = trade_setup.mode if trade_setup is not None else "—"
     lines.extend([
-        f"Mode: {mode}",
-        f"Zone: {_fmt_price(zone.bottom)} — {_fmt_price(zone.top)}",
-        f"Confidence: {_confidence_label(zone.main_strength)} ({zone.main_strength}%)",
+        f"FVG   : {_confidence_label(zone.main_strength)} ({zone.main_strength}%)",
     ])
     if rsi_str:
         lines.append(rsi_str)
     if trade_setup is not None and trade_setup.trade is not None:
-        lines.append(f"Reason: {trade_setup.reason}")
+        lines.append(f"Signal: {trade_setup.reason}")
 
     stoch_lines = _stoch_state_lines(timeframe_bars or {})
     if stoch_lines:

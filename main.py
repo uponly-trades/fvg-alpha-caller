@@ -142,6 +142,7 @@ class AlphaCaller:
                 rsi_value=zone.rsi,
                 timeframe_bars=self._timeframe_bars(zone.symbol),
                 trade_plan=trade_setup.trade,
+                predicted_bars=getattr(trade_setup, "predicted_bars", None),
             )
             if event["type"] == "approaching":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
@@ -169,6 +170,7 @@ class AlphaCaller:
                 rsi_value=new_zone.rsi,
                 timeframe_bars=self._timeframe_bars(new_zone.symbol),
                 trade_plan=trade_setup.trade,
+                predicted_bars=getattr(trade_setup, "predicted_bars", None),
             )
 
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""

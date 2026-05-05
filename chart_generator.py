@@ -96,8 +96,9 @@ def generate_chart(
     rsi_value: Optional[float] = None,
     timeframe_bars: Optional[Dict[str, List]] = None,
     trade_plan=None,
+    predicted_bars: Optional[List[Dict]] = None,
 ) -> Optional[bytes]:
-    """Generate candlestick chart with FVG zone, EMAs, RSI7, KDJ, and per-TF StochRSI columns."""
+    """Generate candlestick chart with FVG zone, EMAs, RSI7, KDJ, StochRSI, and Kronos forecast."""
     try:
         df = pd.DataFrame({
             "Open": [b.open for b in bars],
@@ -227,6 +228,45 @@ def generate_chart(
                 ax_main.text(x_text, price, f" {label} {price:g} ",
                              color="white", fontsize=8, va="center",
                              bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color})
+
+        # ── Kronos forecast ghost candles ─────────────────────────────────
+        if predicted_bars:
+            px_start = len(df)  # first forecast x index
+            p_dir = "up"
+            if trade_plan is not None:
+                p_dir = "up" if trade_plan.direction == "long" else "down"
+            elif predicted_bars[-1]["close"] >= predicted_bars[0]["open"]:
+                p_dir = "up"
+            else:
+                p_dir = "down"
+
+            fc_bull = "#26a69a44"  # transparent green
+            fc_bear = "#ef535044"  # transparent red
+            ec_bull = "#26a69a99"
+            ec_bear = "#ef535099"
+
+            for pi, pb in enumerate(predicted_bars):
+                px = px_start + pi
+                po, pc_ = pb["open"], pb["close"]
+                ph_, pl_ = pb["high"], pb["low"]
+                is_up = pc_ >= po
+                fc = fc_bull if is_up else fc_bear
+                ec = ec_bull if is_up else ec_bear
+                ax_main.bar(px, abs(pc_ - po), w, bottom=min(po, pc_), color=fc, edgecolor=ec, linewidth=0.6)
+                ax_main.vlines(px, pl_, min(po, pc_), color=ec, linewidth=0.6)
+                ax_main.vlines(px, max(po, pc_), ph_, color=ec, linewidth=0.6)
+
+            # Connect last real close to first forecast open with dashed line
+            ax_main.plot(
+                [len(df) - 1, px_start],
+                [float(df["Close"].iloc[-1]), predicted_bars[0]["open"]],
+                color="#ffffff44", linewidth=0.8, linestyle="--",
+            )
+            # Label
+            ax_main.text(
+                px_start + len(predicted_bars) / 2, predicted_bars[-1]["close"],
+                "  Kronos →", color="#aaaaaa", fontsize=7, va="bottom",
+            )
 
         ax_main.tick_params(labelbottom=False, colors="white")
 
