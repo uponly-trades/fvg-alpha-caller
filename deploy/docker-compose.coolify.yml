@@ -32,6 +32,7 @@ services:
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       EXECUTOR_URL: http://trade_executor:8014
       NEXT_PUBLIC_BOT_USERNAME: ${BOT_USERNAME}
+      HOSTNAME: 0.0.0.0
     expose: ["3000"]
     networks:
       - default
@@ -39,7 +40,7 @@ services:
       - coolify
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.fvglive.rule=Host(`${DASHBOARD_DOMAIN}`)"
+      - "traefik.http.routers.fvglive.rule=Host(`fvg-live.uponlytrader.xyz`)"
       - "traefik.http.routers.fvglive.entrypoints=https"
       - "traefik.http.routers.fvglive.tls.certresolver=letsencrypt"
       - "traefik.http.services.fvglive.loadbalancer.server.port=3000"
