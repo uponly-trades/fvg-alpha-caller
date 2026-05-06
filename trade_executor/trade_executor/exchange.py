@@ -14,9 +14,13 @@ def build_exchange(api_key: str, api_secret: str, *, proxy_url: str | None) -> c
         "options": {"defaultType": "future"},
         "enableRateLimit": True,
     }
-    if proxy_url:
-        options["aiohttp_proxy"] = proxy_url
     ex = ccxt.binanceusdm(options)
+    if proxy_url:
+        if proxy_url.startswith("socks"):
+            # ccxt 4.3+ supports socksProxy for SOCKS4/5 URIs
+            ex.socksProxy = proxy_url
+        else:
+            ex.aiohttp_proxy = proxy_url
     return ex
 
 

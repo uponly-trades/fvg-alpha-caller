@@ -10,6 +10,13 @@ def test_build_exchange_has_proxy_when_url_set():
 def test_build_exchange_no_proxy_when_none():
     ex = build_exchange("k", "s", proxy_url=None)
     assert getattr(ex, "aiohttp_proxy", None) in (None, "")
+    assert getattr(ex, "socksProxy", None) in (None, "")
+
+
+def test_build_exchange_socks5_proxy_uses_socks_attr():
+    ex = build_exchange("k", "s", proxy_url="socks5://u:p@host:1080")
+    assert ex.socksProxy == "socks5://u:p@host:1080"
+    assert getattr(ex, "aiohttp_proxy", None) in (None, "")
 
 
 def test_set_isolated_and_leverage_calls_chain(monkeypatch):
