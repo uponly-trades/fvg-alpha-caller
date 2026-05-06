@@ -3,6 +3,26 @@ from typing import Dict, List, Optional
 
 from config import MIN_STRENGTH_TO_ALERT
 from indicator_context import stochrsi_series
+from feature_extractor import extract_tf_features
+
+
+HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct
+LTF_VOL_MIN   = 2.0   # 15m_vol_z
+
+
+def _htf_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
+    """Shadow-backtested filter: HTF trend + LTF volume burst."""
+    bars_4h  = bars_by_tf.get("4h",  [])
+    bars_15m = bars_by_tf.get("15m", [])
+    if len(bars_4h) < 30 or len(bars_15m) < 30:
+        return False
+    f4 = extract_tf_features(bars_4h,  "4h")
+    f15 = extract_tf_features(bars_15m, "15m")
+    e20d = f4.get("ema20_dist_pct")
+    vz   = f15.get("vol_z")
+    if e20d is None or vz is None:
+        return False
+    return e20d >= HTF_TREND_MIN and vz >= LTF_VOL_MIN
 
 
 MODE_TIMEFRAMES = {
@@ -162,6 +182,14 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
+    # Shadow-backtested: SHORT side WR 10% — disable bearish FVG entries entirely.
+    if zone_direction != 1:
+        return TradeSetupResult(
+            "SKIP: SHORT DISABLED", False, mode,
+            "bearish FVG disabled (shadow WR 10%)",
+            None, {}, {}, source="kronos", kronos_raw=kronos,
+        )
+
     # Must align with FVG zone direction
     expected = "LONG" if zone_direction == 1 else "SHORT"
     if direction != expected:
@@ -196,6 +224,13 @@ def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[st
     if int(getattr(zone, "main_strength", 0)) < MIN_STRENGTH_TO_ALERT:
         return TradeSetupResult("SKIP: WEAK FVG", False, mode, "FVG strength below alert threshold", None, {}, {})
 
+    # Shadow-backtested: SHORT side WR 10% across 106 trades — disable until retrained.
+    if int(zone.direction) != 1:
+        return TradeSetupResult(
+            "SKIP: SHORT DISABLED", False, mode,
+            "bearish FVG disabled (shadow WR 10%)", None, {}, {},
+        )
+
     required_tfs = COMBO_TIMEFRAMES[mode]
     all_tfs = ("15m", "30m", "1h", "2h", "4h")
     combo_states = {}
@@ -215,7 +250,13 @@ def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[st
     matches = sum(1 for state in combo_states.values() if state == desired)
     conflicts = sum(1 for state in combo_states.values() if state not in {desired, "neutral"})
     if conflicts or matches < max(2, len(required_tfs) - 1):
-        return TradeSetupResult("SKIP: MIXED COMBO", False, mode, "combo timeframes are mixed", None, combo_states, sparklines)
+        # Shadow-backtested: MIXED COMBO with HTF trend + LTF vol burst → WR 72%, n=43.
+        # Bypass MIXED COMBO when HTF filter passes.
+        if not _htf_filter_pass(bars_by_tf):
+            return TradeSetupResult(
+                "SKIP: MIXED COMBO", False, mode,
+                "combo mixed and HTF filter failed", None, combo_states, sparklines,
+            )
 
     if _price_too_far(zone, current_price):
         return TradeSetupResult("SKIP: FAR FROM FVG", False, mode, "price is too far from FVG zone", None, combo_states, sparklines)
