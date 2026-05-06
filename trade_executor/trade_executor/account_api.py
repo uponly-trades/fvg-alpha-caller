@@ -25,6 +25,22 @@ async def _build_exchange_for_keys(api_key: str, api_secret: str):
     return build_exchange(api_key, api_secret, proxy_url=settings.BINANCE_PROXY_URL)
 
 
+async def _validate_futures_keys(ex: Any) -> None:
+    """Validate keys via futures-only endpoint — avoids spot /sapi/ calls."""
+    await ex.fapiPrivateV2GetBalance()
+
+
+async def _fetch_usdt_balance(ex: Any) -> dict[str, float]:
+    """Fetch USDT balance from futures endpoint only."""
+    items = await ex.fapiPrivateV2GetBalance()
+    for item in items:
+        if item.get("asset") == "USDT":
+            total = float(item.get("balance", 0))
+            free = float(item.get("availableBalance", 0))
+            return {"free": free, "used": max(total - free, 0.0), "total": total}
+    return {"free": 0.0, "used": 0.0, "total": 0.0}
+
+
 async def save_user_keys(
     pool: asyncpg.Pool,
     *,
@@ -34,7 +50,7 @@ async def save_user_keys(
 ) -> dict[str, str]:
     ex = await _build_exchange_for_keys(api_key, api_secret)
     try:
-        await ex.fetch_balance()
+        await _validate_futures_keys(ex)
     finally:
         await _close_exchange(ex)
 
@@ -109,14 +125,9 @@ async def account_summary(pool: asyncpg.Pool, *, telegram_id: int) -> dict[str, 
     api_secret = decrypt(bytes(row["binance_api_secret_enc"]), _master_key())
     ex = await _build_exchange_for_keys(api_key, api_secret)
     try:
-        balance = await ex.fetch_balance()
+        bal = await _fetch_usdt_balance(ex)
     finally:
         await _close_exchange(ex)
 
-    usdt = balance.get("USDT", {}) if isinstance(balance, dict) else {}
-    result["balance"] = {
-        "free": float(usdt.get("free") or 0),
-        "used": float(usdt.get("used") or 0),
-        "total": float(usdt.get("total") or 0),
-    }
+    result["balance"] = bal
     return result
