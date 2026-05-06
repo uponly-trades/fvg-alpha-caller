@@ -10,6 +10,8 @@ HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct (LONG)
 LTF_VOL_MIN   = 2.0   # 15m_vol_z (LONG)
 LTF_VOL_SPIKE_RATIO_MIN = 1.5  # last closed 15m volume vs prior 20 closed candles
 VOL_Z_MAX = 20.0  # guard against partial/misaligned candle spikes
+LONG_RSI7_MAX = 75.0   # block long entries with 15m RSI7 overbought (>75 → mostly losses)
+LONG_E20_4H_MIN = 4.0  # require strong 4h momentum (1.35-1.77 weak zone removed)
 SHORT_E20D_1H_MAX = 0.0   # 1h_ema20_dist_pct must be < 0 (downtrend)
 SHORT_BB15_MAX    = 0.4   # 15m_bb_pos must be < 0.4 (lower band)
 
@@ -30,7 +32,12 @@ def _long_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
 
 
 def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
-    """v2 LONG: stable 15m volume spike AND (4h_ema20 >= 4 OR 1.35-1.77)."""
+    """
+    v2 LONG filter gates (data-driven, n=48 trades):
+      1. 15m RSI7 <= 75 — overbought entries lose 88% of the time
+      2. 4h_ema20_dist_pct >= 4.0 — strong HTF momentum only (1.35-1.77 zone: 3:1 loss ratio)
+      3. 15m vol_spike_ratio >= 1.5x stable (not partial candle noise)
+    """
     bars_4h  = bars_by_tf.get("4h",  [])
     bars_15m = bars_by_tf.get("15m", [])
     if len(bars_4h) < 30 or len(bars_15m) < 30:
@@ -40,19 +47,26 @@ def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
     e20 = f4.get("ema20_dist_pct")
     vol_spike = f15.get("vol_spike_ratio")
     vol_z = f15.get("vol_z")
+    rsi7 = f15.get("rsi7")
+    # Gate 1: RSI7 overbought — data shows RSI7>75 → ~87.5% loss rate
+    if rsi7 is not None and rsi7 > LONG_RSI7_MAX:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_rsi7={rsi7:.1f}>{LONG_RSI7_MAX:g} overbought"}
+    # Gate 2: volume spike quality
     if vol_spike is None or vol_spike < LTF_VOL_SPIKE_RATIO_MIN:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"15m_vol_spike<{LTF_VOL_SPIKE_RATIO_MIN:g}x (got {vol_spike})"}
     if vol_z is not None and vol_z > VOL_Z_MAX:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"15m_vol_z>{VOL_Z_MAX:g} unstable (got {vol_z})"}
+    # Gate 3: 4h momentum must be strong
     if e20 is None:
         return {"valid": False, "status": "v2 SKIP", "reason": "4h_ema20 missing"}
-    if e20 >= 4.0 or (1.35 <= e20 <= 1.77):
-        return {"valid": True, "status": "v2 LONG VALID",
-                "reason": f"4h_ema20={e20:.2f} | 15m_vol_spike={vol_spike:.2f}x"}
-    return {"valid": False, "status": "v2 SKIP",
-            "reason": f"4h_ema20={e20:.2f} not in [4+ or 1.35-1.77]"}
+    if e20 < LONG_E20_4H_MIN:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"4h_ema20={e20:.2f}<{LONG_E20_4H_MIN:g} weak HTF momentum"}
+    return {"valid": True, "status": "v2 LONG VALID",
+            "reason": f"rsi7={rsi7:.1f} 4h_ema20={e20:.2f} 15m_vol_spike={vol_spike:.2f}x"}
 
 
 def _v2_short_decision(bars_by_tf: Dict[str, List]) -> Dict:
