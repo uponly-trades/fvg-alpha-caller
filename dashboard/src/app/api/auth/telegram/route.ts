@@ -4,6 +4,8 @@ import { createSession, SESSION_COOKIE } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { env } from "@/lib/env";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const params = Object.fromEntries(req.nextUrl.searchParams.entries()) as TgPayload;
   if (!verifyTelegramAuth(params, env.botToken)) {

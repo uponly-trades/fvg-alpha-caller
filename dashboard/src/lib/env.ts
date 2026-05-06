@@ -4,10 +4,22 @@ function need(k: string): string {
   return v;
 }
 
+// Lazy getters so Next.js build-time page-data collection
+// doesn't fail when env is unset (envs are only set at runtime).
 export const env = {
-  databaseUrl: need("DATABASE_URL"),
-  botToken: need("TELEGRAM_BOT_TOKEN"),
-  botUsername: need("NEXT_PUBLIC_BOT_USERNAME"),
-  internalToken: need("INTERNAL_TOKEN"),
-  executorUrl: need("EXECUTOR_URL"),
+  get databaseUrl() {
+    return need("DATABASE_URL");
+  },
+  get botToken() {
+    return need("TELEGRAM_BOT_TOKEN");
+  },
+  get botUsername() {
+    return need("NEXT_PUBLIC_BOT_USERNAME");
+  },
+  get internalToken() {
+    return need("INTERNAL_TOKEN");
+  },
+  get executorUrl() {
+    return need("EXECUTOR_URL");
+  },
 };
