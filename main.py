@@ -8,7 +8,13 @@ from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
-from trade_combo import evaluate_trade_setup, build_trade_from_kronos, v2_decision
+from trade_combo import (
+    evaluate_trade_setup,
+    build_trade_from_kronos,
+    v2_decision,
+    build_mitigated_breakout,
+    build_mitigated_reversal,
+)
 from feature_extractor import extract_multi_tf, btc_regime
 import kronos_client
 from websocket_client import BinanceKlineWS
@@ -158,6 +164,16 @@ class AlphaCaller:
         mitigated = self.tracker.check_mitigation(symbol, tf, bars)
         for zone in mitigated:
             send_mitigated_alert(zone)
+            # Log dual shadow hypotheses (continuation vs reversal) for WR study.
+            price = bars[-1].close
+            breakout = build_mitigated_breakout(zone, price)
+            reversal = build_mitigated_reversal(zone, price)
+            self.sim_store.add_kronos_decision(zone, breakout, price, "mitigated_breakout")
+            self.sim_store.add_kronos_decision(zone, reversal, price, "mitigated_reversal")
+            # Features attach to the breakout decision (one snapshot per mitigation —
+            # state is identical across both hypotheses; FK requires an existing
+            # kronos_decisions.id, so reuse event_type='mitigated_breakout').
+            self._log_features(zone, price, "mitigated_breakout")
 
         # Check approaching + touch on strong zones
         interactions = self.tracker.check_interaction(symbol, tf, bars)

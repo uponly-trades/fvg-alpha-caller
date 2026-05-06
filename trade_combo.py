@@ -353,3 +353,135 @@ def evaluate_trade_setup(zone, current_price: float, bars_by_tf: Dict[str, List]
     if mode is None:
         return TradeSetupResult("SKIP: MISSING DATA", False, None, "unsupported timeframe", None, {}, {})
     return evaluate_for_mode(zone, mode, current_price, bars_by_tf)
+
+
+# ---------------------------------------------------------------------------
+# Mitigated FVG shadow builders.
+#
+# A mitigation = price has fully traversed the FVG zone:
+#   bullish FVG mitigated = price closed BELOW zone.bottom (support broke).
+#   bearish FVG mitigated = price closed ABOVE zone.top    (resistance broke).
+#
+# Two competing hypotheses are logged per mitigation event:
+#   BREAKOUT (continuation): bullish->SHORT, bearish->LONG.
+#     SL anchored on the OPPOSITE side of the zone from breakout direction
+#     (zone.top + buffer for short, zone.bottom - buffer for long).
+#   REVERSAL (mean revert): bullish->LONG, bearish->SHORT.
+#     SL anchored just past current_price (overshoot side); allow more room
+#     because the bounce takes time. TP back into the FVG.
+#
+# Both use RR = 1:2 (tp1 = 1R, tp2 = 2R) for simulator parity.
+# ---------------------------------------------------------------------------
+
+_MITIG_REVERSAL_BUFFER_ATR = 0.5  # wider than entry-style 0.1; bounce needs room
+_MITIG_REVERSAL_BUFFER_FRAC = 0.3  # fallback if no atr
+
+
+def _mitig_buffer(zone) -> float:
+    """Standard buffer used for breakout SL (same as entry-style trades)."""
+    return _risk_buffer(zone)
+
+
+def _mitig_reversal_buffer(zone) -> float:
+    zone_size = abs(float(zone.top) - float(zone.bottom))
+    atr = float(getattr(zone, "atr", 0.0) or 0.0)
+    if atr > 0:
+        return atr * _MITIG_REVERSAL_BUFFER_ATR
+    return zone_size * _MITIG_REVERSAL_BUFFER_FRAC
+
+
+def build_mitigated_breakout(zone, current_price: float) -> TradeSetupResult:
+    """
+    Continuation trade after FVG mitigation. Direction OPPOSITE of zone.
+    Bullish mitigated -> SHORT (broke support). SL above zone.top.
+    Bearish mitigated -> LONG  (broke resistance). SL below zone.bottom.
+    """
+    entry = float(current_price)
+    buffer = _mitig_buffer(zone)
+    zone_dir = int(zone.direction)
+
+    if zone_dir == 1:
+        # Bullish FVG mitigated -> SHORT continuation
+        sl = float(zone.top) + buffer
+        risk = sl - entry
+        if risk <= 0:
+            return TradeSetupResult(
+                "SKIP: MITIG BREAKOUT INVALID RISK", False, None,
+                "breakout short SL not above entry", None, {}, {},
+                source="mitigated_breakout",
+            )
+        trade = TradeLevels(
+            direction="short", entry=entry, sl=sl,
+            tp1=entry - risk, tp2=entry - risk * 2, rr=2.0,
+        )
+        reason = "bullish FVG mitigated -> short continuation"
+    else:
+        # Bearish FVG mitigated -> LONG continuation
+        sl = float(zone.bottom) - buffer
+        risk = entry - sl
+        if risk <= 0:
+            return TradeSetupResult(
+                "SKIP: MITIG BREAKOUT INVALID RISK", False, None,
+                "breakout long SL not below entry", None, {}, {},
+                source="mitigated_breakout",
+            )
+        trade = TradeLevels(
+            direction="long", entry=entry, sl=sl,
+            tp1=entry + risk, tp2=entry + risk * 2, rr=2.0,
+        )
+        reason = "bearish FVG mitigated -> long continuation"
+
+    return TradeSetupResult(
+        "MITIG BREAKOUT VALID", True, None, reason, trade, {}, {},
+        source="mitigated_breakout",
+    )
+
+
+def build_mitigated_reversal(zone, current_price: float) -> TradeSetupResult:
+    """
+    Mean-revert trade after FVG mitigation. Direction SAME as zone.
+    Bullish mitigated -> LONG (price overshot down, expect bounce back up).
+        SL = current_price - reversal_buffer (give bounce room).
+    Bearish mitigated -> SHORT (price overshot up, expect rejection).
+        SL = current_price + reversal_buffer.
+    RR fixed 1:2.
+    """
+    entry = float(current_price)
+    buffer = _mitig_reversal_buffer(zone)
+    zone_dir = int(zone.direction)
+
+    if zone_dir == 1:
+        # Bullish FVG mitigated -> LONG reversal
+        sl = entry - buffer
+        risk = entry - sl
+        if risk <= 0:
+            return TradeSetupResult(
+                "SKIP: MITIG REVERSAL INVALID RISK", False, None,
+                "reversal long buffer is zero", None, {}, {},
+                source="mitigated_reversal",
+            )
+        trade = TradeLevels(
+            direction="long", entry=entry, sl=sl,
+            tp1=entry + risk, tp2=entry + risk * 2, rr=2.0,
+        )
+        reason = "bullish FVG mitigated -> long reversal"
+    else:
+        # Bearish FVG mitigated -> SHORT reversal
+        sl = entry + buffer
+        risk = sl - entry
+        if risk <= 0:
+            return TradeSetupResult(
+                "SKIP: MITIG REVERSAL INVALID RISK", False, None,
+                "reversal short buffer is zero", None, {}, {},
+                source="mitigated_reversal",
+            )
+        trade = TradeLevels(
+            direction="short", entry=entry, sl=sl,
+            tp1=entry - risk, tp2=entry - risk * 2, rr=2.0,
+        )
+        reason = "bearish FVG mitigated -> short reversal"
+
+    return TradeSetupResult(
+        "MITIG REVERSAL VALID", True, None, reason, trade, {}, {},
+        source="mitigated_reversal",
+    )
