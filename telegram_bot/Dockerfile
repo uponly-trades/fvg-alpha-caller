@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY telegram_bot/ ./telegram_bot/
+COPY telegram_bot/ ./
 
 ENV PYTHONUNBUFFERED=1
 
