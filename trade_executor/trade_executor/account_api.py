@@ -83,7 +83,7 @@ async def save_user_keys(
         await conn.execute(
             """
             INSERT INTO user_audit_log (user_id, action, payload, created_at)
-            VALUES ($1, 'keys_rotated_telegram', jsonb_build_object('tail', $2), $3)
+            VALUES ($1, 'keys_rotated_telegram', jsonb_build_object('tail', $2::text), $3)
             """,
             row["id"],
             tail,
