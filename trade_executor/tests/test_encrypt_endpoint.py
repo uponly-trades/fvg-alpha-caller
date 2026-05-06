@@ -11,6 +11,14 @@ def env(monkeypatch):
     monkeypatch.setenv("MASTER_ENCRYPTION_KEY", base64.b64encode(os.urandom(32)).decode())
     monkeypatch.setenv("INTERNAL_TOKEN", "secret-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x")
+    # Override cached settings: pydantic_settings reads env once at import time
+    from trade_executor import config as _cfg
+    monkeypatch.setattr(_cfg.settings, "INTERNAL_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        _cfg.settings,
+        "MASTER_ENCRYPTION_KEY",
+        os.environ["MASTER_ENCRYPTION_KEY"],
+    )
 
 
 @pytest.mark.asyncio
