@@ -9,6 +9,7 @@ from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
 from trade_combo import evaluate_trade_setup, build_trade_from_kronos
+from feature_extractor import extract_multi_tf, btc_regime
 import kronos_client
 from websocket_client import BinanceKlineWS
 from telegram import (
@@ -46,6 +47,20 @@ class AlphaCaller:
 
     def _evaluate_setup(self, zone, current_price: float):
         return evaluate_trade_setup(zone, current_price, self._timeframe_bars(zone.symbol))
+
+    def _btc_bars_by_tf(self) -> dict:
+        return self._timeframe_bars("BTCUSDT")
+
+    def _log_features(self, zone, current_price: float, event_type: str) -> None:
+        """Read-only ML logger: snapshot all-TF indicator state at decision time."""
+        try:
+            decision_id = self.sim_store.make_decision_id(zone, current_price, event_type)
+            bars_by_tf = self._timeframe_bars(zone.symbol)
+            features = extract_multi_tf(bars_by_tf, symbol=zone.symbol, with_ls_ratio=False)
+            btc_ctx = btc_regime(self._btc_bars_by_tf())
+            self.sim_store.add_signal_features(decision_id, zone, features, btc_ctx)
+        except Exception as e:
+            logger.warning("log_features failed (%s %s): %s", zone.symbol, zone.tf, e)
 
     async def _evaluate_setup_async(self, zone, current_price: float):
         """Try Kronos first; fall back to StochRSI combo on failure."""
@@ -92,6 +107,7 @@ class AlphaCaller:
         setup = await self._evaluate_setup_async(zone, current_price)
         logger.info("  kronos/combo status=%s valid=%s", setup.status, setup.valid)
         self.sim_store.add_kronos_decision(zone, setup, current_price, "new_fvg")
+        self._log_features(zone, current_price, "new_fvg")
         if setup.valid:
             self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
@@ -144,10 +160,12 @@ class AlphaCaller:
             )
             if event["type"] == "approaching":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
+                self._log_features(zone, price, "approach")
                 send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
             elif event["type"] == "touch":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
+                self._log_features(zone, price, "touch")
                 send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                 logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
 

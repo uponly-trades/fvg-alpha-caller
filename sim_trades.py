@@ -83,6 +83,23 @@ CREATE TABLE IF NOT EXISTS sent_recaps (
     key TEXT PRIMARY KEY,
     sent_at BIGINT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS signal_features (
+    decision_id  TEXT PRIMARY KEY REFERENCES kronos_decisions(id) ON DELETE CASCADE,
+    fvg_id       TEXT NOT NULL,
+    created_at   BIGINT NOT NULL,
+    date         DATE NOT NULL,
+    symbol       TEXT NOT NULL,
+    tf           TEXT NOT NULL,
+    features     JSONB NOT NULL,        -- per-TF indicator snapshot
+    btc_context  JSONB,                 -- BTC regime at decision time
+    outcome      TEXT,                  -- backfilled later: 'win'|'loss'|null
+    pnl_pct      DOUBLE PRECISION
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_features_date ON signal_features(date);
+CREATE INDEX IF NOT EXISTS idx_signal_features_symbol ON signal_features(symbol);
+CREATE INDEX IF NOT EXISTS idx_signal_features_outcome ON signal_features(outcome);
 """
 
 
@@ -187,10 +204,15 @@ class SimTradeStore:
             logger.error("add_sim_trade failed: %s", e)
             return False
 
+    @staticmethod
+    def make_decision_id(zone, current_price: float, event_type: str) -> str:
+        fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
+        return f"{fvg_id}-{event_type}-{int(zone.born_time)}-{int(current_price * 1000)}"
+
     def add_kronos_decision(self, zone, setup, current_price: float, event_type: str) -> bool:
         """Log every Kronos/combo decision (valid or skip) for ML training."""
         fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
-        decision_id = f"{fvg_id}-{event_type}-{int(zone.born_time)}-{int(current_price * 1000)}"
+        decision_id = self.make_decision_id(zone, current_price, event_type)
         now = datetime.now(timezone.utc)
         trade = getattr(setup, "trade", None)
         kronos_raw = getattr(setup, "kronos_raw", None)
@@ -231,6 +253,41 @@ class SimTradeStore:
             return True
         except Exception as e:
             logger.error("add_kronos_decision failed: %s", e)
+            return False
+
+    def add_signal_features(
+        self,
+        decision_id: str,
+        zone,
+        features: Dict,
+        btc_context: Optional[Dict] = None,
+    ) -> bool:
+        """Persist per-TF feature snapshot for a decision (read-only ML logger)."""
+        fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
+        now = datetime.now(timezone.utc)
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT decision_id FROM signal_features WHERE decision_id = %s", (decision_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO signal_features
+                       (decision_id, fvg_id, created_at, date, symbol, tf, features, btc_context)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        decision_id,
+                        fvg_id,
+                        int(zone.born_time),
+                        now.date(),
+                        zone.symbol,
+                        zone.tf,
+                        json.dumps(features),
+                        json.dumps(btc_context) if btc_context else None,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_signal_features failed: %s", e)
             return False
 
     # Legacy compat for existing main.py and tests
