@@ -119,6 +119,19 @@ def volume_zscore(volumes: List[float], length: int = 20) -> Optional[float]:
     return round(float(z), 4)
 
 
+def volume_spike(volumes: List[float], length: int = 20) -> tuple[Optional[float], Optional[float]]:
+    """Return (ratio, pct) for last closed volume versus prior `length` closed candles."""
+    if len(volumes) < length + 1:
+        return None, None
+    window = volumes[-(length + 1):-1]
+    mean = sum(window) / length
+    if mean <= 0:
+        return None, None
+    ratio = volumes[-1] / mean
+    pct = (ratio - 1.0) * 100
+    return round(float(ratio), 4), round(float(pct), 2)
+
+
 def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = False) -> Dict:
     """Extract feature vector for one TF. `bars` is list of Bar dataclasses with OHLCV."""
     if not bars or len(bars) < 30:
@@ -140,6 +153,7 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
     bb_pos = bollinger_position(closes)
     atr = atr_value(highs, lows, closes)
     vol_z = volume_zscore(vols)
+    vol_spike_ratio, vol_spike_pct = volume_spike(vols)
     vol_change_pct = None
     if len(vols) >= 2 and vols[-2] > 0:
         vol_change_pct = round((vols[-1] - vols[-2]) / vols[-2] * 100, 2)
@@ -175,6 +189,8 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
         "bb_pos": bb_pos,
         "vol_z": vol_z,
         "vol_change_pct": vol_change_pct,
+        "vol_spike_ratio": vol_spike_ratio,
+        "vol_spike_pct": vol_spike_pct,
     }
 
     if with_ls_ratio and symbol:

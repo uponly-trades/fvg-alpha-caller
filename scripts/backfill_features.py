@@ -40,7 +40,7 @@ TF_MS = {"15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "2h": 7_200_000, "4h
 def fetch_klines_at(symbol: str, tf: str, end_ms: int, limit: int = 300) -> list:
     """Fetch up to `limit` closed klines ending at end_ms (inclusive of decision time)."""
     url = f"{BINANCE_BASE}/fapi/v1/klines"
-    params = {"symbol": symbol, "interval": tf, "endTime": int(end_ms), "limit": limit}
+    params = {"symbol": symbol, "interval": tf, "endTime": int(end_ms) - 1, "limit": limit}
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()

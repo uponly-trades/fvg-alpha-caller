@@ -8,6 +8,8 @@ from feature_extractor import extract_tf_features
 
 HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct (LONG)
 LTF_VOL_MIN   = 2.0   # 15m_vol_z (LONG)
+LTF_VOL_SPIKE_RATIO_MIN = 1.5  # last closed 15m volume vs prior 20 closed candles
+VOL_Z_MAX = 20.0  # guard against partial/misaligned candle spikes
 SHORT_E20D_1H_MAX = 0.0   # 1h_ema20_dist_pct must be < 0 (downtrend)
 SHORT_BB15_MAX    = 0.4   # 15m_bb_pos must be < 0.4 (lower band)
 
@@ -28,7 +30,7 @@ def _long_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
 
 
 def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
-    """v2 LONG: vol_change_15m >= 50 AND (4h_ema20 >= 4 OR 1.35-1.77)."""
+    """v2 LONG: stable 15m volume spike AND (4h_ema20 >= 4 OR 1.35-1.77)."""
     bars_4h  = bars_by_tf.get("4h",  [])
     bars_15m = bars_by_tf.get("15m", [])
     if len(bars_4h) < 30 or len(bars_15m) < 30:
@@ -36,21 +38,25 @@ def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
     f4 = extract_tf_features(bars_4h, "4h")
     f15 = extract_tf_features(bars_15m, "15m")
     e20 = f4.get("ema20_dist_pct")
-    vc = f15.get("vol_change_pct")
-    if vc is None or vc < 50:
+    vol_spike = f15.get("vol_spike_ratio")
+    vol_z = f15.get("vol_z")
+    if vol_spike is None or vol_spike < LTF_VOL_SPIKE_RATIO_MIN:
         return {"valid": False, "status": "v2 SKIP",
-                "reason": f"15m_vol_change<50 (got {vc})"}
+                "reason": f"15m_vol_spike<{LTF_VOL_SPIKE_RATIO_MIN:g}x (got {vol_spike})"}
+    if vol_z is not None and vol_z > VOL_Z_MAX:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_vol_z>{VOL_Z_MAX:g} unstable (got {vol_z})"}
     if e20 is None:
         return {"valid": False, "status": "v2 SKIP", "reason": "4h_ema20 missing"}
     if e20 >= 4.0 or (1.35 <= e20 <= 1.77):
         return {"valid": True, "status": "v2 LONG VALID",
-                "reason": f"4h_ema20={e20:.2f} | 15m_vc={vc:.0f}"}
+                "reason": f"4h_ema20={e20:.2f} | 15m_vol_spike={vol_spike:.2f}x"}
     return {"valid": False, "status": "v2 SKIP",
             "reason": f"4h_ema20={e20:.2f} not in [4+ or 1.35-1.77]"}
 
 
 def _v2_short_decision(bars_by_tf: Dict[str, List]) -> Dict:
-    """v2 SHORT: 1h_ema20<0 AND vol_change_15m>=100 AND oi_change_15m>=0."""
+    """v2 SHORT: 1h_ema20<0 AND stable 15m volume spike AND oi_change_15m>=0."""
     bars_1h  = bars_by_tf.get("1h",  [])
     bars_15m = bars_by_tf.get("15m", [])
     if len(bars_1h) < 30 or len(bars_15m) < 30:
@@ -58,21 +64,25 @@ def _v2_short_decision(bars_by_tf: Dict[str, List]) -> Dict:
     f1 = extract_tf_features(bars_1h, "1h")
     f15 = extract_tf_features(bars_15m, "15m", with_ls_ratio=False)
     e20 = f1.get("ema20_dist_pct")
-    vc = f15.get("vol_change_pct")
+    vol_spike = f15.get("vol_spike_ratio")
+    vol_z = f15.get("vol_z")
     oi = f15.get("oi_change_pct")
-    if e20 is None or vc is None:
-        return {"valid": False, "status": "v2 SKIP", "reason": "missing 1h_ema20 or vol_change"}
+    if e20 is None or vol_spike is None:
+        return {"valid": False, "status": "v2 SKIP", "reason": "missing 1h_ema20 or vol_spike"}
     if e20 >= 0:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"1h_ema20={e20:.2f} not bearish"}
-    if vc < 100:
+    if vol_spike < LTF_VOL_SPIKE_RATIO_MIN:
         return {"valid": False, "status": "v2 SKIP",
-                "reason": f"15m_vol_change={vc:.0f}<100"}
+                "reason": f"15m_vol_spike={vol_spike:.2f}x<{LTF_VOL_SPIKE_RATIO_MIN:g}x"}
+    if vol_z is not None and vol_z > VOL_Z_MAX:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_vol_z>{VOL_Z_MAX:g} unstable (got {vol_z})"}
     if oi is None or oi < 0:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"15m_oi_change={oi} <0 or missing"}
     return {"valid": True, "status": "v2 SHORT VALID",
-            "reason": f"1h_ema20={e20:.2f} vc={vc:.0f} oi={oi:.2f}"}
+            "reason": f"1h_ema20={e20:.2f} vol_spike={vol_spike:.2f}x oi={oi:.2f}"}
 
 
 def v2_decision(zone, bars_by_tf: Dict[str, List]) -> Dict:

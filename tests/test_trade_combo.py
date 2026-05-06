@@ -123,6 +123,7 @@ def test_bearish_fvg_with_aligned_combo_builds_short_risk_plan(monkeypatch):
         zone(tf="1h", direction=-1, top=101.0, bottom=99.0, atr=1.0),
         current_price=100.0,
         bars_by_tf={
+            "15m": overbought_bars(),
             "30m": overbought_bars(),
             "1h": overbought_bars(),
             "2h": overbought_bars(),
