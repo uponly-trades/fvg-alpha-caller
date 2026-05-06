@@ -46,6 +46,31 @@ def _confidence_label(score: int) -> str:
     return "❌ Low"
 
 
+def _oi_vol_lines(zone, timeframe_bars: dict) -> List[str]:
+    """OI/vol_change_15m context. Compute live from 15m bars."""
+    try:
+        from feature_extractor import extract_tf_features
+    except ImportError:
+        return []
+    bars = timeframe_bars.get("15m", [])
+    if len(bars) < 30:
+        return []
+    try:
+        f = extract_tf_features(bars, "15m", symbol=zone.symbol, with_ls_ratio=True)
+    except Exception:
+        return []
+    vc = f.get("vol_change_pct")
+    oi = f.get("oi_change_pct")
+    out = []
+    if vc is not None:
+        emoji = "🔥" if vc >= 100 else "📈" if vc >= 50 else "↔️"
+        out.append(f"Vol Δ : {emoji} {vc:+.1f}%  (15m)")
+    if oi is not None:
+        emoji = "📈" if oi > 0 else "📉" if oi < 0 else "↔️"
+        out.append(f"OI Δ  : {emoji} {oi:+.2f}%  (15m)")
+    return out
+
+
 def _stoch_state_lines(timeframe_bars: dict) -> List[str]:
     """StochRSI state per TF — oversold/overbought/ranging with K value."""
     try:
@@ -137,6 +162,19 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
         lines.append(rsi_str)
     if trade_setup is not None and trade_setup.trade is not None:
         lines.append(f"Signal: {trade_setup.reason}")
+
+    # OI / vol_change context (15m) — read from features cached on zone if present
+    ctx_lines = _oi_vol_lines(zone, timeframe_bars or {})
+    if ctx_lines:
+        lines.extend(ctx_lines)
+
+    # v1 vs v2 shadow filter compare
+    if trade_setup is not None:
+        v1_icon = "✅" if trade_setup.valid else "⚠️"
+        v2 = getattr(trade_setup, "v2_decision", None)
+        v2_icon = "✅" if (v2 and v2.get("valid")) else "⚠️"
+        v2_reason = v2.get("reason", "—") if v2 else "—"
+        lines.append(f"Filter: v1 {v1_icon} | v2 {v2_icon} ({v2_reason})")
 
     stoch_lines = _stoch_state_lines(timeframe_bars or {})
     if stoch_lines:

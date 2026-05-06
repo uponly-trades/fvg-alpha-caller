@@ -27,6 +27,61 @@ def _long_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
     return e20d >= HTF_TREND_MIN and vz >= LTF_VOL_MIN
 
 
+def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
+    """v2 LONG: vol_change_15m >= 50 AND (4h_ema20 >= 4 OR 1.35-1.77)."""
+    bars_4h  = bars_by_tf.get("4h",  [])
+    bars_15m = bars_by_tf.get("15m", [])
+    if len(bars_4h) < 30 or len(bars_15m) < 30:
+        return {"valid": False, "status": "v2 SKIP", "reason": "insufficient bars"}
+    f4 = extract_tf_features(bars_4h, "4h")
+    f15 = extract_tf_features(bars_15m, "15m")
+    e20 = f4.get("ema20_dist_pct")
+    vc = f15.get("vol_change_pct")
+    if vc is None or vc < 50:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_vol_change<50 (got {vc})"}
+    if e20 is None:
+        return {"valid": False, "status": "v2 SKIP", "reason": "4h_ema20 missing"}
+    if e20 >= 4.0 or (1.35 <= e20 <= 1.77):
+        return {"valid": True, "status": "v2 LONG VALID",
+                "reason": f"4h_ema20={e20:.2f} | 15m_vc={vc:.0f}"}
+    return {"valid": False, "status": "v2 SKIP",
+            "reason": f"4h_ema20={e20:.2f} not in [4+ or 1.35-1.77]"}
+
+
+def _v2_short_decision(bars_by_tf: Dict[str, List]) -> Dict:
+    """v2 SHORT: 1h_ema20<0 AND vol_change_15m>=100 AND oi_change_15m>=0."""
+    bars_1h  = bars_by_tf.get("1h",  [])
+    bars_15m = bars_by_tf.get("15m", [])
+    if len(bars_1h) < 30 or len(bars_15m) < 30:
+        return {"valid": False, "status": "v2 SKIP", "reason": "insufficient bars"}
+    f1 = extract_tf_features(bars_1h, "1h")
+    f15 = extract_tf_features(bars_15m, "15m", with_ls_ratio=False)
+    e20 = f1.get("ema20_dist_pct")
+    vc = f15.get("vol_change_pct")
+    oi = f15.get("oi_change_pct")
+    if e20 is None or vc is None:
+        return {"valid": False, "status": "v2 SKIP", "reason": "missing 1h_ema20 or vol_change"}
+    if e20 >= 0:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"1h_ema20={e20:.2f} not bearish"}
+    if vc < 100:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_vol_change={vc:.0f}<100"}
+    if oi is None or oi < 0:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"15m_oi_change={oi} <0 or missing"}
+    return {"valid": True, "status": "v2 SHORT VALID",
+            "reason": f"1h_ema20={e20:.2f} vc={vc:.0f} oi={oi:.2f}"}
+
+
+def v2_decision(zone, bars_by_tf: Dict[str, List]) -> Dict:
+    """Shadow v2 filter. Returns {valid, status, reason} dict for parallel logging."""
+    if int(zone.direction) == 1:
+        return _v2_long_decision(bars_by_tf)
+    return _v2_short_decision(bars_by_tf)
+
+
 def _short_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
     """Shadow-backtested SHORT filter: 1h downtrend + 15m near lower BB (WR 57% on n=14)."""
     bars_1h  = bars_by_tf.get("1h",  [])
@@ -89,6 +144,7 @@ class TradeSetupResult:
     source: str = "combo"          # "kronos" | "combo"
     kronos_raw: Optional[dict] = None  # raw Kronos response for ML logging
     predicted_bars: Optional[list] = None  # Kronos forecast candles for chart
+    v2_decision: Optional[dict] = None  # shadow v2 filter result for compare logging
 
 
 def classify_mode(tf: str) -> Optional[str]:

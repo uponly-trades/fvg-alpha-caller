@@ -8,7 +8,7 @@ from chart_generator import generate_chart
 from config import TIMEFRAMES
 from fvg_engine import FVGTracker
 from sim_trades import SimTradeStore
-from trade_combo import evaluate_trade_setup, build_trade_from_kronos
+from trade_combo import evaluate_trade_setup, build_trade_from_kronos, v2_decision
 from feature_extractor import extract_multi_tf, btc_regime
 import kronos_client
 from websocket_client import BinanceKlineWS
@@ -63,7 +63,7 @@ class AlphaCaller:
             logger.warning("log_features failed (%s %s): %s", zone.symbol, zone.tf, e)
 
     async def _evaluate_setup_async(self, zone, current_price: float):
-        """Try Kronos first; fall back to StochRSI combo on failure."""
+        """Try Kronos first; fall back to StochRSI combo on failure. Attach shadow v2 decision."""
         bars_by_tf = self._timeframe_bars(zone.symbol)
         tf_bars = bars_by_tf.get(zone.tf, [])
         ohlcv = [
@@ -85,9 +85,24 @@ class AlphaCaller:
             kronos_setup = build_trade_from_kronos(kronos, int(zone.direction))
             # Bearish FVG: combo path applies reversal filter (Kronos has no bar-context).
             if int(zone.direction) != 1 and kronos_setup.status == "SKIP: SHORT VIA COMBO":
-                return evaluate_trade_setup(zone, current_price, bars_by_tf)
-            return kronos_setup
-        return evaluate_trade_setup(zone, current_price, bars_by_tf)
+                setup = evaluate_trade_setup(zone, current_price, bars_by_tf)
+            else:
+                setup = kronos_setup
+        else:
+            setup = evaluate_trade_setup(zone, current_price, bars_by_tf)
+
+        # Shadow v2 filter — log parallel decision for compare, no impact on trade
+        try:
+            v2 = v2_decision(zone, bars_by_tf)
+        except Exception as e:
+            logger.warning("v2_decision failed: %s", e)
+            v2 = None
+        return setup.__class__(
+            status=setup.status, valid=setup.valid, mode=setup.mode, reason=setup.reason,
+            trade=setup.trade, combo_states=setup.combo_states, sparklines=setup.sparklines,
+            source=setup.source, kronos_raw=setup.kronos_raw,
+            predicted_bars=setup.predicted_bars, v2_decision=v2,
+        )
 
     def _save_chart_png(self, zone, chart_png: bytes) -> str:
         """Persist chart PNG to disk, return path string."""
@@ -165,13 +180,19 @@ class AlphaCaller:
             if event["type"] == "approaching":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
                 self._log_features(zone, price, "approach")
-                send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
-                logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
+                if trade_setup.valid:
+                    send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
+                    logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
+                else:
+                    logger.info("Approach SKIP %s %s | %s", symbol, tf, trade_setup.status)
             elif event["type"] == "touch":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
                 self._log_features(zone, price, "touch")
-                send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
-                logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
+                if trade_setup.valid:
+                    send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
+                    logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
+                else:
+                    logger.info("Touch SKIP %s %s | %s", symbol, tf, trade_setup.status)
 
         # Check new FVG
         new_zone = self.tracker.check_new_fvg(symbol, tf)
@@ -196,11 +217,14 @@ class AlphaCaller:
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
             await self._store_fvg_all_modes(new_zone, chart_path, price)
 
-            send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
-            logger.info(
-                "New FVG alert %s %s | strength=%d rsi=%s",
-                symbol, tf, new_zone.main_strength, new_zone.rsi,
-            )
+            if trade_setup.valid:
+                send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
+                logger.info(
+                    "New FVG alert %s %s | strength=%d rsi=%s",
+                    symbol, tf, new_zone.main_strength, new_zone.rsi,
+                )
+            else:
+                logger.info("New FVG SKIP %s %s | %s", symbol, tf, trade_setup.status)
 
     async def run(self):
         logger.info(

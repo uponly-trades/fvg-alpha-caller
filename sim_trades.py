@@ -72,8 +72,16 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
     tp1          DOUBLE PRECISION,
     tp2          DOUBLE PRECISION,
     kronos_raw   JSONB,                  -- full Kronos response, null if combo fallback
-    trade_id     TEXT                    -- FK to sim_trades.id, null if no trade taken
+    trade_id     TEXT,                   -- FK to sim_trades.id, null if no trade taken
+    v2_valid     BOOLEAN,                -- shadow filter v2 decision (compare vs v1)
+    v2_status    TEXT,                   -- v2 status string
+    v2_reason    TEXT                    -- v2 skip/take reason
 );
+
+ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_valid  BOOLEAN;
+ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_status TEXT;
+ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_kronos_decisions_v2_valid ON kronos_decisions(v2_valid);
 
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_date ON kronos_decisions(date);
@@ -221,12 +229,14 @@ class SimTradeStore:
                 cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (decision_id,))
                 if cur.fetchone():
                     return False
+                v2 = getattr(setup, "v2_decision", None)
                 cur.execute(
                     """INSERT INTO kronos_decisions
                        (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
                         current_price, source, status, valid, mode, reason,
-                        direction, entry, sl, tp1, tp2, kronos_raw)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        direction, entry, sl, tp1, tp2, kronos_raw,
+                        v2_valid, v2_status, v2_reason)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (
                         decision_id,
                         fvg_id,
@@ -248,6 +258,9 @@ class SimTradeStore:
                         float(trade.tp1) if trade else None,
                         float(trade.tp2) if trade else None,
                         json.dumps(kronos_raw) if kronos_raw else None,
+                        bool(v2["valid"]) if v2 else None,
+                        v2["status"] if v2 else None,
+                        v2["reason"] if v2 else None,
                     ),
                 )
             return True
