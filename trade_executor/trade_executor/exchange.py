@@ -13,6 +13,7 @@ def build_exchange(api_key: str, api_secret: str, *, proxy_url: str | None) -> c
         "secret": api_secret,
         "options": {"defaultType": "future"},
         "enableRateLimit": True,
+        "timeout": 30000,  # 30s — SOCKS5 proxy adds latency
     }
     ex = ccxt.binanceusdm(options)
     if proxy_url:
