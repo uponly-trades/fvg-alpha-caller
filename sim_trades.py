@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
     sl           DOUBLE PRECISION,
     tp1          DOUBLE PRECISION,
     tp2          DOUBLE PRECISION,
-    kronos_raw   JSONB                   -- full Kronos response, null if combo fallback
+    kronos_raw   JSONB,                  -- full Kronos response, null if combo fallback
+    trade_id     TEXT                    -- FK to sim_trades.id, null if no trade taken
 );
 
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
@@ -174,6 +175,12 @@ class SimTradeStore:
                         float(trade.tp2),
                         setup.reason,
                     ),
+                )
+                # Link kronos_decision → sim_trade (match by fvg_id + mode + valid)
+                cur.execute(
+                    """UPDATE kronos_decisions SET trade_id = %s
+                       WHERE fvg_id = %s AND mode = %s AND valid = true AND trade_id IS NULL""",
+                    (trade_id, fvg_id, setup.mode),
                 )
             return True
         except Exception as e:
