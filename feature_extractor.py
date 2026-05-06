@@ -132,6 +132,14 @@ def volume_spike(volumes: List[float], length: int = 20) -> tuple[Optional[float
     return round(float(ratio), 4), round(float(pct), 2)
 
 
+def slope_latest(values: List[Optional[float]]) -> Optional[float]:
+    """Return latest minus previous for indicator series with possible None warm-up values."""
+    valid = [float(v) for v in values if v is not None and not np.isnan(float(v))]
+    if len(valid) < 2:
+        return None
+    return round(valid[-1] - valid[-2], 6)
+
+
 def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = False) -> Dict:
     """Extract feature vector for one TF. `bars` is list of Bar dataclasses with OHLCV."""
     if not bars or len(bars) < 30:
@@ -169,6 +177,8 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
         "close": round(last_close, 8),
         "rsi7": _last(rsi7),
         "rsi14": _last(rsi14),
+        "rsi7_slope": slope_latest(rsi7),
+        "rsi14_slope": slope_latest(rsi14),
         "stoch_k": _last(stoch_k),
         "stoch_d": _last(stoch_d),
         "kdj_k": _last(kdj_k),

@@ -46,6 +46,7 @@ def test_volume_spike_pct_uses_prior_20_closed_average_not_previous_candle():
     assert features["vol_spike_ratio"] == 0.3
 
 
+
 def test_v2_long_uses_stable_volume_spike_not_noisy_previous_candle_change():
     bars_by_tf = {
         "4h": make_bars([1000] * 30),
