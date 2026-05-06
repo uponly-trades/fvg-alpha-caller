@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
 import websockets
@@ -11,6 +13,11 @@ from config import KLINES_LIMIT, SYMBOLS, TIMEFRAMES
 from rest_client import Bar, fetch_klines
 
 logger = logging.getLogger(__name__)
+
+# Buffer cache persisted to disk so restarts skip REST warm-up
+_CACHE_PATH = Path(os.environ.get("BUFFER_CACHE_PATH", "/tmp/fvg_buffer_cache.json"))
+# Cache is stale if last bar is older than this (seconds) — 2 candles of smallest TF (15m)
+_CACHE_MAX_AGE_SEC = 30 * 60  # 30 minutes
 
 
 class BinanceKlineWS:
@@ -51,6 +58,62 @@ class BinanceKlineWS:
     def _build_url(self, streams: List[str]) -> str:
         return self.BASE_URL + "/".join(streams)
 
+    # ------------------------------------------------------------------
+    # Disk cache helpers
+    # ------------------------------------------------------------------
+
+    def _save_cache(self) -> None:
+        """Persist current buffers to disk for fast restart."""
+        try:
+            data = {}
+            for key, bars in self._buffers.items():
+                data[key] = [
+                    {
+                        "t": b.open_time, "o": b.open, "h": b.high,
+                        "l": b.low, "c": b.close, "v": b.volume,
+                    }
+                    for b in bars
+                ]
+            _CACHE_PATH.write_text(json.dumps(data))
+        except Exception as e:
+            logger.warning("Buffer cache save failed: %s", e)
+
+    def _load_cache(self) -> int:
+        """
+        Load buffers from disk cache. Returns number of keys restored.
+        Skips cache if file is missing, corrupt, or any key's last bar
+        is older than _CACHE_MAX_AGE_SEC (stale data → must REST-fetch).
+        """
+        if not _CACHE_PATH.exists():
+            return 0
+        try:
+            raw = json.loads(_CACHE_PATH.read_text())
+            now_ms = int(time.time() * 1000)
+            loaded = 0
+            for key, bar_dicts in raw.items():
+                if not bar_dicts:
+                    continue
+                last_bar_ms = bar_dicts[-1]["t"]
+                age_sec = (now_ms - last_bar_ms) / 1000
+                if age_sec > _CACHE_MAX_AGE_SEC:
+                    continue  # stale — will REST-fetch this key
+                bars = [
+                    Bar(open_time=b["t"], open=b["o"], high=b["h"],
+                        low=b["l"], close=b["c"], volume=b["v"], is_closed=True)
+                    for b in bar_dicts
+                ]
+                self._buffers[key] = bars
+                self._last_closed_time[key] = bars[-1].open_time
+                loaded += 1
+            return loaded
+        except Exception as e:
+            logger.warning("Buffer cache load failed (will REST warm-up): %s", e)
+            return 0
+
+    # ------------------------------------------------------------------
+    # Warm-up
+    # ------------------------------------------------------------------
+
     def _warmup_one(self, symbol: str, tf: str) -> None:
         key = self._make_key(symbol, tf)
         bars = fetch_klines(symbol, tf, limit=KLINES_LIMIT)
@@ -61,12 +124,25 @@ class BinanceKlineWS:
         logger.info("WS warm-up %s %s | buf=%d last_time=%s", symbol, tf, len(bars), bars[-1].open_time)
 
     async def _warmup_all(self) -> None:
-        logger.info("WS warm-up starting | symbols=%d tfs=%d", len(SYMBOLS), len(TIMEFRAMES))
+        # Try disk cache first
+        cached = self._load_cache()
+        total = len(SYMBOLS) * len(TIMEFRAMES)
+        if cached > 0:
+            logger.info("Buffer cache restored %d/%d keys — skipping REST fetch for cached symbols", cached, total)
+
+        # REST-fetch only keys missing from cache
+        fetched = 0
         for symbol in SYMBOLS:
             for tf in TIMEFRAMES:
+                key = self._make_key(symbol, tf)
+                if key in self._buffers:
+                    continue  # already loaded from cache
                 await asyncio.to_thread(self._warmup_one, symbol, tf)
                 await asyncio.sleep(0.05)
-        logger.info("WS warm-up complete | buffers=%d", len(self._buffers))
+                fetched += 1
+
+        logger.info("WS warm-up complete | cached=%d rest_fetched=%d total=%d", cached, fetched, total)
+        self._save_cache()
 
     def _bar_from_kline(self, kline: dict) -> Bar:
         return Bar(
@@ -109,6 +185,9 @@ class BinanceKlineWS:
 
             logger.info("WS bar closed %s %s @ %s | buf=%d", symbol, tf, bar.open_time, len(self._buffers[key]))
             await self.on_bar_close(symbol, tf, list(self._buffers[key]))
+
+            # Persist cache after every bar close so restarts are instant
+            self._save_cache()
         except Exception as e:
             logger.warning("WS message handling failed: %s", e)
 
