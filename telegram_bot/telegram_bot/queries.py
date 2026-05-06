@@ -100,24 +100,45 @@ async def stats(conn, *, telegram_id: int) -> dict[str, Any]:
         return {"registered": False}
     all_time = await conn.fetchrow(
         """
-        SELECT COUNT(*)::int AS closed_trades,
-               COUNT(*) FILTER (WHERE COALESCE(pnl_usdt, 0) > 0)::int AS wins,
-               COALESCE(SUM(pnl_usdt), 0)::float AS pnl_usdt
+        SELECT
+            COUNT(*)::int                                                    AS closed_trades,
+            COUNT(*) FILTER (WHERE COALESCE(pnl_usdt, 0) > 0)::int         AS wins,
+            COUNT(*) FILTER (WHERE status = 'closed_tp2')::int              AS tp2_hits,
+            COUNT(*) FILTER (WHERE status = 'closed_sl')::int               AS sl_hits,
+            COUNT(*) FILTER (WHERE status = 'closed_breakeven')::int        AS be_hits,
+            COALESCE(SUM(pnl_usdt), 0)::float                               AS pnl_usdt,
+            COALESCE(AVG(pnl_usdt) FILTER (WHERE COALESCE(pnl_usdt,0) > 0), 0)::float  AS avg_win,
+            COALESCE(AVG(pnl_usdt) FILTER (WHERE COALESCE(pnl_usdt,0) <= 0), 0)::float AS avg_loss,
+            COALESCE(MAX(pnl_usdt), 0)::float                               AS best_trade,
+            COALESCE(MIN(pnl_usdt), 0)::float                               AS worst_trade,
+            COALESCE(SUM(pnl_usdt) FILTER (WHERE COALESCE(pnl_usdt,0) > 0), 0)::float  AS gross_win,
+            COALESCE(ABS(SUM(pnl_usdt) FILTER (WHERE COALESCE(pnl_usdt,0) <= 0)), 0)::float AS gross_loss
         FROM user_trades
-        WHERE user_id=$1 AND status IN ('closed_tp2','closed_sl','closed_breakeven','manual_close')
+        WHERE user_id=$1
+          AND status IN ('closed_tp2','closed_sl','closed_breakeven','manual_close')
         """,
         row["id"],
     )
-    closed = int(all_time["closed_trades"] or 0)
-    wins = int(all_time["wins"] or 0)
+    closed   = int(all_time["closed_trades"] or 0)
+    wins     = int(all_time["wins"] or 0)
+    gw       = float(all_time["gross_win"] or 0)
+    gl       = float(all_time["gross_loss"] or 0)
     return {
-        "registered": True,
+        "registered":     True,
         "today_pnl_usdt": float(row["today_pnl_usdt"] or 0),
-        "today_pnl_pct": float(row["today_pnl_pct"] or 0),
-        "today_trades": int(row["today_trades"] or 0),
-        "today_wins": int(row["today_wins"] or 0),
-        "closed_trades": closed,
-        "wins": wins,
-        "winrate": (wins / closed * 100) if closed else 0.0,
-        "pnl_usdt": float(all_time["pnl_usdt"] or 0),
+        "today_pnl_pct":  float(row["today_pnl_pct"] or 0),
+        "today_trades":   int(row["today_trades"] or 0),
+        "today_wins":     int(row["today_wins"] or 0),
+        "closed_trades":  closed,
+        "wins":           wins,
+        "winrate":        (wins / closed * 100) if closed else 0.0,
+        "pnl_usdt":       float(all_time["pnl_usdt"] or 0),
+        "avg_win":        float(all_time["avg_win"] or 0),
+        "avg_loss":       float(all_time["avg_loss"] or 0),
+        "best_trade":     float(all_time["best_trade"] or 0),
+        "worst_trade":    float(all_time["worst_trade"] or 0),
+        "tp2_hits":       int(all_time["tp2_hits"] or 0),
+        "sl_hits":        int(all_time["sl_hits"] or 0),
+        "be_hits":        int(all_time["be_hits"] or 0),
+        "profit_factor":  round(gw / gl, 2) if gl else 0.0,
     }

@@ -174,12 +174,52 @@ def fmt_trade_list(trades: list[dict], *, closed: bool) -> str:
 def fmt_stats(s: dict) -> str:
     if not s.get("registered"):
         return "Send /start first."
+
+    # ── today ─────────────────────────────────────────────────────
+    tt   = s["today_trades"]
+    tw   = s["today_wins"]
+    tl   = tt - tw
+    tpnl = float(s["today_pnl_usdt"])
+    twr  = (tw / tt * 100) if tt else 0.0
+
+    # ── all-time ──────────────────────────────────────────────────
+    closed = s["closed_trades"]
+    wins   = s["wins"]
+    losses = closed - wins
+    wr     = float(s["winrate"])
+    pnl    = float(s["pnl_usdt"])
+    tp2    = s.get("tp2_hits", 0)
+    sl_h   = s.get("sl_hits", 0)
+    be_h   = s.get("be_hits", 0)
+    avg_w  = float(s.get("avg_win", 0))
+    avg_l  = float(s.get("avg_loss", 0))
+    best   = float(s.get("best_trade", 0))
+    worst  = float(s.get("worst_trade", 0))
+    pf     = float(s.get("profit_factor", 0))
+
+    # ── expectancy per trade ──────────────────────────────────────
+    exp = (wr / 100 * avg_w + (1 - wr / 100) * avg_l) if closed else 0.0
+
     return (
-        "📊 <b>Stats</b>\n"
-        f"Today: {s['today_trades']} trades, {s['today_wins']} wins, "
-        f"{_money(float(s['today_pnl_usdt']))} ({_pct(float(s['today_pnl_pct']))})\n"
-        f"All-time: {s['closed_trades']} closed, {s['wins']} wins, "
-        f"WR {float(s['winrate']):.1f}%, PnL {_money(float(s['pnl_usdt']))}"
+        "📊 <b>Trading Stats</b>\n\n"
+
+        "📅 <b>Today</b>\n"
+        f"  Trades: <b>{tt}</b>  (W {tw} / L {tl})"
+        + (f"  WR <b>{twr:.0f}%</b>" if tt else "") + "\n"
+        f"  PnL: <b>{_money(tpnl)}</b>\n\n"
+
+        "🏆 <b>All-Time</b>\n"
+        f"  Trades: <b>{closed}</b>  (W {wins} / L {losses})\n"
+        f"  Win Rate: <b>{wr:.1f}%</b>  |  Profit Factor: <b>{pf:.2f}</b>\n"
+        f"  Net PnL: <b>{_money(pnl)}</b>\n\n"
+
+        "🎯 <b>Exits</b>\n"
+        f"  TP2 ✅ {tp2}  |  SL 🛑 {sl_h}  |  Breakeven 🔁 {be_h}\n\n"
+
+        "📐 <b>Per-Trade</b>\n"
+        f"  Avg Win: <b>{_money(avg_w)}</b>  |  Avg Loss: <b>{_money(avg_l)}</b>\n"
+        f"  Best: <b>{_money(best)}</b>  |  Worst: <b>{_money(worst)}</b>\n"
+        f"  Expectancy: <b>{_money(exp)}</b> / trade"
     )
 
 
