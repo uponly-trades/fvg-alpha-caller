@@ -1,40 +1,18 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [trade_executor, telegram_bot]
+    types: [completed]
     branches: [main]
 
 jobs:
-  deploy:
-    runs-on: dell-dubai
+  redeploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - name: Pull latest code
+      - name: Trigger Coolify redeploy
         run: |
-          cd /opt/fvg-alpha-caller
-          git pull origin main
-
-      - name: Write .env from secrets
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          KRONOS_URL: ${{ secrets.KRONOS_URL }}
-        run: |
-          cat > /opt/fvg-alpha-caller/.env << EOF
-          TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-          TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-          DATABASE_URL=${DATABASE_URL}
-          KRONOS_URL=${KRONOS_URL}
-          EOF
-
-      - name: Rebuild and restart
-        run: |
-          cd /opt/fvg-alpha-caller
-          docker compose build --no-cache
-          docker compose up -d
-
-      - name: Verify running
-        run: |
-          sleep 5
-          docker compose -f /opt/fvg-alpha-caller/docker-compose.yaml ps
-          docker logs fvg-alpha-caller-fvg-alpha-caller-1 --tail 10
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+            "${{ secrets.COOLIFY_URL }}/api/v1/services/x11j71l7mde2nsujipb23uky/restart"
