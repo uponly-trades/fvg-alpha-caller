@@ -40,10 +40,20 @@ services:
       - coolify
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.fvglive.rule=Host(`fvg-live.uponlytrader.xyz`)"
-      - "traefik.http.routers.fvglive.entrypoints=https"
-      - "traefik.http.routers.fvglive.tls.certresolver=letsencrypt"
-      - "traefik.http.services.fvglive.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.gzip.compress=true"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.http-fvglive.entryPoints=http"
+      - "traefik.http.routers.http-fvglive.middlewares=redirect-to-https"
+      - "traefik.http.routers.http-fvglive.rule=Host(`fvg-live.uponlytrader.xyz`) && PathPrefix(`/`)"
+      - "traefik.http.routers.http-fvglive.service=http-fvglive"
+      - "traefik.http.routers.https-fvglive.entryPoints=https"
+      - "traefik.http.routers.https-fvglive.middlewares=gzip"
+      - "traefik.http.routers.https-fvglive.rule=Host(`fvg-live.uponlytrader.xyz`) && PathPrefix(`/`)"
+      - "traefik.http.routers.https-fvglive.service=https-fvglive"
+      - "traefik.http.routers.https-fvglive.tls=true"
+      - "traefik.http.routers.https-fvglive.tls.certresolver=letsencrypt"
+      - "traefik.http.services.http-fvglive.loadbalancer.server.port=3000"
+      - "traefik.http.services.https-fvglive.loadbalancer.server.port=3000"
 
 networks:
   default:
