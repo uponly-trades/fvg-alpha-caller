@@ -177,6 +177,56 @@ def test_weak_fvg_skips_before_combo_validation():
     assert result.status == "SKIP: WEAK FVG"
 
 
+def test_kronos_long_re_anchors_sl_below_zone_bottom():
+    # Regression: ZECUSDT-style. Kronos predicted SL is tighter (closer to entry)
+    # than zone-anchored SL because predictor has no zone awareness. SL must widen
+    # to (zone.bottom - 0.1*atr); TPs preserved verbatim → RR stretches.
+    kronos = {
+        "direction": "LONG", "timeframe": "SCALPING",
+        "entry": 580.06, "sl": 572.053, "tp1": 584.06, "tp2": 588.06,
+        "confidence": 70,
+    }
+    z = zone(direction=1, top=575.0, bottom=565.0, atr=2.0)
+    result = trade_combo.build_trade_from_kronos(kronos, z)
+
+    assert result.status == "LONG VALID"
+    assert result.valid is True
+    # zone_sl = 565.0 - 0.1*2.0 = 564.8; kronos_sl 572.053 sits inside zone → widen.
+    assert result.trade.sl == pytest.approx(564.8)
+    assert result.trade.tp1 == pytest.approx(584.06)
+    assert result.trade.tp2 == pytest.approx(588.06)
+    # RR no longer 2.0 — kronos TP preserved on widened risk.
+    expected_rr = (588.06 - 580.06) / (580.06 - 564.8)
+    assert result.trade.rr == pytest.approx(expected_rr)
+
+
+def test_kronos_long_keeps_tighter_kronos_sl_when_already_below_zone():
+    # When kronos SL is already below the zone-anchored SL, keep kronos SL.
+    # min(kronos_sl=98.0, zone_sl=98.9) → 98.0.
+    kronos = {
+        "direction": "LONG", "timeframe": "INTRADAY",
+        "entry": 100.0, "sl": 98.0, "tp1": 102.0, "tp2": 104.0,
+        "confidence": 80,
+    }
+    z = zone(direction=1, top=100.5, bottom=99.0, atr=1.0)
+    result = trade_combo.build_trade_from_kronos(kronos, z)
+    assert result.trade.sl == pytest.approx(98.0)
+    assert result.trade.rr == pytest.approx(2.0)
+
+
+def test_kronos_short_routes_to_combo_path():
+    # SHORT kronos signal must defer to combo (bars-aware filter), regardless of SL.
+    kronos = {
+        "direction": "SHORT", "timeframe": "SCALPING",
+        "entry": 100.0, "sl": 101.0, "tp1": 99.0, "tp2": 98.0,
+        "confidence": 70,
+    }
+    z = zone(direction=-1, top=101.0, bottom=99.0, atr=1.0)
+    result = trade_combo.build_trade_from_kronos(kronos, z)
+    assert result.status == "SKIP: SHORT VIA COMBO"
+    assert result.valid is False
+
+
 def test_invalid_risk_skips_trade(monkeypatch):
     monkeypatch.setattr(trade_combo, "_latest_stoch_state", lambda bars, direction: ("long", []))
 

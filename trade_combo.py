@@ -238,11 +238,13 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
 _TIMEFRAME_MAP = {"SCALPING": "scalping", "INTRADAY": "intraday", "SWING": "swing"}
 
 
-def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResult:
+def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
     """
     Convert Kronos prediction response into TradeSetupResult.
-    RANGING → SKIP. Direction must align with zone_direction, else SKIP.
+    RANGING → SKIP. Direction must align with zone.direction, else SKIP.
+    SL is re-anchored to zone geometry (kronos has no zone awareness); TPs preserved.
     """
+    zone_direction = int(zone.direction)
     direction = kronos.get("direction", "RANGING")
     timeframe = kronos.get("timeframe", "INTRADAY")
     confidence = kronos.get("confidence", 0)
@@ -273,13 +275,32 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
+    entry = float(kronos["entry"])
+    kronos_sl = float(kronos["sl"])
+    buffer = _risk_buffer(zone)
+    # Zone-anchored SL: SL must sit beyond the FVG (never inside). Widen kronos SL
+    # toward the zone edge if it landed inside or too close. TPs preserved verbatim
+    # because they reflect kronos's predicted excursion.
+    if zone_direction == 1:
+        zone_sl = float(zone.bottom) - buffer
+        sl = min(kronos_sl, zone_sl)
+    else:
+        zone_sl = float(zone.top) + buffer
+        sl = max(kronos_sl, zone_sl)
+
+    tp1 = float(kronos["tp1"])
+    tp2 = float(kronos["tp2"])
+    risk = abs(entry - sl)
+    reward = abs(tp2 - entry)
+    rr = reward / risk if risk > 0 else 0.0
+
     trade = TradeLevels(
         direction=direction.lower(),
-        entry=float(kronos["entry"]),
-        sl=float(kronos["sl"]),
-        tp1=float(kronos["tp1"]),
-        tp2=float(kronos["tp2"]),
-        rr=2.0,
+        entry=entry,
+        sl=sl,
+        tp1=tp1,
+        tp2=tp2,
+        rr=rr,
     )
     status = f"{direction} VALID"
     reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"

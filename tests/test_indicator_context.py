@@ -551,10 +551,13 @@ def test_kronos_client_returns_decision_on_success(monkeypatch):
 
 
 def test_build_trade_from_kronos_long():
+    from types import SimpleNamespace
     from trade_combo import build_trade_from_kronos
     kronos = {"direction": "LONG", "timeframe": "INTRADAY", "entry": 100.0,
               "sl": 99.0, "tp1": 101.0, "tp2": 102.0, "confidence": 75}
-    result = build_trade_from_kronos(kronos)
+    # Zone bottom 99.5 → zone_sl = 99.5 - 0.1 = 99.4. kronos_sl=99.0 already wider, so SL stays 99.0.
+    zone = SimpleNamespace(direction=1, top=100.5, bottom=99.5, atr=1.0)
+    result = build_trade_from_kronos(kronos, zone)
     assert result.status == "LONG VALID"
     assert result.valid is True
     assert result.mode == "intraday"
@@ -566,10 +569,12 @@ def test_build_trade_from_kronos_long():
 
 
 def test_build_trade_from_kronos_ranging():
+    from types import SimpleNamespace
     from trade_combo import build_trade_from_kronos
     kronos = {"direction": "RANGING", "timeframe": "SCALPING", "entry": 100.0,
               "sl": 99.5, "tp1": 100.5, "tp2": 101.0, "confidence": 30}
-    result = build_trade_from_kronos(kronos)
+    zone = SimpleNamespace(direction=1, top=100.5, bottom=99.5, atr=1.0)
+    result = build_trade_from_kronos(kronos, zone)
     assert result.status == "SKIP: RANGING"
     assert result.valid is False
     assert result.trade is None

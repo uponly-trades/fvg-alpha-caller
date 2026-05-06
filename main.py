@@ -88,7 +88,7 @@ class AlphaCaller:
             tf=zone.tf,
         )
         if kronos is not None:
-            kronos_setup = build_trade_from_kronos(kronos, int(zone.direction))
+            kronos_setup = build_trade_from_kronos(kronos, zone)
             # Bearish FVG: combo path applies reversal filter (Kronos has no bar-context).
             if int(zone.direction) != 1 and kronos_setup.status == "SKIP: SHORT VIA COMBO":
                 setup = evaluate_trade_setup(zone, current_price, bars_by_tf)
