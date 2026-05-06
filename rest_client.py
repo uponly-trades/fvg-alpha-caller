@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -8,6 +9,10 @@ import requests
 from config import BASE_URL, KLINES_LIMIT, SYMBOLS, TIMEFRAMES
 
 logger = logging.getLogger(__name__)
+
+# Optional SOCKS5 proxy for Binance (needed when server IP is geo-blocked)
+_SOCKS5_URL = os.environ.get("SOCKS5_PROXY_URL")  # e.g. socks5h://user:pass@host:port
+_PROXIES = {"https": _SOCKS5_URL, "http": _SOCKS5_URL} if _SOCKS5_URL else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +31,7 @@ def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
     url = f"{BASE_URL}/fapi/v1/klines"
     params = {"symbol": symbol, "interval": tf, "limit": limit}
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, timeout=15, proxies=_PROXIES)
         resp.raise_for_status()
         raw = resp.json()
     except Exception as e:
