@@ -69,7 +69,7 @@ class AlphaCaller:
             logger.warning("log_features failed (%s %s): %s", zone.symbol, zone.tf, e)
 
     async def _evaluate_setup_async(self, zone, current_price: float):
-        """Try Kronos first; fall back to StochRSI combo on failure. Attach shadow v2 decision."""
+        """Kronos-only path. Combo fallback disabled (WR 15-22% vs Kronos 37-39%)."""
         bars_by_tf = self._timeframe_bars(zone.symbol)
         tf_bars = bars_by_tf.get(zone.tf, [])
         ohlcv = [
@@ -88,14 +88,15 @@ class AlphaCaller:
             tf=zone.tf,
         )
         if kronos is not None:
-            kronos_setup = build_trade_from_kronos(kronos, zone)
-            # Bearish FVG: combo path applies reversal filter (Kronos has no bar-context).
-            if int(zone.direction) != 1 and kronos_setup.status == "SKIP: SHORT VIA COMBO":
-                setup = evaluate_trade_setup(zone, current_price, bars_by_tf)
-            else:
-                setup = kronos_setup
+            setup = build_trade_from_kronos(kronos, zone)
         else:
-            setup = evaluate_trade_setup(zone, current_price, bars_by_tf)
+            # Kronos unavailable — skip entirely rather than fall back to combo
+            from trade_combo import TradeSetupResult
+            setup = TradeSetupResult(
+                "SKIP: KRONOS UNAVAILABLE", False, None,
+                "Kronos offline, combo path disabled",
+                None, {}, {}, source="kronos",
+            )
 
         # Shadow v2 filter — log parallel decision for compare, no impact on trade
         try:
