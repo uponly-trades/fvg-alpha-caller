@@ -141,14 +141,14 @@ class BinanceKlineWS:
             logger.info("WS warm-up complete | all %d keys loaded from cache", total)
             return
 
-        # Concurrent fetch: 10 parallel requests, safe under Binance 2400/5min limit
-        sem = asyncio.Semaphore(10)
+        # Concurrent fetch: 3 parallel — proxy SOCKS5 chokes above this
+        sem = asyncio.Semaphore(3)
 
         async def _fetch_one(symbol: str, tf: str) -> None:
             async with sem:
                 await asyncio.to_thread(self._warmup_one, symbol, tf)
 
-        logger.info("WS warm-up starting | cached=%d rest_needed=%d concurrent=10", cached, len(missing))
+        logger.info("WS warm-up starting | cached=%d rest_needed=%d concurrent=3", cached, len(missing))
         await asyncio.gather(*[_fetch_one(s, t) for s, t in missing])
         logger.info("WS warm-up complete | cached=%d rest_fetched=%d total=%d", cached, len(missing), total)
         self._save_cache()
