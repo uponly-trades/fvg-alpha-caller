@@ -52,19 +52,8 @@ def fmt_daily(*, date: str, trades: int, wins: int, pnl_usdt: float, pnl_pct: fl
 
 def fmt_help() -> str:
     return (
-        "🤖 <b>FVG Live Binance</b>\n"
-        "/setkeys — setup Binance API key\n"
-        "/balance — saldo USDT Binance Futures\n"
-        "/trades — trade aktif\n"
-        "/closed — trade closed terakhir\n"
-        "/stats — PnL + winrate\n"
-        "/settings — risk/leverage/max trade\n"
-        "/setrisk 2 — risk % per trade\n"
-        "/setlev 5 — leverage 5-20x\n"
-        "/setmax 3 — max concurrent trades\n"
-        "/setloss 6 — daily loss cap %\n"
-        "/pause — stop new trades\n"
-        "/resume — enable live trades\n"
+        "🤖 <b>FVG Live Trading</b>\n\n"
+        "Gunakan tombol di bawah untuk manage akun trading kamu."
     )
 
 
