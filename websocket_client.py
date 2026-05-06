@@ -130,18 +130,27 @@ class BinanceKlineWS:
         if cached > 0:
             logger.info("Buffer cache restored %d/%d keys — skipping REST fetch for cached symbols", cached, total)
 
-        # REST-fetch only keys missing from cache
-        fetched = 0
-        for symbol in SYMBOLS:
-            for tf in TIMEFRAMES:
-                key = self._make_key(symbol, tf)
-                if key in self._buffers:
-                    continue  # already loaded from cache
-                await asyncio.to_thread(self._warmup_one, symbol, tf)
-                await asyncio.sleep(0.05)
-                fetched += 1
+        # Collect keys that still need REST fetch
+        missing = [
+            (symbol, tf)
+            for symbol in SYMBOLS
+            for tf in TIMEFRAMES
+            if self._make_key(symbol, tf) not in self._buffers
+        ]
+        if not missing:
+            logger.info("WS warm-up complete | all %d keys loaded from cache", total)
+            return
 
-        logger.info("WS warm-up complete | cached=%d rest_fetched=%d total=%d", cached, fetched, total)
+        # Concurrent fetch: 10 parallel requests, safe under Binance 2400/5min limit
+        sem = asyncio.Semaphore(10)
+
+        async def _fetch_one(symbol: str, tf: str) -> None:
+            async with sem:
+                await asyncio.to_thread(self._warmup_one, symbol, tf)
+
+        logger.info("WS warm-up starting | cached=%d rest_needed=%d concurrent=10", cached, len(missing))
+        await asyncio.gather(*[_fetch_one(s, t) for s, t in missing])
+        logger.info("WS warm-up complete | cached=%d rest_fetched=%d total=%d", cached, len(missing), total)
         self._save_cache()
 
     def _bar_from_kline(self, kline: dict) -> Bar:
@@ -251,10 +260,13 @@ class BinanceKlineWS:
             len(SYMBOLS), len(TIMEFRAMES), len(SYMBOLS) * len(TIMEFRAMES), len(chunks),
             self.FALLBACK_INTERVAL_SEC, self.STALE_AFTER_SEC,
         )
-        await self._warmup_all()
+        # Start WS connections immediately — don't block on warm-up.
+        # Bars arriving before buffer is ready trigger on-demand warmup_one() per key.
         self._fallback_task = asyncio.create_task(self._fallback_loop())
         self._connection_tasks = [asyncio.create_task(self._run_connection(i, chunk)) for i, chunk in enumerate(chunks)]
-        await asyncio.gather(*self._connection_tasks)
+        # Warm-up runs concurrently so signals flow as soon as each symbol's buffer is ready
+        warmup_task = asyncio.create_task(self._warmup_all())
+        await asyncio.gather(*self._connection_tasks, warmup_task)
 
     def stop(self) -> None:
         self._running = False
