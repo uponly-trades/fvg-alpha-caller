@@ -57,6 +57,72 @@ def fmt_help() -> str:
     )
 
 
+def fmt_dashboard(summary: dict, stats: dict) -> str:
+    """Rich home screen with live status, balance, and today's stats."""
+    # ── status line ──────────────────────────────────────────────
+    if not summary.get("registered"):
+        return "🤖 <b>FVG Alpha Caller</b>\n\nKirim /start untuk daftar."
+
+    if not summary.get("has_keys"):
+        status_line = "⚠️ <b>No API Keys</b> — tekan 🔑 Set API Keys"
+    elif not summary.get("enabled"):
+        status_line = "⏸ <b>Paused</b>"
+    else:
+        status_line = "✅ <b>Active</b> — trading live"
+
+    # ── balance ──────────────────────────────────────────────────
+    bal = summary.get("balance") or {}
+    if bal:
+        bal_line = f"💰 Balance: <b>${float(bal.get('total', 0)):.2f}</b> USDT  (free ${float(bal.get('free', 0)):.2f})"
+    else:
+        bal_line = "💰 Balance: <i>set API keys first</i>"
+
+    # ── settings ─────────────────────────────────────────────────
+    risk    = float(summary.get("risk_pct", 1))
+    lev     = int(summary.get("leverage", 10))
+    maxc    = int(summary.get("max_concurrent", 3))
+    dloss   = float(summary.get("daily_loss_cap_pct", 5))
+    key_tail = summary.get("api_key_tail") or "—"
+    settings_line = (
+        f"⚙️ Risk <b>{risk:.2f}%</b>  |  Lev <b>{lev}x</b>  |  "
+        f"Max <b>{maxc}</b> trades  |  Daily cap <b>{dloss:.1f}%</b>"
+    )
+
+    # ── today stats ──────────────────────────────────────────────
+    today_trades = stats.get("today_trades", 0)
+    today_wins   = stats.get("today_wins", 0)
+    today_pnl    = float(stats.get("today_pnl_usdt", 0) or 0)
+    today_wr     = (today_wins / today_trades * 100) if today_trades else 0
+    pnl_sign     = "+" if today_pnl >= 0 else ""
+    today_line = (
+        f"📊 Today: <b>{today_trades}</b> trades  "
+        f"WR <b>{today_wr:.0f}%</b>  "
+        f"PnL <b>{pnl_sign}${today_pnl:.2f}</b>"
+    )
+
+    # ── all-time ─────────────────────────────────────────────────
+    closed  = stats.get("closed_trades", 0)
+    wins    = stats.get("wins", 0)
+    wr_all  = float(stats.get("winrate", 0) or 0)
+    pnl_all = float(stats.get("pnl_usdt", 0) or 0)
+    sign_all = "+" if pnl_all >= 0 else ""
+    alltime_line = (
+        f"🏆 All-time: <b>{closed}</b> trades  "
+        f"WR <b>{wr_all:.1f}%</b>  "
+        f"PnL <b>{sign_all}${pnl_all:.2f}</b>"
+    )
+
+    return (
+        f"🤖 <b>FVG Alpha Caller</b>\n\n"
+        f"{status_line}\n"
+        f"{bal_line}\n\n"
+        f"{settings_line}\n"
+        f"🔑 Key: <code>...{key_tail}</code>\n\n"
+        f"{today_line}\n"
+        f"{alltime_line}"
+    )
+
+
 def fmt_key_saved(tail: str) -> str:
     return f"✅ API key saved. Tail: <code>...{tail}</code>"
 

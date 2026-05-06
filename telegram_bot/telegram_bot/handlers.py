@@ -22,8 +22,20 @@ from telegram_bot.queries import (
     upsert_user,
     user_row,
 )
+
+
+async def _dashboard_text(pool, telegram_id: int) -> str:
+    """Fetch summary + stats and render rich dashboard. Fallback to fmt_help on error."""
+    try:
+        summary = await account_summary(telegram_id)
+    except ExecutorClientError:
+        summary = {}
+    async with pool.acquire() as conn:
+        s = await stats(conn, telegram_id=telegram_id)
+    return fmt_dashboard(summary, s)
 from telegram_bot.templates import (
     fmt_balance,
+    fmt_dashboard,
     fmt_help,
     fmt_key_saved,
     fmt_settings,
@@ -99,12 +111,15 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     @dp.message(Command("start"))
     async def on_start(m: Message):
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
-        await m.answer(fmt_help(), reply_markup=main_menu(), parse_mode="HTML")
+        text = await _dashboard_text(pool, m.from_user.id)
+        await m.answer(text, reply_markup=main_menu(), parse_mode="HTML")
 
     @dp.callback_query(F.data == "menu")
     async def cb_menu(cb: CallbackQuery):
-        await cb.message.edit_text(fmt_help(), reply_markup=main_menu(), parse_mode="HTML")
-        await cb.answer()
+        await cb.answer("Refreshing…")
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        text = await _dashboard_text(pool, cb.from_user.id)
+        await cb.message.edit_text(text, reply_markup=main_menu(), parse_mode="HTML")
 
     # ── balance ───────────────────────────────────────────────────────────────
 
@@ -275,7 +290,10 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             except Exception:
                 pass
         await state.clear()
-        await m.answer(fmt_key_saved(str(result.get("api_key_tail") or api_key[-4:])), reply_markup=main_menu(), parse_mode="HTML")
+        tail = str(result.get("api_key_tail") or api_key[-4:])
+        await m.answer(fmt_key_saved(tail), parse_mode="HTML")
+        text = await _dashboard_text(pool, m.from_user.id)
+        await m.answer(text, reply_markup=main_menu(), parse_mode="HTML")
 
     # ── numeric settings (FSM) ────────────────────────────────────────────────
 
