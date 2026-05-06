@@ -168,6 +168,42 @@ def divergence_state(highs: List[float], lows: List[float], osc: List[Optional[f
     return "none"
 
 
+_OI_CACHE: Dict[Tuple[str, str], Tuple[float, Optional[float]]] = {}
+OI_CACHE_TTL_SEC = 60
+
+
+def fetch_oi_change_pct(symbol: str, tf: str) -> Optional[float]:
+    """Open-interest delta % over last 2 periods. Positive = adding positions."""
+    key = (symbol, tf)
+    now = time.time()
+    cached = _OI_CACHE.get(key)
+    if cached and now - cached[0] < OI_CACHE_TTL_SEC:
+        return cached[1]
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/futures/data/openInterestHist",
+            params={"symbol": symbol, "period": tf, "limit": 2},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data or len(data) < 2:
+            _OI_CACHE[key] = (now, None)
+            return None
+        prev = float(data[0]["sumOpenInterest"])
+        curr = float(data[-1]["sumOpenInterest"])
+        if prev <= 0:
+            _OI_CACHE[key] = (now, None)
+            return None
+        delta = round((curr - prev) / prev * 100, 4)
+        _OI_CACHE[key] = (now, delta)
+        return delta
+    except Exception as e:
+        logger.warning("Fetch OI failed %s %s: %s", symbol, tf, e)
+        _OI_CACHE[key] = (now, None)
+        return None
+
+
 def fetch_long_short_ratio(symbol: str, tf: str) -> Optional[Tuple[float, float]]:
     key = (symbol, tf)
     now = time.time()

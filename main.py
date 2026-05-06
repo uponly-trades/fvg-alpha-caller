@@ -56,7 +56,7 @@ class AlphaCaller:
         try:
             decision_id = self.sim_store.make_decision_id(zone, current_price, event_type)
             bars_by_tf = self._timeframe_bars(zone.symbol)
-            features = extract_multi_tf(bars_by_tf, symbol=zone.symbol, with_ls_ratio=False)
+            features = extract_multi_tf(bars_by_tf, symbol=zone.symbol, with_ls_ratio=True)
             btc_ctx = btc_regime(self._btc_bars_by_tf())
             self.sim_store.add_signal_features(decision_id, zone, features, btc_ctx)
         except Exception as e:
@@ -82,7 +82,11 @@ class AlphaCaller:
             tf=zone.tf,
         )
         if kronos is not None:
-            return build_trade_from_kronos(kronos, int(zone.direction))
+            kronos_setup = build_trade_from_kronos(kronos, int(zone.direction))
+            # Bearish FVG: combo path applies reversal filter (Kronos has no bar-context).
+            if int(zone.direction) != 1 and kronos_setup.status == "SKIP: SHORT VIA COMBO":
+                return evaluate_trade_setup(zone, current_price, bars_by_tf)
+            return kronos_setup
         return evaluate_trade_setup(zone, current_price, bars_by_tf)
 
     def _save_chart_png(self, zone, chart_png: bytes) -> str:

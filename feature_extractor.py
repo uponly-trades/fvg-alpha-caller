@@ -18,6 +18,7 @@ from indicator_context import (
     stochrsi_series,
     kdj_series,
     fetch_long_short_ratio,
+    fetch_oi_change_pct,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,9 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
     bb_pos = bollinger_position(closes)
     atr = atr_value(highs, lows, closes)
     vol_z = volume_zscore(vols)
+    vol_change_pct = None
+    if len(vols) >= 2 and vols[-2] > 0:
+        vol_change_pct = round((vols[-1] - vols[-2]) / vols[-2] * 100, 2)
 
     last_close = closes[-1]
     e20 = _last(ema20)
@@ -170,6 +174,7 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
         "macd_hist": macd_d["hist"],
         "bb_pos": bb_pos,
         "vol_z": vol_z,
+        "vol_change_pct": vol_change_pct,
     }
 
     if with_ls_ratio and symbol:
@@ -177,6 +182,9 @@ def extract_tf_features(bars, tf: str, symbol: str = "", with_ls_ratio: bool = F
         if ls:
             feat["long_pct"] = ls[0]
             feat["short_pct"] = ls[1]
+        oi = fetch_oi_change_pct(symbol, tf)
+        if oi is not None:
+            feat["oi_change_pct"] = oi
 
     return feat
 

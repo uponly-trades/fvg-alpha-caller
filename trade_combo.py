@@ -6,12 +6,14 @@ from indicator_context import stochrsi_series
 from feature_extractor import extract_tf_features
 
 
-HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct
-LTF_VOL_MIN   = 2.0   # 15m_vol_z
+HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct (LONG)
+LTF_VOL_MIN   = 2.0   # 15m_vol_z (LONG)
+SHORT_E20D_1H_MAX = 0.0   # 1h_ema20_dist_pct must be < 0 (downtrend)
+SHORT_BB15_MAX    = 0.4   # 15m_bb_pos must be < 0.4 (lower band)
 
 
-def _htf_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
-    """Shadow-backtested filter: HTF trend + LTF volume burst."""
+def _long_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
+    """Shadow-backtested LONG filter: HTF trend + LTF volume burst (WR 72% on n=43)."""
     bars_4h  = bars_by_tf.get("4h",  [])
     bars_15m = bars_by_tf.get("15m", [])
     if len(bars_4h) < 30 or len(bars_15m) < 30:
@@ -23,6 +25,21 @@ def _htf_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
     if e20d is None or vz is None:
         return False
     return e20d >= HTF_TREND_MIN and vz >= LTF_VOL_MIN
+
+
+def _short_filter_pass(bars_by_tf: Dict[str, List]) -> bool:
+    """Shadow-backtested SHORT filter: 1h downtrend + 15m near lower BB (WR 57% on n=14)."""
+    bars_1h  = bars_by_tf.get("1h",  [])
+    bars_15m = bars_by_tf.get("15m", [])
+    if len(bars_1h) < 30 or len(bars_15m) < 30:
+        return False
+    f1 = extract_tf_features(bars_1h,  "1h")
+    f15 = extract_tf_features(bars_15m, "15m")
+    e20d_1h = f1.get("ema20_dist_pct")
+    bb15    = f15.get("bb_pos")
+    if e20d_1h is None or bb15 is None:
+        return False
+    return e20d_1h < SHORT_E20D_1H_MAX and bb15 < SHORT_BB15_MAX
 
 
 MODE_TIMEFRAMES = {
@@ -182,11 +199,12 @@ def build_trade_from_kronos(kronos: dict, zone_direction: int) -> TradeSetupResu
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
-    # Shadow-backtested: SHORT side WR 10% — disable bearish FVG entries entirely.
+    # SHORT side: filter handled inside evaluate_for_mode (bars-aware).
+    # Kronos path can't see bars — leave SHORT to combo path so filter applies.
     if zone_direction != 1:
         return TradeSetupResult(
-            "SKIP: SHORT DISABLED", False, mode,
-            "bearish FVG disabled (shadow WR 10%)",
+            "SKIP: SHORT VIA COMBO", False, mode,
+            "bearish FVG routed to combo path for reversal filter",
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
@@ -224,12 +242,15 @@ def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[st
     if int(getattr(zone, "main_strength", 0)) < MIN_STRENGTH_TO_ALERT:
         return TradeSetupResult("SKIP: WEAK FVG", False, mode, "FVG strength below alert threshold", None, {}, {})
 
-    # Shadow-backtested: SHORT side WR 10% across 106 trades — disable until retrained.
+    # SHORT side: blanket WR 10%, but reversal filter (1h downtrend + 15m near lower BB)
+    # rescues WR 57% on n=14. Gate strictly.
     if int(zone.direction) != 1:
-        return TradeSetupResult(
-            "SKIP: SHORT DISABLED", False, mode,
-            "bearish FVG disabled (shadow WR 10%)", None, {}, {},
-        )
+        if not _short_filter_pass(bars_by_tf):
+            return TradeSetupResult(
+                "SKIP: SHORT FILTER", False, mode,
+                "bearish FVG without reversal context (1h_ema20_dist_pct<0 AND 15m_bb_pos<0.4)",
+                None, {}, {},
+            )
 
     required_tfs = COMBO_TIMEFRAMES[mode]
     all_tfs = ("15m", "30m", "1h", "2h", "4h")
@@ -250,9 +271,10 @@ def evaluate_for_mode(zone, mode: str, current_price: float, bars_by_tf: Dict[st
     matches = sum(1 for state in combo_states.values() if state == desired)
     conflicts = sum(1 for state in combo_states.values() if state not in {desired, "neutral"})
     if conflicts or matches < max(2, len(required_tfs) - 1):
-        # Shadow-backtested: MIXED COMBO with HTF trend + LTF vol burst → WR 72%, n=43.
-        # Bypass MIXED COMBO when HTF filter passes.
-        if not _htf_filter_pass(bars_by_tf):
+        # MIXED COMBO bypass — only for LONG (filter validated on bullish FVG only).
+        # Bearish FVG that reaches here already passed _short_filter_pass above.
+        is_long = int(zone.direction) == 1
+        if is_long and not _long_filter_pass(bars_by_tf):
             return TradeSetupResult(
                 "SKIP: MIXED COMBO", False, mode,
                 "combo mixed and HTF filter failed", None, combo_states, sparklines,
