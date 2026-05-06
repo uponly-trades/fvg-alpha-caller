@@ -43,19 +43,34 @@ DB_URL = os.environ.get(
 )
 BINANCE_BASE = os.environ.get("BINANCE_BASE", "https://fapi.binance.com")
 TF_MS = {"15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000}
+TF_MIN = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240}
+
+# Binance USDT-M futures fees (taker, percent of notional)
+FEE_TAKER_PCT = 0.04          # per side (0.04% open + 0.04% close = 0.08% round-trip)
+FUNDING_PCT_PER_8H = 0.01     # average funding per 8h period
 
 
 SCHEMA_MIGRATION = """
 ALTER TABLE signal_features
-  ADD COLUMN IF NOT EXISTS long_outcome  text,
-  ADD COLUMN IF NOT EXISTS long_pnl_pct  double precision,
-  ADD COLUMN IF NOT EXISTS long_bars     integer,
-  ADD COLUMN IF NOT EXISTS short_outcome text,
-  ADD COLUMN IF NOT EXISTS short_pnl_pct double precision,
-  ADD COLUMN IF NOT EXISTS short_bars    integer;
+  ADD COLUMN IF NOT EXISTS long_outcome      text,
+  ADD COLUMN IF NOT EXISTS long_pnl_pct      double precision,
+  ADD COLUMN IF NOT EXISTS long_net_pnl_pct  double precision,
+  ADD COLUMN IF NOT EXISTS long_bars         integer,
+  ADD COLUMN IF NOT EXISTS short_outcome     text,
+  ADD COLUMN IF NOT EXISTS short_pnl_pct     double precision,
+  ADD COLUMN IF NOT EXISTS short_net_pnl_pct double precision,
+  ADD COLUMN IF NOT EXISTS short_bars        integer;
 CREATE INDEX IF NOT EXISTS idx_sf_long_outcome  ON signal_features(long_outcome);
 CREATE INDEX IF NOT EXISTS idx_sf_short_outcome ON signal_features(short_outcome);
 """
+
+
+def fee_drag_pct(bars_held: int, tf: str) -> float:
+    """Round-trip taker + funding for held duration. Returns % of notional."""
+    fee = 2 * FEE_TAKER_PCT
+    minutes = bars_held * TF_MIN.get(tf, 60)
+    funding_periods = max(0, minutes // 480)
+    return fee + funding_periods * FUNDING_PCT_PER_8H
 
 
 def fetch_forward_klines(symbol: str, tf: str, start_ms: int, max_bars: int = 200) -> list:
@@ -72,11 +87,18 @@ def fetch_forward_klines(symbol: str, tf: str, start_ms: int, max_bars: int = 20
 
 
 def simulate(is_long: bool, entry: float, sl: float, tp1: float, tp2: float, klines: list):
+    """Bar-by-bar replay. Returns (outcome, gross_pnl_pct, bars_held).
+
+    Same-bar SL+TP ambiguity resolved via open-price proxy: bar's open determines
+    which level the price would have approached first. Imperfect (intra-bar path
+    unknown without tick data) but unbiased — better than always-SL conservative.
+    """
     tp1_hit = False
     risk_pct = abs(entry - sl) / entry * 100
     reward_pct = abs(tp2 - entry) / entry * 100
 
     for i, k in enumerate(klines, 1):
+        bar_open = float(k[1])
         high = float(k[2])
         low = float(k[3])
         if is_long:
@@ -87,6 +109,18 @@ def simulate(is_long: bool, entry: float, sl: float, tp1: float, tp2: float, kli
             sl_hit = high >= sl
             tp2_hit = low <= tp2
             tp1_now = low <= tp1
+
+        if sl_hit and tp2_hit:
+            # Both touched in same bar — pick whichever is closer to bar open
+            if is_long:
+                sl_first = (bar_open - sl) <= (tp2 - bar_open)
+            else:
+                sl_first = (sl - bar_open) <= (bar_open - tp2)
+            if sl_first:
+                if tp1_hit:
+                    return ("tp1", 0.0, i)
+                return ("loss", -risk_pct, i)
+            return ("win", reward_pct, i)
 
         if sl_hit:
             if tp1_hit:
@@ -205,11 +239,14 @@ def main():
                         stats["long"]["open"] += 1
                         updates["long_outcome"] = None
                         updates["long_pnl_pct"] = None
+                        updates["long_net_pnl_pct"] = None
                         updates["long_bars"] = bars
                     else:
                         stats["long"][out] += 1
+                        net = pnl - fee_drag_pct(bars, r["tf"])
                         updates["long_outcome"] = out
                         updates["long_pnl_pct"] = round(pnl, 4)
+                        updates["long_net_pnl_pct"] = round(net, 4)
                         updates["long_bars"] = bars
 
             if args.side in ("short", "both") and r["short_outcome"] is None:
@@ -222,11 +259,14 @@ def main():
                         stats["short"]["open"] += 1
                         updates["short_outcome"] = None
                         updates["short_pnl_pct"] = None
+                        updates["short_net_pnl_pct"] = None
                         updates["short_bars"] = bars
                     else:
                         stats["short"][out] += 1
+                        net = pnl - fee_drag_pct(bars, r["tf"])
                         updates["short_outcome"] = out
                         updates["short_pnl_pct"] = round(pnl, 4)
+                        updates["short_net_pnl_pct"] = round(net, 4)
                         updates["short_bars"] = bars
 
             if updates:
@@ -249,19 +289,24 @@ def main():
             cur.execute("""
               SELECT
                 'long' AS side, long_outcome AS outcome, COUNT(*) n,
-                ROUND(AVG(long_pnl_pct)::numeric, 3) avg_pnl
+                ROUND(AVG(long_pnl_pct)::numeric, 3) avg_gross,
+                ROUND(AVG(long_net_pnl_pct)::numeric, 3) avg_net
               FROM signal_features WHERE long_outcome IS NOT NULL
               GROUP BY long_outcome
               UNION ALL
               SELECT
                 'short', short_outcome, COUNT(*),
-                ROUND(AVG(short_pnl_pct)::numeric, 3)
+                ROUND(AVG(short_pnl_pct)::numeric, 3),
+                ROUND(AVG(short_net_pnl_pct)::numeric, 3)
               FROM signal_features WHERE short_outcome IS NOT NULL
               GROUP BY short_outcome
               ORDER BY side, outcome;
             """)
             for r in cur.fetchall():
-                log.info("  %s %s: n=%d avg_pnl=%s%%", r["side"], r["outcome"], r["n"], r["avg_pnl"])
+                log.info(
+                    "  %s %s: n=%d gross=%s%% net=%s%%",
+                    r["side"], r["outcome"], r["n"], r["avg_gross"], r["avg_net"],
+                )
     finally:
         conn.close()
 

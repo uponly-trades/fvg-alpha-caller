@@ -42,8 +42,20 @@ DB_URL = os.environ.get(
 )
 BINANCE_BASE = os.environ.get("BINANCE_BASE", "https://fapi.binance.com")
 TF_MS = {"15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000}
+TF_MIN = {"15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240}
+
+# Binance USDT-M futures fees (taker, percent of notional)
+FEE_TAKER_PCT = 0.04
+FUNDING_PCT_PER_8H = 0.01
 
 MITIG_EVENTS = ("mitigated_breakout", "mitigated_reversal")
+
+
+def fee_drag_pct(bars_held: int, tf: str) -> float:
+    fee = 2 * FEE_TAKER_PCT
+    minutes = bars_held * TF_MIN.get(tf, 60)
+    funding_periods = max(0, minutes // 480)
+    return fee + funding_periods * FUNDING_PCT_PER_8H
 
 
 def fetch_forward_klines(symbol: str, tf: str, start_ms: int, max_bars: int = 200) -> list:
@@ -60,11 +72,13 @@ def fetch_forward_klines(symbol: str, tf: str, start_ms: int, max_bars: int = 20
 
 
 def simulate(is_long: bool, entry: float, sl: float, tp1: float, tp2: float, klines: list):
+    """Bar-by-bar replay with same-bar SL+TP open-price tiebreak."""
     tp1_hit = False
     risk_pct = abs(entry - sl) / entry * 100
     reward_pct = abs(tp2 - entry) / entry * 100
 
     for i, k in enumerate(klines, 1):
+        bar_open = float(k[1])
         high = float(k[2])
         low = float(k[3])
         if is_long:
@@ -75,6 +89,17 @@ def simulate(is_long: bool, entry: float, sl: float, tp1: float, tp2: float, kli
             sl_hit = high >= sl
             tp2_hit = low <= tp2
             tp1_now = low <= tp1
+
+        if sl_hit and tp2_hit:
+            if is_long:
+                sl_first = (bar_open - sl) <= (tp2 - bar_open)
+            else:
+                sl_first = (sl - bar_open) <= (bar_open - tp2)
+            if sl_first:
+                if tp1_hit:
+                    return ("tp1", 0.0, i)
+                return ("loss", -risk_pct, i)
+            return ("win", reward_pct, i)
 
         if sl_hit:
             if tp1_hit:
@@ -188,20 +213,24 @@ def main():
                 stats["open"] += 1
                 col_outcome = None
                 col_pnl = None
+                col_net = None
             else:
                 stats[out] += 1
                 col_outcome = out
                 col_pnl = round(pnl, 4) if pnl is not None else None
+                col_net = round(pnl - fee_drag_pct(bars, r["tf"]), 4) if pnl is not None else None
 
             if is_long:
-                set_clause = "long_outcome = %s, long_pnl_pct = %s, long_bars = %s"
+                set_clause = ("long_outcome = %s, long_pnl_pct = %s, "
+                              "long_net_pnl_pct = %s, long_bars = %s")
             else:
-                set_clause = "short_outcome = %s, short_pnl_pct = %s, short_bars = %s"
+                set_clause = ("short_outcome = %s, short_pnl_pct = %s, "
+                              "short_net_pnl_pct = %s, short_bars = %s")
 
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE signal_features SET {set_clause} WHERE decision_id = %s",
-                    (col_outcome, col_pnl, bars, r["sf_decision_id"]),
+                    (col_outcome, col_pnl, col_net, bars, r["sf_decision_id"]),
                 )
             conn.commit()
 
