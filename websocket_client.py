@@ -54,6 +54,11 @@ class BinanceKlineWS:
     FALLBACK_INTERVAL_SEC = 30
     RECONNECT_DELAY_INITIAL = 1.0
     RECONNECT_DELAY_MAX = 60.0
+    # Per-connection recv watchdog. After a half-broken keepalive, recv() can
+    # block forever even though the socket reports "open" — a fleet of 100
+    # streams will produce a closed kline at least every minute, so 90s of
+    # silence means the socket is dead and we must drop+reconnect.
+    PER_CONN_STALE_SEC = 90.0
 
     def __init__(self, on_bar_close: Callable[[str, str, List[Bar]], Awaitable[None]]):
         self.on_bar_close = on_bar_close
@@ -237,8 +242,14 @@ class BinanceKlineWS:
                     logger.info("WS connected | conn=%d streams=%d", index, len(streams))
                     delay = self.RECONNECT_DELAY_INITIAL
                     self._last_message_at[index] = time.time()
-                    async for message in ws:
-                        if not self._running:
+                    while self._running:
+                        try:
+                            message = await asyncio.wait_for(ws.recv(), timeout=self.PER_CONN_STALE_SEC)
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "WS recv stale | conn=%d silent=%.0fs — dropping",
+                                index, self.PER_CONN_STALE_SEC,
+                            )
                             break
                         self._last_message_at[index] = time.time()
                         await self._handle_message(message)
