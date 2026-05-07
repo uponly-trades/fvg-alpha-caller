@@ -424,6 +424,39 @@ class SimTradeStore:
         loss_count = sum(1 for r in records if r["status"] == "loss")
         closed = win_count + loss_count
         winrate = round((win_count / closed) * 100, 1) if closed else 0.0
+
+        # Per-trigger (mode) breakdown
+        by_trigger: Dict[str, Dict] = {}
+        for r in records:
+            mode = r.get("mode") or "unknown"
+            if mode not in by_trigger:
+                by_trigger[mode] = {"win": 0, "loss": 0, "tp1": 0, "open": 0}
+            s = r["status"]
+            if s == "win":
+                by_trigger[mode]["win"] += 1
+            elif s == "loss":
+                by_trigger[mode]["loss"] += 1
+            elif s == "tp1_hit":
+                by_trigger[mode]["tp1"] += 1
+            else:
+                by_trigger[mode]["open"] += 1
+
+        # Per-symbol breakdown
+        by_symbol: Dict[str, Dict] = {}
+        for r in records:
+            sym = r.get("symbol", "?")
+            if sym not in by_symbol:
+                by_symbol[sym] = {"win": 0, "loss": 0, "tp1": 0, "open": 0}
+            s = r["status"]
+            if s == "win":
+                by_symbol[sym]["win"] += 1
+            elif s == "loss":
+                by_symbol[sym]["loss"] += 1
+            elif s == "tp1_hit":
+                by_symbol[sym]["tp1"] += 1
+            else:
+                by_symbol[sym]["open"] += 1
+
         recent = sorted(records, key=lambda r: r.get("created_at", 0), reverse=True)[:5]
         return {
             "date": date,
@@ -432,6 +465,8 @@ class SimTradeStore:
             "win": win_count,
             "loss": loss_count,
             "closed_winrate": winrate,
+            "by_trigger": by_trigger,
+            "by_symbol": by_symbol,
             "recent": recent,
         }
 

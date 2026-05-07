@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 from datetime import datetime, timezone, timedelta
@@ -6,6 +7,7 @@ from typing import List, Optional
 import requests
 
 from config import BOT_TOKEN, CHAT_ID
+import alert_settings as _asettings
 
 logger = logging.getLogger(__name__)
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -322,6 +324,102 @@ def _calc_pnl_pct(r: dict) -> Optional[float]:
         return None
 
 
+# ─── /settings command poller ────────────────────────────────────────────────
+
+_last_update_id: int = 0
+
+_TRIGGER_LABELS = {
+    "new_fvg":    "New FVG alert",
+    "approach":   "Approaching zone",
+    "touch":      "Touch zone",
+    "snipe_long":  "Snipe LONG (limit)",
+    "snipe_short": "Snipe SHORT (retest)",
+}
+
+_HELP = (
+    "⚙️ <b>Alert Trigger Settings</b>\n\n"
+    "Commands:\n"
+    "/settings — show current settings\n"
+    "/settings &lt;trigger&gt; on|off — toggle\n\n"
+    "Triggers: new_fvg  approach  touch  snipe_long  snipe_short\n\n"
+    "Example: /settings snipe_short off"
+)
+
+
+def _settings_status_msg() -> str:
+    s = _asettings.get_settings()
+    lines = ["⚙️ <b>Alert Trigger Settings</b>\n"]
+    for key in _asettings.TRIGGER_KEYS:
+        icon = "✅" if s.get(key, True) else "❌"
+        label = _TRIGGER_LABELS.get(key, key)
+        lines.append(f"{icon} <code>{key}</code>  —  {label}")
+    lines.append("\nToggle: /settings &lt;trigger&gt; on|off")
+    return "\n".join(lines)
+
+
+def _handle_settings_command(text: str) -> str:
+    """Parse /settings [trigger] [on|off] and return reply text."""
+    parts = text.strip().split()
+    # /settings with no args → show status
+    if len(parts) == 1:
+        return _settings_status_msg()
+    if len(parts) == 2:
+        # /settings help
+        return _HELP
+    if len(parts) == 3:
+        _, trigger, value = parts
+        trigger = trigger.lower().strip()
+        value = value.lower().strip()
+        if value not in ("on", "off"):
+            return f"❌ Value must be on or off, got: {value}"
+        enabled = value == "on"
+        ok = _asettings.set_trigger(trigger, enabled)
+        if not ok:
+            valid = ", ".join(_asettings.TRIGGER_KEYS)
+            return f"❌ Unknown trigger: {trigger}\nValid: {valid}"
+        icon = "✅" if enabled else "❌"
+        label = _TRIGGER_LABELS.get(trigger, trigger)
+        return f"{icon} <b>{trigger}</b> ({label}) turned <b>{'ON' if enabled else 'OFF'}</b>\n\n{_settings_status_msg()}"
+    return _HELP
+
+
+async def _poll_commands_loop() -> None:
+    """Long-poll Telegram for bot commands every 3s."""
+    global _last_update_id
+    get_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    while True:
+        try:
+            resp = requests.get(
+                get_url,
+                params={"offset": _last_update_id + 1, "timeout": 2, "allowed_updates": ["message"]},
+                timeout=10,
+            )
+            if resp.ok:
+                updates = resp.json().get("result", [])
+                for upd in updates:
+                    _last_update_id = upd["update_id"]
+                    msg = upd.get("message", {})
+                    text = msg.get("text", "")
+                    chat_id = msg.get("chat", {}).get("id")
+                    if text.startswith("/settings") and str(chat_id) == str(CHAT_ID):
+                        reply = _handle_settings_command(text)
+                        requests.post(
+                            TELEGRAM_URL,
+                            json={"chat_id": CHAT_ID, "text": reply, "parse_mode": "HTML"},
+                            timeout=10,
+                        )
+        except Exception as e:
+            logger.debug("command poll error: %s", e)
+        await asyncio.sleep(3)
+
+
+def start_command_poller() -> asyncio.Task:
+    """Start background command polling task. Call once from main event loop."""
+    return asyncio.ensure_future(_poll_commands_loop())
+
+
+# ─── Daily recap ──────────────────────────────────────────────────────────────
+
 def send_trade_recap(session_name: str, recap: dict) -> bool:
     date_str = recap.get("date", "—")
     open_c = recap["open"]
@@ -339,13 +437,50 @@ def send_trade_recap(session_name: str, recap: dict) -> bool:
     lines = [
         f"📊 <b>Trade Recap — {session_name}  |  {date_str}</b>",
         "",
-        f"{'⏳':2} {open_c} open   {'🎯':2} {tp1_c} tp1   {'✅':2} {win_c} win   {'❌':2} {loss_c} loss",
+        f"⏳ {open_c} open   🎯 {tp1_c} tp1   ✅ {win_c} win   ❌ {loss_c} loss",
         f"WR {wr_emoji} <b>{wr}%</b>  ({closed} closed)   {r_emoji} <b>{r_sign}{total_r:.1f}R</b>",
     ]
 
+    # Per-trigger breakdown
+    by_trigger = recap.get("by_trigger", {})
+    if by_trigger:
+        lines.extend(["", "── Per Trigger ──────────────────"])
+        trigger_labels = {
+            "new_fvg": "NewFVG", "approach": "Approach", "touch": "Touch",
+            "snipe": "Snipe", "snipe_long": "SnipeLong", "snipe_short": "SnipeShort",
+        }
+        for mode, stats in sorted(by_trigger.items()):
+            w = stats.get("win", 0)
+            l = stats.get("loss", 0)
+            t = stats.get("tp1", 0)
+            n = w + l
+            wr_t = round(w / n * 100) if n else 0
+            r_t = w * 2.0 + t * 1.0 - l * 1.0
+            r_t_str = f"{'+' if r_t >= 0 else ''}{r_t:.1f}R"
+            icon = "🔥" if wr_t >= 70 else "✅" if wr_t >= 50 else "⚠️" if n > 0 else "─"
+            label = trigger_labels.get(mode, mode)
+            lines.append(f"{icon} <code>{label:<12}</code> {w}W {l}L {wr_t}%  {r_t_str}")
+
+    # Per-symbol breakdown
+    by_symbol = recap.get("by_symbol", {})
+    if by_symbol:
+        lines.extend(["", "── Per Symbol ───────────────────"])
+        for sym, stats in sorted(by_symbol.items(), key=lambda x: -(x[1].get("win", 0) - x[1].get("loss", 0))):
+            w = stats.get("win", 0)
+            l = stats.get("loss", 0)
+            t = stats.get("tp1", 0)
+            n = w + l
+            wr_s = round(w / n * 100) if n else 0
+            r_s = w * 2.0 + t * 1.0 - l * 1.0
+            r_s_str = f"{'+' if r_s >= 0 else ''}{r_s:.1f}R"
+            icon = "🔥" if wr_s >= 70 else "✅" if wr_s >= 50 else "⚠️" if n > 0 else "─"
+            short_sym = sym.replace("USDT", "")
+            lines.append(f"{icon} <b>{short_sym:<8}</b> {w}W {l}L {wr_s}%  {r_s_str}")
+
+    # Recent trades (last 5)
     recent = recap.get("recent", [])
     if recent:
-        lines.extend(["", "─────────────────────"])
+        lines.extend(["", "── Recent ───────────────────────"])
         status_icon = {"win": "✅", "loss": "❌", "tp1_hit": "🎯", "open": "⏳"}
         dir_icon = {"long": "🟢", "short": "🔴"}
         for r in recent:
@@ -358,9 +493,10 @@ def send_trade_recap(session_name: str, recap: dict) -> bool:
             sl = _fmt_price(r["sl"])
             pnl = _calc_pnl_pct(r)
             pnl_str = f"  {'+' if pnl >= 0 else ''}{pnl:.2f}%" if pnl is not None else ""
-            created = _fmt_ts(r.get("created_at", 0))
+            mode = r.get("mode", "")
+            mode_tag = f" [{mode}]" if mode and mode != "intraday" else ""
             lines.append(
-                f"{s_icon} {d_icon} <b>{sym}</b> {tf}  {entry} → {tp2}  SL {sl}{pnl_str}  <i>{created}</i>"
+                f"{s_icon} {d_icon} <b>{sym}</b> {tf}{mode_tag}  {entry} → {tp2}  SL {sl}{pnl_str}"
             )
 
     return _send("\n".join(lines))

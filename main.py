@@ -25,8 +25,10 @@ from telegram import (
     send_touch_alert,
     send_trade_recap,
     send_snipe_alert,
+    start_command_poller,
 )
 from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short
+import alert_settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -207,12 +209,13 @@ class AlphaCaller:
                         tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
                         born_time=retest_hit.born_time,
                     )
-                    send_snipe_alert(
-                        snipe_type="retest_short",
-                        symbol=symbol, tf=tf,
-                        trade_setup=snipe_setup,
-                        timeframe_bars=bars_by_tf,
-                    )
+                    if alert_settings.is_enabled("snipe_short"):
+                        send_snipe_alert(
+                            snipe_type="retest_short",
+                            symbol=symbol, tf=tf,
+                            trade_setup=snipe_setup,
+                            timeframe_bars=bars_by_tf,
+                        )
                     logger.info("Retest SHORT snipe %s %s | entry=%.6g", symbol, tf, price)
             else:
                 logger.info("Retest SHORT snipe SKIP %s %s | %s", symbol, tf, gate_reason)
@@ -238,7 +241,7 @@ class AlphaCaller:
             if event["type"] == "approaching":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
                 self._log_features(zone, price, "approach")
-                if trade_setup.valid:
+                if trade_setup.valid and alert_settings.is_enabled("approach"):
                     send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                     logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
                 else:
@@ -249,44 +252,46 @@ class AlphaCaller:
                     snipe_setup = build_long_snipe(zone)
                     if snipe_setup is not None:
                         self.sim_store.add_sim_trade_raw(
-                            symbol=symbol, tf=tf, mode="snipe",
+                            symbol=symbol, tf=tf, mode="snipe_long",
                             direction="long", entry=snipe_setup.trade.entry,
                             sl=snipe_setup.trade.sl, tp1=snipe_setup.trade.tp1,
                             tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
                             born_time=int(zone.born_time),
                         )
-                        send_snipe_alert(
-                            snipe_type="long_limit", symbol=symbol, tf=tf,
-                            trade_setup=snipe_setup, chart_png=chart_png,
-                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                        )
-                        logger.info("Snipe LONG approach %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
+                        if alert_settings.is_enabled("snipe_long"):
+                            send_snipe_alert(
+                                snipe_type="long_limit", symbol=symbol, tf=tf,
+                                trade_setup=snipe_setup, chart_png=chart_png,
+                                zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
+                            )
+                            logger.info("Snipe LONG approach %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
             elif event["type"] == "touch":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
                 self._log_features(zone, price, "touch")
-                if trade_setup.valid:
+                if trade_setup.valid and alert_settings.is_enabled("touch"):
                     send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                     logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
                 else:
                     logger.info("Touch SKIP %s %s | %s", symbol, tf, trade_setup.status)
                 # Snipe long on touch (price entering zone — refine to zone.bottom limit)
                 if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False):
-                    zone._snipe_long_sent = True  # one snipe per zone (approach OR touch)
+                    zone._snipe_long_sent = True
                     snipe_setup = build_long_snipe(zone)
                     if snipe_setup is not None:
                         self.sim_store.add_sim_trade_raw(
-                            symbol=symbol, tf=tf, mode="snipe",
+                            symbol=symbol, tf=tf, mode="snipe_long",
                             direction="long", entry=snipe_setup.trade.entry,
                             sl=snipe_setup.trade.sl, tp1=snipe_setup.trade.tp1,
                             tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
                             born_time=int(zone.born_time),
                         )
-                        send_snipe_alert(
-                            snipe_type="long_limit", symbol=symbol, tf=tf,
-                            trade_setup=snipe_setup, chart_png=chart_png,
-                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                        )
-                        logger.info("Snipe LONG touch %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
+                        if alert_settings.is_enabled("snipe_long"):
+                            send_snipe_alert(
+                                snipe_type="long_limit", symbol=symbol, tf=tf,
+                                trade_setup=snipe_setup, chart_png=chart_png,
+                                zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
+                            )
+                            logger.info("Snipe LONG touch %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
 
         # Check new FVG
         new_zone = self.tracker.check_new_fvg(symbol, tf)
@@ -311,7 +316,7 @@ class AlphaCaller:
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
             await self._store_fvg_all_modes(new_zone, chart_path, price)
 
-            if trade_setup.valid:
+            if trade_setup.valid and alert_settings.is_enabled("new_fvg"):
                 send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
                 logger.info(
                     "New FVG alert %s %s | strength=%d rsi=%s",
@@ -325,6 +330,7 @@ class AlphaCaller:
             "Alpha Caller (Binance WS + REST fallback) | tfs=%d",
             len(TIMEFRAMES),
         )
+        start_command_poller()
         await self.poller.run()
 
 
