@@ -187,3 +187,30 @@ def test_confluence_direction_filters():
     bars_by_tf = {"1h": bars_touch, "2h": [], "4h": []}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=-1, bars_by_tf=bars_by_tf)
     assert score == 0
+
+
+from strategy_v2 import _trigger_zone_touched
+
+
+def test_trigger_no_zone_returns_none():
+    bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 5)]
+    assert _trigger_zone_touched(zone=None, bars=bars) is None
+
+
+def test_trigger_zone_not_touched_returns_none():
+    z = make_zone(top=100.5, bottom=99.5)
+    bars = [make_bar(i, 200, 201, 199, 200.5) for i in range(1, 5)]
+    assert _trigger_zone_touched(zone=z, bars=bars) is None
+
+
+def test_trigger_zone_touched_returns_zone():
+    z = make_zone(top=100.5, bottom=99.5)
+    bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 5)]
+    assert _trigger_zone_touched(zone=z, bars=bars) is z
+
+
+def test_trigger_zone_fully_mitigated_returns_none():
+    z = make_zone(top=100.5, bottom=99.5)
+    z.mitigation = 1.0
+    bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 5)]
+    assert _trigger_zone_touched(zone=z, bars=bars) is None

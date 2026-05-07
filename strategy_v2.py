@@ -85,3 +85,15 @@ def _compute_htf_confluence(
         if touched:
             score += V2_HTF_WEIGHTS[tf]
     return score, touches
+
+
+def _trigger_zone_touched(zone: Optional[FVGZone], bars: List) -> Optional[FVGZone]:
+    """Return zone if last closed bar touched it (and zone is not fully mitigated)."""
+    if zone is None or zone.mitigation >= 1.0:
+        return None
+    if not bars:
+        return None
+    last = bars[-1]
+    if last.high >= zone.bottom and last.low <= zone.top:
+        return zone
+    return None
