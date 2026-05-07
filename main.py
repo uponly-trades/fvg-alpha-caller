@@ -217,6 +217,72 @@ class AlphaCaller:
                     send_trade_recap(name, self.sim_store.daily_recap(now.date().isoformat()))
                 return
 
+    def _v2_backfill_zones(self, symbol: str, tf: str, bars) -> None:
+        """Scan a warm-up buffer with sliding 3-bar windows and register every
+        FVG into tracker.zones. Idempotent — zone_id collision is the dedup key.
+
+        Why: live capture only fires on bar close, so HTF zones (1h/2h/4h)
+        wouldn't populate for hours after a restart, leaving evaluate_v2_signal
+        confluence-blocked. Backfill closes that gap immediately.
+
+        Must NOT touch tracker.last_bar_time — the next live close needs to
+        proceed through _v2_capture_fvg unchanged.
+        """
+        if not bars or len(bars) < 3:
+            return
+        from fvg_engine import FVGZone
+        for i in range(2, len(bars)):
+            window = bars[i - 2:i + 1]
+            fvg = detect_fvg(window, symbol=symbol)
+            if not fvg:
+                continue
+            zone_id = f"{symbol}_{tf}_{fvg['born_time']}_{fvg['direction']}"
+            if zone_id in self.tracker.zones:
+                continue
+            fvg["symbol"] = symbol
+            try:
+                s = calc_strength(window, fvg, symbol=symbol, existing_zones=self.tracker.zones)
+            except Exception as e:
+                logger.warning("backfill calc_strength fail %s %s: %s", symbol, tf, e)
+                continue
+            zone = FVGZone(
+                symbol=symbol, tf=tf, direction=fvg["direction"],
+                top=fvg["top"], bottom=fvg["bottom"], size=fvg["size"],
+                born_time=fvg["born_time"],
+                main_strength=s["main_strength"], bull_strength=s["bull_strength"],
+                bear_strength=s["bear_strength"], label=s["label"],
+                rsi=s["rsi"], atr=s["atr"], sl=s["sl"], tp1=s["tp1"], tp2=s["tp2"],
+                price=s["price"],
+                vol_change_pct=s["vol_change_pct"], price_change_pct=s["price_change_pct"],
+                candle_body_pct=s["candle_body_pct"], dist_to_zone=s["dist_to_zone"],
+                dominance_bias=s["dominance_bias"], btc_trend=s["btc_trend"],
+                dominance_state=s["dominance_state"], btc_state=s["btc_state"],
+                volume_spike_ratio=s["volume_spike_ratio"],
+                displacement_ok=s["displacement_ok"],
+                btc_alignment_ok=s["btc_alignment_ok"],
+                confluence_tf_count=s["confluence_tf_count"],
+                price_change_24h_pct=s["price_change_24h_pct"],
+                confirm_score=s["confirm_score"], confirm_label=s["confirm_label"],
+            )
+            self.tracker.zones[zone_id] = zone
+
+    def _v2_backfill_all(self) -> None:
+        """Walk all WS warm-up buffers and backfill zones once."""
+        before = len(self.tracker.zones)
+        for key, bars in list(self.poller._buffers.items()):
+            if "_" not in key:
+                continue
+            symbol, tf = key.rsplit("_", 1)
+            self.tracker.update_buffer(symbol, tf, bars)
+            self._v2_backfill_zones(symbol, tf, bars)
+        added = len(self.tracker.zones) - before
+        try:
+            self.tracker._save_zones()
+        except Exception as e:
+            logger.warning("backfill save_zones failed: %s", e)
+        logger.info("v2 backfill complete | zones %d -> %d (+%d)",
+                    before, len(self.tracker.zones), added)
+
     def _v2_capture_fvg(self, symbol: str, tf: str, bars) -> None:
         """v2 FVG ingest: bypass MIN_STRENGTH_TO_ALERT, store ANY detected FVG."""
         key = (symbol, tf)
@@ -592,13 +658,38 @@ class AlphaCaller:
             else:
                 logger.info("New FVG SKIP %s %s | %s", symbol, tf, trade_setup.status)
 
+    async def _v2_backfill_when_warm(self) -> None:
+        """Wait until WS warm-up has populated buffers, then backfill all
+        historical FVGs once. Bounded by a generous timeout so a slow REST
+        fetch doesn't block forever — partial backfill is still a win."""
+        if STRATEGY_VERSION != "v2":
+            return
+        from config import SYMBOLS
+        target = len(SYMBOLS) * len(TIMEFRAMES)
+        deadline = time.time() + 300  # 5 min cap
+        while time.time() < deadline:
+            ready = len(self.poller._buffers)
+            # Backfill once we hit ≥80% coverage so HTF signals can fire fast,
+            # even if one or two pairs lag behind.
+            if ready >= max(1, int(target * 0.8)):
+                break
+            await asyncio.sleep(2)
+        try:
+            self._v2_backfill_all()
+        except Exception as e:
+            logger.warning("v2 backfill failed: %s", e)
+
     async def run(self):
         logger.info(
             "Alpha Caller (Binance WS + REST fallback) | tfs=%d",
             len(TIMEFRAMES),
         )
+        backfill_task = asyncio.create_task(self._v2_backfill_when_warm())
         # start_command_poller() — disabled: dedicated telegram_bot handles all commands
-        await self.poller.run()
+        try:
+            await self.poller.run()
+        finally:
+            backfill_task.cancel()
 
 
 async def main():
