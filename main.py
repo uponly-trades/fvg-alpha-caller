@@ -286,10 +286,13 @@ class AlphaCaller:
             logger.info("v2 cooldown skip %s %s", symbol, sig.direction_str)
             return
         signal_id = f"{symbol}_{sig.trigger_tf}_{sig.zone_born_time}_{sig.direction}"
-        self.v2_trail.register(
+        registered = self.v2_trail.register(
             signal_id=signal_id, symbol=symbol, trigger_tf=sig.trigger_tf,
             direction=sig.direction, entry=sig.entry, sl=sig.sl, atr=sig.atr,
         )
+        if registered is None:
+            logger.warning("v2 duplicate signal_id %s — alert suppressed", signal_id)
+            return
         send_v2_alert(sig, timeframe_bars=bars_by_tf)
         logger.info(
             "v2 signal %s %s %s | score=%d entry=%g sl=%g",
@@ -306,12 +309,17 @@ class AlphaCaller:
         # =====================================================
         if STRATEGY_VERSION == "v2":
             self.tracker.update_buffer(symbol, tf, bars)
-            # 1. Detect & store any FVG (any strength) on this bar
+            self.sim_store.update_open_trades(symbol, bars[-1])
+            self._maybe_send_recap()
+            # 1. Mitigation pass — drops fully-mitigated zones so HTF/trigger checks
+            # don't include stale ones. Fixes "active forever" bug.
+            self.tracker.check_mitigation(symbol, tf, bars)
+            # 2. Detect & store any FVG (any strength) on this bar
             self._v2_capture_fvg(symbol, tf, bars)
-            # 2. Trail bookkeeping for any open v2 trades on this trigger TF
+            # 3. Trail bookkeeping for any open v2 trades on this trigger TF
             if tf in V2_TRIGGER_TFS:
                 self._v2_handle_trail(symbol, tf, bars)
-            # 3. Evaluate signal only on trigger TFs (15m / 30m)
+            # 4. Evaluate signal only on trigger TFs (15m / 30m)
             if tf in V2_TRIGGER_TFS:
                 self._v2_try_emit_signal(symbol, tf, bars)
             return
