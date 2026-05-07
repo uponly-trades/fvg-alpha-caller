@@ -16,8 +16,12 @@ _SOCKS5_URL = os.environ.get("SOCKS5_PROXY_URL")  # e.g. socks5h://user:pass@hos
 _PROXIES = {"https": _SOCKS5_URL, "http": _SOCKS5_URL} if _SOCKS5_URL else None
 
 # Rate-limit backoff config
-_RATE_LIMIT_RETRIES = int(os.environ.get("FETCH_RETRIES", "3"))
-_RATE_LIMIT_BASE_SLEEP = float(os.environ.get("FETCH_BACKOFF_BASE_SEC", "2.0"))
+# Defaults sized for Binance Futures cold-start: 5 retries × up to 60s sleep
+# covers a ~3-5min IP ban (typical 418 duration). Most bans resolve well before
+# the 5th retry; the higher ceiling is just insurance for the worst burst.
+_RATE_LIMIT_RETRIES = int(os.environ.get("FETCH_RETRIES", "5"))
+_RATE_LIMIT_BASE_SLEEP = float(os.environ.get("FETCH_BACKOFF_BASE_SEC", "5.0"))
+_RATE_LIMIT_MAX_SLEEP = float(os.environ.get("FETCH_BACKOFF_MAX_SEC", "60.0"))
 _RATE_LIMIT_STATUS = {418, 429}
 
 
@@ -47,7 +51,7 @@ def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
                     sleep_s = float(retry_after) if retry_after else _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
                 except ValueError:
                     sleep_s = _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
-                sleep_s = min(sleep_s, 30.0)
+                sleep_s = min(sleep_s, _RATE_LIMIT_MAX_SLEEP)
                 logger.warning(
                     "Fetch klines %s %s rate-limited %d (attempt %d/%d) — sleep %.1fs",
                     symbol, tf, resp.status_code, attempt + 1, _RATE_LIMIT_RETRIES, sleep_s,

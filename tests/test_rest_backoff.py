@@ -49,6 +49,19 @@ def test_429_also_triggers_backoff():
     assert len(bars) == 1
 
 
+def test_max_sleep_ceiling_caps_long_retry_after():
+    """Retry-After header beyond _RATE_LIMIT_MAX_SLEEP must be clamped."""
+    sample = [[1000, "1", "2", "0.5", "1.5", "10"], [2000, "1.5", "3", "1", "2", "20"]]
+    rl = _make_resp(418)
+    rl.headers = {"Retry-After": "9999"}  # absurdly long
+    responses = [rl, _make_resp(200, sample)]
+    sleeps = []
+    with patch.object(rest_client.requests, "get", side_effect=responses), \
+         patch.object(rest_client.time, "sleep", side_effect=lambda s: sleeps.append(s)):
+        rest_client.fetch_klines("BTCUSDT", "1h")
+    assert max(sleeps) <= rest_client._RATE_LIMIT_MAX_SLEEP
+
+
 def test_retry_after_header_respected():
     sample = [[1000, "1", "2", "0.5", "1.5", "10"], [2000, "1.5", "3", "1", "2", "20"]]
     rl = _make_resp(429)
