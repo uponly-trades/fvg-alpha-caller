@@ -25,7 +25,7 @@ from telegram import (
     send_touch_alert,
     send_trade_recap,
     send_snipe_alert,
-    start_command_poller,
+
 )
 from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
 import alert_settings
@@ -435,7 +435,7 @@ class AlphaCaller:
             "Alpha Caller (Binance WS + REST fallback) | tfs=%d",
             len(TIMEFRAMES),
         )
-        start_command_poller()
+        # start_command_poller() — disabled: dedicated telegram_bot handles all commands
         await self.poller.run()
 
 
