@@ -42,7 +42,7 @@ async def _existing(conn, user_id: int, decision_id: str) -> bool:
 
 
 async def _symbol_meta(ex, symbol: str) -> SymbolMeta:
-    info = await ex.fapiPublic_get_exchangeinfo()
+    info = await ex.fapiPublicGetExchangeInfo()
     for s in info["symbols"]:
         if s["symbol"] == symbol:
             step = 0.001
