@@ -236,10 +236,20 @@ class AlphaCaller:
                         born_time=retest_hit.born_time,
                     )
                     if alert_settings.is_enabled("snipe_short"):
+                        retest_chart = generate_chart(
+                            bars=bars,
+                            zone_top=retest_hit.zone_top,
+                            zone_bottom=retest_hit.resistance,
+                            zone_direction=-1,
+                            symbol=symbol, tf=tf,
+                            timeframe_bars=bars_by_tf,
+                            trade_plan=snipe_setup.trade,
+                        )
                         send_snipe_alert(
                             snipe_type="retest_short",
                             symbol=symbol, tf=tf,
                             trade_setup=snipe_setup,
+                            chart_png=retest_chart,
                             timeframe_bars=bars_by_tf,
                         )
                     logger.info("Retest SHORT snipe %s %s | entry=%.6g", symbol, tf, price)
