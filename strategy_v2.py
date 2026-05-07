@@ -46,3 +46,22 @@ def _htf_active_and_touched(
         if b.high >= zone.bottom and b.low <= zone.top:
             return True
     return False
+
+
+def _latest_active_zone(
+    zones: Dict[str, FVGZone],
+    symbol: str,
+    tf: str,
+    direction: int,
+) -> Optional[FVGZone]:
+    """Return the most recently born, not-fully-mitigated zone for (symbol, tf, direction)."""
+    candidates = [
+        z for z in zones.values()
+        if z.symbol == symbol
+        and z.tf == tf
+        and z.direction == direction
+        and z.mitigation < 1.0
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda z: z.born_time)

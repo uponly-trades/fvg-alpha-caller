@@ -108,3 +108,37 @@ def test_htf_zone_fully_mitigated_returns_false():
     bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)]
     result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
     assert result is False
+
+
+from strategy_v2 import _latest_active_zone
+
+
+def test_latest_active_zone_returns_none_when_empty():
+    assert _latest_active_zone(zones={}, symbol="BTCUSDT", tf="1h", direction=1) is None
+
+
+def test_latest_active_zone_filters_by_symbol_tf_direction():
+    z_match = make_zone(symbol="BTCUSDT", tf="1h", direction=1, born_time=2000)
+    z_wrong_symbol = make_zone(symbol="ETHUSDT", tf="1h", direction=1, born_time=3000)
+    z_wrong_tf = make_zone(symbol="BTCUSDT", tf="2h", direction=1, born_time=3000)
+    z_wrong_dir = make_zone(symbol="BTCUSDT", tf="1h", direction=-1, born_time=3000)
+    zones = {"a": z_match, "b": z_wrong_symbol, "c": z_wrong_tf, "d": z_wrong_dir}
+    result = _latest_active_zone(zones=zones, symbol="BTCUSDT", tf="1h", direction=1)
+    assert result is z_match
+
+
+def test_latest_active_zone_picks_youngest():
+    z_old = make_zone(symbol="BTCUSDT", tf="1h", direction=1, born_time=1000)
+    z_new = make_zone(symbol="BTCUSDT", tf="1h", direction=1, born_time=2000)
+    zones = {"a": z_old, "b": z_new}
+    result = _latest_active_zone(zones=zones, symbol="BTCUSDT", tf="1h", direction=1)
+    assert result is z_new
+
+
+def test_latest_active_zone_skips_fully_mitigated():
+    z_mit = make_zone(symbol="BTCUSDT", tf="1h", direction=1, born_time=2000)
+    z_mit.mitigation = 1.0
+    z_active = make_zone(symbol="BTCUSDT", tf="1h", direction=1, born_time=1500)
+    zones = {"a": z_mit, "b": z_active}
+    result = _latest_active_zone(zones=zones, symbol="BTCUSDT", tf="1h", direction=1)
+    assert result is z_active
