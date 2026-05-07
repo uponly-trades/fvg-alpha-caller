@@ -52,10 +52,12 @@ async def predict(
     zone_direction: int,
     symbol: str = "",
     tf: str = "",
+    htf_bars: Optional[List[Dict]] = None,
 ) -> Optional[Dict]:
     """
     Call Kronos service. Returns decision dict or None if unreachable/error.
     Decision dict keys: direction, timeframe, entry, sl, tp1, tp2, confidence.
+    htf_bars: optional 4h OHLCV bars for HTF RSI7 gate inside Kronos.
     """
     payload = {
         "bars": bars[-512:],
@@ -65,6 +67,8 @@ async def predict(
         "symbol": symbol,
         "tf": tf,
     }
+    if htf_bars:
+        payload["htf_bars"] = htf_bars[-50:]  # 50 × 4h = 200h context, enough for RSI7
 
     sem = _get_sem()
     last_err: Optional[Exception] = None

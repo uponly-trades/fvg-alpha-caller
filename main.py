@@ -84,6 +84,13 @@ class AlphaCaller:
         ]
         atr = float(getattr(zone, "atr", 0.0) or 0.0)
 
+        htf_raw = bars_by_tf.get("4h", [])
+        htf_bars = [
+            {"open": float(b.open), "high": float(b.high), "low": float(b.low),
+             "close": float(b.close), "volume": float(b.volume)}
+            for b in htf_raw
+        ] if htf_raw else None
+
         kronos = await kronos_client.predict(
             bars=ohlcv,
             current_price=float(current_price),
@@ -91,6 +98,7 @@ class AlphaCaller:
             zone_direction=int(zone.direction),
             symbol=zone.symbol,
             tf=zone.tf,
+            htf_bars=htf_bars,
         )
         if kronos is not None:
             setup = build_trade_from_kronos(kronos, zone)
