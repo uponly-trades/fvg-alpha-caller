@@ -578,7 +578,7 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
     """Send a v2 entry alert. `signal` is a strategy_v2.V2Signal instance."""
     direction_emoji = "🟢 LONG" if signal.direction == 1 else "🔴 SHORT"
     status_trade = "NEW LONG" if signal.direction == 1 else "NEW SHORT"
-    title = f"({status_trade} - FRESH FVG | {signal.symbol} | {signal.trigger_tf})"
+    title = f"({status_trade} | {signal.symbol} | {signal.trigger_tf})"
 
     sl_pct = (signal.sl - signal.entry) / signal.entry * 100 if signal.entry else 0.0
     tp = getattr(signal, "tp", None)
@@ -605,7 +605,7 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         tp_line,
         "",
         f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/4)",
-        f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} FVG touch",
+        f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} touch",
         f"HTF:     {htf_line}",
         "",
         f"<a href='{_tv_link(signal.symbol, signal.trigger_tf)}'>📊 TradingView</a>",
