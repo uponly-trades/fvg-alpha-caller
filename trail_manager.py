@@ -97,3 +97,37 @@ def _on_bar_close(self, symbol: str, tf: str, bars) -> List[TrailUpdate]:
 
 
 TrailManager.on_bar_close = _on_bar_close
+
+
+@dataclass
+class TrailStop:
+    signal_id: str
+    symbol: str
+    direction: int
+    sl_at_stop: float
+    last_price: float
+
+
+def _check_stop_hit(self, symbol: str, last_price: float) -> List[TrailStop]:
+    stops: List[TrailStop] = []
+    for state in self._states.values():
+        if state.closed:
+            continue
+        if state.symbol != symbol:
+            continue
+        hit = (
+            (state.direction == 1 and last_price <= state.current_sl)
+            or (state.direction == -1 and last_price >= state.current_sl)
+        )
+        if hit:
+            state.closed = True
+            state.close_reason = "trail_stop"
+            stops.append(TrailStop(
+                signal_id=state.signal_id, symbol=symbol,
+                direction=state.direction, sl_at_stop=state.current_sl,
+                last_price=last_price,
+            ))
+    return stops
+
+
+TrailManager.check_stop_hit = _check_stop_hit

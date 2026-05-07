@@ -97,3 +97,49 @@ def test_trail_skips_when_only_one_bar():
     bars = [make_bar(1, 99.0, 100.0, 99.0, 99.5)]
     updates = tm.on_bar_close("BTCUSDT", "15m", bars)
     assert updates == []
+
+
+def test_long_stop_hit_when_price_touches_sl():
+    tm = TrailManager()
+    tm.register(signal_id="x", symbol="BTCUSDT", trigger_tf="15m", direction=1,
+                entry=100.0, sl=99.0, atr=1.0)
+    stops = tm.check_stop_hit("BTCUSDT", last_price=99.0)
+    assert len(stops) == 1
+    assert stops[0].signal_id == "x"
+    state = tm.get("x")
+    assert state.closed is True
+
+
+def test_long_no_stop_when_price_above_sl():
+    tm = TrailManager()
+    tm.register(signal_id="x", symbol="BTCUSDT", trigger_tf="15m", direction=1,
+                entry=100.0, sl=99.0, atr=1.0)
+    stops = tm.check_stop_hit("BTCUSDT", last_price=99.5)
+    assert stops == []
+    state = tm.get("x")
+    assert state.closed is False
+
+
+def test_short_stop_hit_when_price_at_or_above_sl():
+    tm = TrailManager()
+    tm.register(signal_id="x", symbol="BTCUSDT", trigger_tf="15m", direction=-1,
+                entry=100.0, sl=101.0, atr=1.0)
+    stops = tm.check_stop_hit("BTCUSDT", last_price=101.0)
+    assert len(stops) == 1
+
+
+def test_check_stop_filters_by_symbol():
+    tm = TrailManager()
+    tm.register(signal_id="x", symbol="ETHUSDT", trigger_tf="15m", direction=1,
+                entry=100.0, sl=99.0, atr=1.0)
+    stops = tm.check_stop_hit("BTCUSDT", last_price=98.0)
+    assert stops == []
+
+
+def test_check_stop_skips_already_closed():
+    tm = TrailManager()
+    tm.register(signal_id="x", symbol="BTCUSDT", trigger_tf="15m", direction=1,
+                entry=100.0, sl=99.0, atr=1.0)
+    tm.check_stop_hit("BTCUSDT", last_price=99.0)
+    stops = tm.check_stop_hit("BTCUSDT", last_price=99.0)
+    assert stops == []
