@@ -122,3 +122,49 @@ def test_backfill_all_runs_per_buffer(caller, monkeypatch):
     monkeypatch.setattr(caller, "_v2_backfill_zones", lambda s, t, b: seen.append((s, t)))
     caller._v2_backfill_all()
     assert sorted(seen) == sorted([("BTCUSDT", "15m"), ("BTCUSDT", "1h"), ("ETHUSDT", "4h")])
+
+
+@pytest.mark.asyncio
+async def test_backfill_when_warm_loops_until_full_coverage(caller, monkeypatch):
+    """The polling wrapper must re-invoke _v2_backfill_all as buffers grow
+    (no fixed deadline that misses late warm-ups). Once coverage hits the
+    full threshold, it must terminate."""
+    import asyncio as _asyncio
+    import main as _main
+
+    monkeypatch.setattr(_main, "STRATEGY_VERSION", "v2")
+    monkeypatch.setattr(_main, "TIMEFRAMES", ["15m", "1h"])
+    import config as _config
+    monkeypatch.setattr(_config, "SYMBOLS", ["A", "B"])
+
+    # Patch the asyncio module that main.py actually uses
+    async def _no_sleep(_s):
+        return None
+    monkeypatch.setattr(_main.asyncio, "sleep", _no_sleep)
+
+    calls = {"n": 0}
+    sequence = [0, 1, 2, 4]  # 4/4 = 100% >= 95% threshold → terminate
+
+    def fake_all():
+        idx = min(calls["n"], len(sequence) - 1)
+        n = sequence[idx]
+        caller.poller._buffers = {f"K{i}": [] for i in range(n)}
+        calls["n"] += 1
+
+    monkeypatch.setattr(caller, "_v2_backfill_all", fake_all)
+    # Pre-populate one buffer so the initial "wait for any buffer" loop exits
+    caller.poller._buffers = {"seed": []}
+
+    await _asyncio.wait_for(caller._v2_backfill_when_warm(), timeout=5)
+    assert calls["n"] >= 3, f"backfill loop only ran {calls['n']} times"
+
+
+@pytest.mark.asyncio
+async def test_backfill_when_warm_returns_when_strategy_not_v2(caller, monkeypatch):
+    """v1 must skip backfill entirely — no buffer poll, no calls."""
+    import main as _main
+    monkeypatch.setattr(_main, "STRATEGY_VERSION", "v1")
+    called = {"n": 0}
+    monkeypatch.setattr(caller, "_v2_backfill_all", lambda: called.update(n=called["n"] + 1))
+    await caller._v2_backfill_when_warm()
+    assert called["n"] == 0

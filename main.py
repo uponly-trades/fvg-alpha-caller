@@ -659,25 +659,50 @@ class AlphaCaller:
                 logger.info("New FVG SKIP %s %s | %s", symbol, tf, trade_setup.status)
 
     async def _v2_backfill_when_warm(self) -> None:
-        """Wait until WS warm-up has populated buffers, then backfill all
-        historical FVGs once. Bounded by a generous timeout so a slow REST
-        fetch doesn't block forever — partial backfill is still a win."""
+        """Periodically backfill zones from WS warm-up buffers until coverage
+        stabilises. Idempotent (zone_id dedup) so safe to re-fire.
+
+        Why a loop: cold-start REST may be 418-banned for many minutes per
+        symbol — a single fixed deadline hits empty/partial buffers and never
+        retries. Continuous polling keeps registering newly-warmed keys as the
+        REST fetch grinds through the fleet.
+        """
         if STRATEGY_VERSION != "v2":
             return
         from config import SYMBOLS
         target = len(SYMBOLS) * len(TIMEFRAMES)
-        deadline = time.time() + 300  # 5 min cap
-        while time.time() < deadline:
+        full_threshold = max(1, int(target * 0.95))
+        hard_deadline = time.time() + 60 * 60  # 60 min absolute cap
+        last_count = -1
+        stable_since: float | None = None
+        # Wait briefly for any buffers to populate before first scan
+        while time.time() < hard_deadline:
             ready = len(self.poller._buffers)
-            # Backfill once we hit ≥80% coverage so HTF signals can fire fast,
-            # even if one or two pairs lag behind.
-            if ready >= max(1, int(target * 0.8)):
+            if ready > 0:
                 break
             await asyncio.sleep(2)
-        try:
-            self._v2_backfill_all()
-        except Exception as e:
-            logger.warning("v2 backfill failed: %s", e)
+        while time.time() < hard_deadline:
+            ready = len(self.poller._buffers)
+            try:
+                self._v2_backfill_all()
+            except Exception as e:
+                logger.warning("v2 backfill failed: %s", e)
+            if ready >= full_threshold:
+                logger.info("v2 backfill done | coverage=%d/%d (>=95%%)", ready, target)
+                return
+            if ready == last_count:
+                if stable_since is None:
+                    stable_since = time.time()
+                elif time.time() - stable_since >= 90:
+                    logger.info(
+                        "v2 backfill done | coverage stable at %d/%d for 90s",
+                        ready, target,
+                    )
+                    return
+            else:
+                stable_since = None
+                last_count = ready
+            await asyncio.sleep(30)
 
     async def run(self):
         logger.info(
