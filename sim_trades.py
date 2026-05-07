@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -270,6 +271,59 @@ class SimTradeStore:
             return True
         except Exception as e:
             logger.error("add_kronos_decision failed: %s", e)
+            return False
+
+    def add_v2_decision(self, signal, signal_id: str) -> bool:
+        """Persist a v2 signal as a kronos_decisions row so trade_executor.signal_poller picks it up.
+
+        valid=true is what poller filters on. tp1=entry+1R (initial executor TP), tp2=entry+2R.
+        Idempotent on (id) — duplicate signal_id returns False.
+        """
+        fvg_id = f"{signal.symbol}-{signal.trigger_tf}-{int(signal.zone_born_time)}"
+        now = datetime.now(timezone.utc)
+        r = abs(float(signal.entry) - float(signal.sl))
+        if signal.direction == 1:
+            tp1 = float(signal.entry) + r
+            tp2 = float(signal.entry) + r * 2
+        else:
+            tp1 = float(signal.entry) - r
+            tp2 = float(signal.entry) - r * 2
+        try:
+            with _cursor() as cur:
+                cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (signal_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO kronos_decisions
+                       (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
+                        current_price, source, status, valid, mode, reason,
+                        direction, entry, sl, tp1, tp2)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        signal_id,
+                        fvg_id,
+                        int(time.time() * 1000),
+                        now.date(),
+                        signal.symbol,
+                        signal.trigger_tf,
+                        "v2_fvg_touch",
+                        int(signal.direction),
+                        float(signal.entry),
+                        "v2",
+                        f"v2 {signal.direction_str.upper()} score={signal.confluence_score}",
+                        True,
+                        signal.direction_str,
+                        f"v2 multi-tf confluence (score={signal.confluence_score})",
+                        signal.direction_str,
+                        float(signal.entry),
+                        float(signal.sl),
+                        tp1,
+                        tp2,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_v2_decision failed: %s", e)
             return False
 
     def add_signal_features(

@@ -117,9 +117,11 @@ STRATEGY_VERSION = os.environ.get("STRATEGY_VERSION", "v1")  # "v1" or "v2"
 KRONOS_ENABLED = os.environ.get("KRONOS_ENABLED", "true").lower() == "true"
 
 # v2 detection params
-V2_TRIGGER_TFS = ["15m", "30m"]              # bullish/bearish FVG touch on these
-V2_HTF_TFS = ["1h", "2h", "4h"]              # confluence sources
-V2_HTF_WEIGHTS = {"1h": 1, "2h": 2, "4h": 3} # display-only confidence score
+V2_TRIGGER_TFS = ["15m"]                                    # bullish/bearish FVG touch on these
+V2_HTF_TFS = ["30m", "1h", "2h", "4h"]                      # confluence sources
+V2_HTF_WEIGHTS = {"30m": 1, "1h": 1, "2h": 1, "4h": 1}      # flat +1 each, max 4
+V2_HTF_MIN_SCORE = int(os.environ.get("V2_HTF_MIN_SCORE", "1"))  # threshold ≥1
+V2_RR = float(os.environ.get("V2_RR", "2.0"))               # display TP = entry ± R×RR
 V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed-candle window for "currently touched"
 ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
 

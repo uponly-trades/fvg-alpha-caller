@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
 from config import (
-    V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS,
+    V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_HTF_MIN_SCORE, V2_RR,
     V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
@@ -12,15 +12,16 @@ from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
 class V2Signal:
     symbol: str
     direction: int                    # 1 long, -1 short
-    trigger_tf: str                   # "15m" or "30m"
+    trigger_tf: str                   # "15m"
     zone_top: float
     zone_bottom: float
     zone_born_time: int
     entry: float
     sl: float
+    tp: float                         # entry ± R × V2_RR (display + initial executor TP2)
     atr: float
-    confluence_score: int             # 1-6
-    htf_touches: Dict[str, bool]      # {"1h": bool, "2h": bool, "4h": bool}
+    confluence_score: int             # 1-4 (flat weights)
+    htf_touches: Dict[str, bool]      # {"30m": bool, "1h": bool, "2h": bool, "4h": bool}
     indicators: Dict[str, float] = field(default_factory=dict)
 
     @property
@@ -115,8 +116,8 @@ def evaluate_v2_signal(
     """Multi-TF FVG touch confluence detector.
 
     Returns V2Signal if:
-      1. 15m or 30m FVG (any strength, any direction) is touched on latest bar.
-      2. At least one of {1h, 2h, 4h} same-direction FVG is active+touched.
+      1. 15m FVG (any strength, any direction) is touched on latest bar.
+      2. HTF confluence score ≥ V2_HTF_MIN_SCORE across {30m, 1h, 2h, 4h}.
     """
     for direction in (1, -1):
         for trigger_tf in V2_TRIGGER_TFS:
@@ -125,7 +126,7 @@ def evaluate_v2_signal(
             if triggered is None:
                 continue
             score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
-            if score < 1:
+            if score < V2_HTF_MIN_SCORE:
                 continue
 
             atr_val = float(triggered.atr) if triggered.atr else 0.0
@@ -141,6 +142,8 @@ def evaluate_v2_signal(
 
             sl = _compute_sl(triggered, atr_val)
             entry = float(bars_by_tf[trigger_tf][-1].close)
+            r = abs(entry - sl)
+            tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
 
             return V2Signal(
                 symbol=symbol,
@@ -151,6 +154,7 @@ def evaluate_v2_signal(
                 zone_born_time=triggered.born_time,
                 entry=entry,
                 sl=sl,
+                tp=tp,
                 atr=atr_val,
                 confluence_score=score,
                 htf_touches=touches,

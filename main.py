@@ -4,6 +4,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 # trigger-TF duration in seconds (used by v2 freshness guard)
 _TF_SECONDS = {"15m": 15 * 60, "30m": 30 * 60, "1h": 60 * 60, "2h": 2 * 60 * 60, "4h": 4 * 60 * 60}
@@ -382,6 +383,15 @@ class AlphaCaller:
         try:
             trigger_bars = bars_by_tf.get(sig.trigger_tf, []) or bars
             if trigger_bars and len(trigger_bars) >= 3:
+                r = abs(float(sig.entry) - float(sig.sl))
+                tp1 = sig.entry + r if sig.direction == 1 else sig.entry - r
+                v2_plan = SimpleNamespace(
+                    entry=float(sig.entry),
+                    sl=float(sig.sl),
+                    tp1=float(tp1),
+                    tp2=float(sig.tp),
+                    direction=sig.direction_str,
+                )
                 chart_png = generate_chart(
                     bars=trigger_bars[-100:],
                     zone_top=sig.zone_top,
@@ -390,14 +400,21 @@ class AlphaCaller:
                     symbol=symbol,
                     tf=sig.trigger_tf,
                     timeframe_bars=bars_by_tf,
+                    trade_plan=v2_plan,
                 )
         except Exception as e:
             logger.warning("v2 chart render failed %s %s: %s", symbol, sig.trigger_tf, e)
         send_v2_alert(sig, timeframe_bars=bars_by_tf, chart_png=chart_png)
+        # Persist as kronos_decisions row → trade_executor.signal_poller picks it
+        # up and places the order on each user with API keys + enabled.
+        try:
+            self.sim_store.add_v2_decision(sig, signal_id)
+        except Exception as e:
+            logger.error("v2 decision persist failed %s: %s", signal_id, e)
         logger.info(
-            "v2 signal %s %s %s | score=%d entry=%g sl=%g chart=%s",
+            "v2 signal %s %s %s | score=%d entry=%g sl=%g tp=%g chart=%s",
             symbol, sig.trigger_tf, sig.direction_str,
-            sig.confluence_score, sig.entry, sig.sl,
+            sig.confluence_score, sig.entry, sig.sl, sig.tp,
             "yes" if chart_png else "no",
         )
 

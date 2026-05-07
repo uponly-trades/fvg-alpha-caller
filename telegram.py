@@ -547,7 +547,7 @@ def _send_photo(caption: str, png_bytes: bytes) -> bool:
 # =====================================================
 
 def _v2_confluence_stars(score: int) -> str:
-    n = max(0, min(score, 6))
+    n = max(0, min(score, 4))
     return "⭐" * n if n > 0 else "—"
 
 
@@ -581,12 +581,20 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
     title = f"({status_trade} - FRESH FVG | {signal.symbol} | {signal.trigger_tf})"
 
     sl_pct = (signal.sl - signal.entry) / signal.entry * 100 if signal.entry else 0.0
+    tp = getattr(signal, "tp", None)
+    tp_pct = (tp - signal.entry) / signal.entry * 100 if (tp and signal.entry) else 0.0
 
     htf_line_parts = []
-    for tf in ("1h", "2h", "4h"):
+    for tf in ("30m", "1h", "2h", "4h"):
         mark = "✓" if signal.htf_touches.get(tf) else "·"
         htf_line_parts.append(f"{tf}{mark}")
     htf_line = " ".join(htf_line_parts)
+
+    tp_line = (
+        f"🎯 TP:    <code>{tp:g}</code> ({tp_pct:+.2f}%) RR 1:2"
+        if tp else
+        f"🎯 TP:    trail (RR 1:∞)"
+    )
 
     lines = [
         f"<b>{title}</b>",
@@ -594,9 +602,9 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         f"{direction_emoji}",
         f"📍 Entry: <code>{signal.entry:g}</code>",
         f"🛑 SL:    <code>{signal.sl:g}</code> ({sl_pct:+.2f}%)",
-        f"🎯 TP:    trail (RR 1:∞)",
+        tp_line,
         "",
-        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/6)",
+        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/4)",
         f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} FVG touch",
         f"HTF:     {htf_line}",
         "",

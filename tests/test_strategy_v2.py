@@ -12,15 +12,17 @@ def test_v2signal_fields_present():
         zone_born_time=1714915200000,
         entry=67250.0,
         sl=66890.0,
+        tp=67970.0,
         atr=120.0,
         confluence_score=3,
-        htf_touches={"1h": False, "2h": False, "4h": True},
+        htf_touches={"30m": False, "1h": False, "2h": False, "4h": True},
         indicators={"stoch_rsi_15m": 23.0, "vol_change_pct": 18.0},
     )
     assert sig.direction == 1
     assert sig.trigger_tf == "15m"
     assert sig.confluence_score == 3
     assert sig.htf_touches["4h"] is True
+    assert sig.tp == 67970.0
 
 
 from rest_client import Bar
@@ -149,34 +151,35 @@ from strategy_v2 import _compute_htf_confluence
 
 def test_confluence_no_htf_zones_returns_zero():
     zones = {}
-    bars_by_tf = {"1h": [], "2h": [], "4h": []}
+    bars_by_tf = {"30m": [], "1h": [], "2h": [], "4h": []}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
     assert score == 0
-    assert touches == {"1h": False, "2h": False, "4h": False}
+    assert touches == {"30m": False, "1h": False, "2h": False, "4h": False}
 
 
-def test_confluence_only_4h_touched_returns_score_3():
+def test_confluence_only_4h_touched_returns_score_1():
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5)
     zones = {"a": z_4h}
     bars_4h = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)]
     bars_4h.append(make_bar(25, 100, 100.6, 99.4, 100.0))
-    bars_by_tf = {"1h": [], "2h": [], "4h": bars_4h}
+    bars_by_tf = {"30m": [], "1h": [], "2h": [], "4h": bars_4h}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
-    assert score == 3
-    assert touches == {"1h": False, "2h": False, "4h": True}
+    assert score == 1
+    assert touches == {"30m": False, "1h": False, "2h": False, "4h": True}
 
 
-def test_confluence_all_three_touched_returns_score_6():
+def test_confluence_all_four_touched_returns_score_4():
     bars_touch = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 24)]
     bars_touch.append(make_bar(24, 100, 100.6, 99.4, 100.0))
+    z_30m = make_zone(tf="30m", direction=1, top=100.5, bottom=99.5, born_time=50)
     z_1h = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5, born_time=100)
     z_2h = make_zone(tf="2h", direction=1, top=100.5, bottom=99.5, born_time=200)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, born_time=300)
-    zones = {"a": z_1h, "b": z_2h, "c": z_4h}
-    bars_by_tf = {"1h": bars_touch, "2h": bars_touch, "4h": bars_touch}
+    zones = {"a": z_1h, "b": z_2h, "c": z_4h, "d": z_30m}
+    bars_by_tf = {"30m": bars_touch, "1h": bars_touch, "2h": bars_touch, "4h": bars_touch}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
-    assert score == 6
-    assert touches == {"1h": True, "2h": True, "4h": True}
+    assert score == 4
+    assert touches == {"30m": True, "1h": True, "2h": True, "4h": True}
 
 
 def test_confluence_direction_filters():
@@ -184,7 +187,7 @@ def test_confluence_direction_filters():
     bars_touch.append(make_bar(24, 100, 100.6, 99.4, 100.0))
     z = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5)
     zones = {"a": z}
-    bars_by_tf = {"1h": bars_touch, "2h": [], "4h": []}
+    bars_by_tf = {"30m": [], "1h": bars_touch, "2h": [], "4h": []}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=-1, bars_by_tf=bars_by_tf)
     assert score == 0
 
@@ -292,12 +295,16 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     assert sig is not None
     assert sig.direction == 1
     assert sig.trigger_tf == "15m"
-    assert sig.confluence_score == 3
+    assert sig.confluence_score == 1
     assert sig.htf_touches["4h"] is True
     assert sig.htf_touches["1h"] is False
+    # tp = entry + 2R for long
+    r = abs(sig.entry - sig.sl)
+    assert abs(sig.tp - (sig.entry + 2 * r)) < 1e-9
 
 
-def test_eval_30m_fallback_when_no_15m_zone():
+def test_eval_no_15m_zone_returns_none_even_with_30m_zone():
+    """30m is HTF in v2, not a trigger TF. Only 15m bears trigger zones."""
     z_30m = make_zone(tf="30m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     z_1h = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_30m, "b": z_1h}
@@ -310,9 +317,7 @@ def test_eval_30m_fallback_when_no_15m_zone():
         "4h": _bars_far_from_zone(z_30m),
     }
     sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
-    assert sig is not None
-    assert sig.trigger_tf == "30m"
-    assert sig.confluence_score == 1
+    assert sig is None
 
 
 def test_eval_short_mirror():
