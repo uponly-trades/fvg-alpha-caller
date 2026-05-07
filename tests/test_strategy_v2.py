@@ -214,3 +214,25 @@ def test_trigger_zone_fully_mitigated_returns_none():
     z.mitigation = 1.0
     bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 5)]
     assert _trigger_zone_touched(zone=z, bars=bars) is None
+
+
+from strategy_v2 import _compute_sl
+
+
+def test_sl_long_below_zone_bottom():
+    z = make_zone(top=100.5, bottom=99.5, direction=1, atr_val=2.0)
+    sl = _compute_sl(zone=z, atr_val=2.0)
+    assert abs(sl - 98.9) < 1e-9
+
+
+def test_sl_short_above_zone_top():
+    z = make_zone(top=100.5, bottom=99.5, direction=-1, atr_val=2.0)
+    sl = _compute_sl(zone=z, atr_val=2.0)
+    assert abs(sl - 101.1) < 1e-9
+
+
+def test_sl_uses_zone_bottom_not_wick():
+    z = make_zone(top=100.5, bottom=99.5, direction=1, atr_val=2.0)
+    sl = _compute_sl(zone=z, atr_val=2.0)
+    assert sl < z.bottom
+    assert sl > z.bottom - 5.0

@@ -97,3 +97,11 @@ def _trigger_zone_touched(zone: Optional[FVGZone], bars: List) -> Optional[FVGZo
     if last.high >= zone.bottom and last.low <= zone.top:
         return zone
     return None
+
+
+def _compute_sl(zone: FVGZone, atr_val: float) -> float:
+    """SL = zone edge ± ATR*buffer. Below FVG bottom for long, above top for short."""
+    buf = atr_val * ATR_BUFFER_V2
+    if zone.direction == 1:
+        return zone.bottom - buf
+    return zone.top + buf
