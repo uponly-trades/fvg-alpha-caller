@@ -230,8 +230,8 @@ def _risk_buffer(zone) -> float:
     zone_size = abs(float(zone.top) - float(zone.bottom))
     atr = float(getattr(zone, "atr", 0.0) or 0.0)
     if atr > 0:
-        return atr * 0.1
-    return zone_size * 0.1
+        return atr * 0.8
+    return zone_size * 0.8
 
 
 def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
