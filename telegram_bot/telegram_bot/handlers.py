@@ -54,6 +54,50 @@ class NumericSetup(StatesGroup):
     waiting_for_value = State()
 
 
+# ── hybrid UX helpers ─────────────────────────────────────────────────────────
+
+async def _edit_or_reply(
+    bot,
+    *,
+    chat_id: int,
+    prompt_msg_id: int | None,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = None,
+) -> None:
+    """Edit the stored prompt message in place; on any failure send a new one.
+
+    Why: keeps multi-step flows in a single bubble so the chat doesn't fill
+    with stale prompts and orphaned confirmations.
+    """
+    if prompt_msg_id is not None:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=prompt_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return
+        except Exception as e:
+            log.debug("edit_message_text fallback (chat=%s msg=%s): %s", chat_id, prompt_msg_id, e)
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+
+
+async def _safe_delete(bot, *, chat_id: int, message_id: int) -> None:
+    """Delete a message; ignore failures (already gone, too old, no perms)."""
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        log.debug("delete_message ignored (chat=%s msg=%s): %s", chat_id, message_id, e)
+
+
 # ── keyboards ────────────────────────────────────────────────────────────────
 
 def main_menu() -> InlineKeyboardMarkup:
@@ -270,30 +314,44 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             parse_mode="HTML",
             reply_markup=back_button(),
         )
+        await state.update_data(prompt_msg_id=cb.message.message_id)
 
     @dp.message(KeySetup.waiting_for_keys)
     async def on_keys_message(m: Message, state: FSMContext):
+        data = await state.get_data()
+        prompt_msg_id = data.get("prompt_msg_id")
+        # Always wipe the user's own message — secrets in chat history.
+        await _safe_delete(m.bot, chat_id=m.chat.id, message_id=m.message_id)
+
         lines = [x.strip() for x in (m.text or "").splitlines() if x.strip()]
         if len(lines) != 2:
-            await m.answer("❌ Send exactly 2 lines: API key, then API secret.")
+            await _edit_or_reply(
+                m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
+                text="❌ Send exactly 2 lines: API key, then API secret.",
+                reply_markup=back_button(),
+            )
             return
+
         api_key, api_secret = lines
         try:
             result = await set_keys(m.from_user.id, api_key, api_secret)
         except ExecutorClientError as e:
             log.warning("setkeys failed telegram_id=%s: %s", m.from_user.id, e)
-            await m.answer(f"❌ Binance key check failed: {e}")
+            await _edit_or_reply(
+                m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
+                text=f"❌ Binance key check failed: {e}",
+                reply_markup=back_button(),
+            )
             return
-        finally:
-            try:
-                await m.delete()
-            except Exception:
-                pass
+
         await state.clear()
         tail = str(result.get("api_key_tail") or api_key[-4:])
-        await m.answer(fmt_key_saved(tail), parse_mode="HTML")
         text = await _dashboard_text(pool, m.from_user.id)
-        await m.answer(text, reply_markup=main_menu(), parse_mode="HTML")
+        await _edit_or_reply(
+            m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
+            text=f"{fmt_key_saved(tail)}\n\n{text}",
+            reply_markup=main_menu(), parse_mode="HTML",
+        )
 
     # ── numeric settings (FSM) ────────────────────────────────────────────────
 
@@ -307,13 +365,14 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     async def _ask_numeric(target, state: FSMContext, key: str):
         cfg = _NUMERIC_CONFIG[key]
         await state.set_state(NumericSetup.waiting_for_value)
-        await state.update_data(numeric_key=key)
         text = f"Enter {cfg['label']} ({cfg['hint']}):"
         if isinstance(target, CallbackQuery):
             await target.answer()
             await target.message.edit_text(text, reply_markup=back_button())
+            await state.update_data(numeric_key=key, prompt_msg_id=target.message.message_id)
         else:
-            await target.answer(text)
+            sent = await target.answer(text, reply_markup=back_button())
+            await state.update_data(numeric_key=key, prompt_msg_id=sent.message_id)
 
     @dp.message(Command("setrisk"))
     async def on_setrisk_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setrisk")
@@ -335,18 +394,30 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     async def on_numeric_value(m: Message, state: FSMContext):
         data = await state.get_data()
         key = data.get("numeric_key", "setrisk")
+        prompt_msg_id = data.get("prompt_msg_id")
         cfg = _NUMERIC_CONFIG[key]
+        # Wipe user's input — keeps flow in single bubble.
+        await _safe_delete(m.bot, chat_id=m.chat.id, message_id=m.message_id)
         try:
             raw = float((m.text or "").strip())
             if raw < cfg["min_v"] or raw > cfg["max_v"]:
                 raise ValueError(f"must be {cfg['hint']}")
             value = int(raw) if cfg["integer"] else raw
         except (ValueError, TypeError) as e:
-            await m.answer(f"❌ Invalid: {e}")
+            await _edit_or_reply(
+                m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
+                text=f"❌ Invalid: {e}\n\nEnter {cfg['label']} ({cfg['hint']}):",
+                reply_markup=back_button(),
+            )
             return
         await state.clear()
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
         async with pool.acquire() as conn:
             await update_setting(conn, telegram_id=m.from_user.id, field=cfg["field"], value=value)
         suffix = "x" if cfg["field"] == "leverage" else "%"
-        await m.answer(f"✅ {cfg['label']} set to {value}{suffix}", reply_markup=main_menu())
+        dashboard = await _dashboard_text(pool, m.from_user.id)
+        await _edit_or_reply(
+            m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
+            text=f"✅ {cfg['label']} set to {value}{suffix}\n\n{dashboard}",
+            reply_markup=main_menu(), parse_mode="HTML",
+        )
