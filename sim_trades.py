@@ -307,6 +307,63 @@ class SimTradeStore:
     def add_trade(self, zone, setup, created_at: int) -> bool:
         return self.add_sim_trade(zone, setup, created_at)
 
+    def add_sim_trade_raw(
+        self,
+        *,
+        symbol: str,
+        tf: str,
+        mode: str,
+        direction: str,
+        entry: float,
+        sl: float,
+        tp1: float,
+        tp2: float,
+        reason: str,
+        born_time: int,
+    ) -> bool:
+        """
+        Insert a sim_trade without requiring a full FVG zone + TradeSetupResult pair.
+        Used by snipe modes that compute trade levels independently.
+        fvg_id is derived from born_time for FK consistency; inserts a minimal fvg_zones
+        row if none exists yet (snipe can fire before add_fvg for retest shorts).
+        """
+        now_ms = int(__import__("time").time() * 1000)
+        fvg_id = f"{symbol}-{tf}-{born_time}"
+        trade_id = f"{fvg_id}-{mode}-{now_ms}"
+        created_dt = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc)
+        try:
+            with _cursor() as cur:
+                # Ensure fvg_zones FK target exists
+                cur.execute("SELECT id FROM fvg_zones WHERE id = %s", (fvg_id,))
+                if not cur.fetchone():
+                    born_dt = datetime.fromtimestamp(born_time / 1000, tz=timezone.utc)
+                    cur.execute(
+                        """INSERT INTO fvg_zones
+                           (id, created_at, date, symbol, tf, direction, zone_top, zone_bottom,
+                            price, strength)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (id) DO NOTHING""",
+                        (fvg_id, born_time, born_dt.date(), symbol, tf, 1, entry, entry, entry, 0),
+                    )
+                cur.execute("SELECT id FROM sim_trades WHERE id = %s", (trade_id,))
+                if cur.fetchone():
+                    return False
+                cur.execute(
+                    """INSERT INTO sim_trades
+                       (id, fvg_id, created_at, date, symbol, tf, mode, direction,
+                        entry, sl, tp1, tp2, status, reason)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open', %s)""",
+                    (
+                        trade_id, fvg_id, now_ms, created_dt.date(),
+                        symbol, tf, mode, direction,
+                        float(entry), float(sl), float(tp1), float(tp2), reason,
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("add_sim_trade_raw failed: %s", e)
+            return False
+
     def update_open_trades(self, symbol: str, bar) -> int:
         try:
             with _cursor() as cur:

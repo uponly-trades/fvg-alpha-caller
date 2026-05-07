@@ -193,6 +193,62 @@ def send_new_fvg_alert(zone, chart_png: Optional[bytes] = None, trade_setup=None
     return _send(msg)
 
 
+def send_snipe_alert(
+    snipe_type: str,          # "long_limit" | "retest_short"
+    symbol: str,
+    tf: str,
+    trade_setup,
+    chart_png: Optional[bytes] = None,
+    zone=None,
+    timeframe_bars: dict = None,
+) -> bool:
+    """Send a snipe entry alert (long limit or retest short)."""
+    if trade_setup is None or trade_setup.trade is None:
+        return False
+    trade = trade_setup.trade
+    tv_url = _tv_link(symbol, tf)
+
+    if snipe_type == "long_limit":
+        icon = "🎯"
+        title = f"SNIPE LONG (limit) | {symbol} | {tf}"
+        dir_line = f"Dir   : 🟢 LONG (limit @ zone bottom)"
+    else:
+        icon = "🩸"
+        title = f"SNIPE SHORT (retest) | {symbol} | {tf}"
+        dir_line = f"Dir   : 🔴 SHORT (retest rejection)"
+
+    lines = [
+        f"{icon} <b>{title}</b>",
+        "",
+        dir_line,
+        f"Entry : <b>{_fmt_price(trade.entry)}</b>",
+        f"SL    : {_fmt_price(trade.sl)}",
+        f"TP1   : {_fmt_price(trade.tp1)}",
+        f"TP2   : {_fmt_price(trade.tp2)}",
+        f"RR    : 1:2",
+        f"Signal: {trade_setup.reason}",
+    ]
+
+    if zone is not None:
+        lines.append(f"Zone  : {_fmt_price(zone.bottom)} — {_fmt_price(zone.top)}")
+
+    ctx_lines = _oi_vol_lines(zone, timeframe_bars or {}) if zone is not None else []
+    if ctx_lines:
+        lines.extend(ctx_lines)
+
+    stoch_lines = _stoch_state_lines(timeframe_bars or {})
+    if stoch_lines:
+        lines.append("")
+        lines.extend(stoch_lines)
+
+    lines.extend(["", f"<a href='{tv_url}'>Open TradingView</a>"])
+    msg = "\n".join(lines)
+
+    if chart_png:
+        return _send_photo(msg, chart_png)
+    return _send(msg)
+
+
 def send_mitigated_alert(zone) -> bool:
     emoji = "🟢" if zone.direction == 1 else "🔴"
     dir_text = "Bullish" if zone.direction == 1 else "Bearish"
