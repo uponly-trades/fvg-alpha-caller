@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -13,6 +14,11 @@ logger = logging.getLogger(__name__)
 # Optional SOCKS5 proxy for Binance (needed when server IP is geo-blocked)
 _SOCKS5_URL = os.environ.get("SOCKS5_PROXY_URL")  # e.g. socks5h://user:pass@host:port
 _PROXIES = {"https": _SOCKS5_URL, "http": _SOCKS5_URL} if _SOCKS5_URL else None
+
+# Rate-limit backoff config
+_RATE_LIMIT_RETRIES = int(os.environ.get("FETCH_RETRIES", "3"))
+_RATE_LIMIT_BASE_SLEEP = float(os.environ.get("FETCH_BACKOFF_BASE_SEC", "2.0"))
+_RATE_LIMIT_STATUS = {418, 429}
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,15 +33,39 @@ class Bar:
 
 
 def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
-    """Fetch closed klines from Binance Futures REST API."""
+    """Fetch closed klines from Binance Futures REST API with backoff on 418/429."""
     url = f"{BASE_URL}/fapi/v1/klines"
     params = {"symbol": symbol, "interval": tf, "limit": limit}
-    try:
-        resp = requests.get(url, params=params, timeout=15, proxies=_PROXIES)
-        resp.raise_for_status()
-        raw = resp.json()
-    except Exception as e:
-        logger.error("Fetch klines failed %s %s: %s", symbol, tf, e)
+    raw = None
+    last_err: Optional[str] = None
+    for attempt in range(_RATE_LIMIT_RETRIES + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=15, proxies=_PROXIES)
+            if resp.status_code in _RATE_LIMIT_STATUS and attempt < _RATE_LIMIT_RETRIES:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    sleep_s = float(retry_after) if retry_after else _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
+                except ValueError:
+                    sleep_s = _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
+                sleep_s = min(sleep_s, 30.0)
+                logger.warning(
+                    "Fetch klines %s %s rate-limited %d (attempt %d/%d) — sleep %.1fs",
+                    symbol, tf, resp.status_code, attempt + 1, _RATE_LIMIT_RETRIES, sleep_s,
+                )
+                time.sleep(sleep_s)
+                continue
+            resp.raise_for_status()
+            raw = resp.json()
+            break
+        except Exception as e:
+            last_err = str(e)
+            if attempt < _RATE_LIMIT_RETRIES:
+                sleep_s = _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
+                time.sleep(min(sleep_s, 10.0))
+                continue
+            break
+    if raw is None:
+        logger.error("Fetch klines failed %s %s: %s", symbol, tf, last_err or "rate-limited")
         return []
 
     bars = []
