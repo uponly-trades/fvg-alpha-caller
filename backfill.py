@@ -14,6 +14,7 @@ import requests
 import psycopg2
 import psycopg2.extras
 
+import binance_limit
 from config import BASE_URL, DATABASE_URL, SYMBOLS, TIMEFRAMES, MIN_STRENGTH_TO_ALERT
 from fvg_engine import detect_fvg, calc_strength, FVGZone
 from trade_combo import evaluate_for_mode, COMBO_TIMEFRAMES, _build_trade_levels
@@ -58,9 +59,14 @@ def fetch_klines(symbol: str, interval: str, limit: int = 1500) -> List[Bar]:
             params["endTime"] = end_time
 
         try:
+            binance_limit.await_capacity_sync(weight_needed=10, raise_when_banned=True)
             resp = requests.get(url, params=params, timeout=15)
+            binance_limit.record_response(resp)
             resp.raise_for_status()
             raw = resp.json()
+        except binance_limit.BinanceBannedError as e:
+            logger.error("backfill aborting %s %s: %s", symbol, interval, e)
+            raise
         except Exception as e:
             logger.warning("fetch_klines %s %s failed: %s", symbol, interval, e)
             break

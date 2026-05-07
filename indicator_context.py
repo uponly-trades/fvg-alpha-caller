@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import requests
 
+import binance_limit
 from config import BASE_URL, TIMEFRAMES
 
 logger = logging.getLogger(__name__)
@@ -180,11 +181,13 @@ def fetch_oi_change_pct(symbol: str, tf: str) -> Optional[float]:
     if cached and now - cached[0] < OI_CACHE_TTL_SEC:
         return cached[1]
     try:
+        binance_limit.await_capacity_sync(weight_needed=1)
         resp = requests.get(
             f"{BASE_URL}/futures/data/openInterestHist",
             params={"symbol": symbol, "period": tf, "limit": 2},
             timeout=10,
         )
+        binance_limit.record_response(resp)
         resp.raise_for_status()
         data = resp.json()
         if not data or len(data) < 2:
@@ -211,11 +214,13 @@ def fetch_long_short_ratio(symbol: str, tf: str) -> Optional[Tuple[float, float]
     if cached and now - cached[0] < LS_CACHE_TTL_SEC:
         return cached[1]
     try:
+        binance_limit.await_capacity_sync(weight_needed=1)
         resp = requests.get(
             f"{BASE_URL}/futures/data/topLongShortPositionRatio",
             params={"symbol": symbol, "period": tf, "limit": 1},
             timeout=10,
         )
+        binance_limit.record_response(resp)
         resp.raise_for_status()
         data = resp.json()
         if not data:

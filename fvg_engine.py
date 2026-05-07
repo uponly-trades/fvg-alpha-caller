@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+import binance_limit
 from config import (
     ATR_LEN, BASE_URL, BTC_NEUTRAL_BAND, CANDLE_WEIGHT, DISPLACEMENT_BODY_PCT,
     DOM_NEUTRAL_BAND, GAP_WEIGHT, INVALID_ATR_BUFFER, INVALID_LOOKAHEAD_BARS,
@@ -32,7 +33,9 @@ def _fetch_closes(symbol: str, interval: str = "1h", limit: int = 60) -> List[fl
     """Fetch recent closed kline closes from Binance Futures."""
     url = f"{BASE_URL}/fapi/v1/klines"
     try:
+        binance_limit.await_capacity_sync(weight_needed=5)
         resp = requests.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=10)
+        binance_limit.record_response(resp)
         resp.raise_for_status()
         raw = resp.json()
         # drop last (forming) candle
@@ -107,7 +110,9 @@ def get_24h_price_change_pct(symbol: str) -> float:
         return _DOMINANCE_CACHE[cache_key]
     try:
         url = f"{BASE_URL}/fapi/v1/ticker/24hr"
+        binance_limit.await_capacity_sync(weight_needed=1)
         resp = requests.get(url, params={"symbol": symbol}, timeout=10)
+        binance_limit.record_response(resp)
         resp.raise_for_status()
         data = resp.json()
         val = float(data.get("priceChangePercent", 0.0))

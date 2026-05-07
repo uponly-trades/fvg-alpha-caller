@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+import binance_limit
 from config import BASE_URL, KLINES_LIMIT, SYMBOLS, TIMEFRAMES
 
 logger = logging.getLogger(__name__)
@@ -44,17 +45,31 @@ def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
     last_err: Optional[str] = None
     for attempt in range(_RATE_LIMIT_RETRIES + 1):
         try:
+            binance_limit.await_capacity_sync(weight_needed=5)
             resp = requests.get(url, params=params, timeout=15, proxies=_PROXIES)
+            binance_limit.record_response(resp)
             if resp.status_code in _RATE_LIMIT_STATUS and attempt < _RATE_LIMIT_RETRIES:
                 retry_after = resp.headers.get("Retry-After")
+                header_present = False
                 try:
-                    sleep_s = float(retry_after) if retry_after else _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
+                    if retry_after:
+                        sleep_s = float(retry_after)
+                        header_present = True
+                    else:
+                        sleep_s = _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
                 except ValueError:
                     sleep_s = _RATE_LIMIT_BASE_SLEEP * (2 ** attempt)
-                sleep_s = min(sleep_s, _RATE_LIMIT_MAX_SLEEP)
+                # Honor full Retry-After when server provides it (a 418 ban can be
+                # 1800+ s — capping guarantees re-ban escalation). Cap only the
+                # exponential-backoff fallback when the header is absent.
+                if not header_present:
+                    sleep_s = min(sleep_s, _RATE_LIMIT_MAX_SLEEP)
+                if resp.status_code == 418:
+                    binance_limit.mark_banned(int(sleep_s) + 1)
                 logger.warning(
-                    "Fetch klines %s %s rate-limited %d (attempt %d/%d) — sleep %.1fs",
+                    "Fetch klines %s %s rate-limited %d (attempt %d/%d) — sleep %.1fs%s",
                     symbol, tf, resp.status_code, attempt + 1, _RATE_LIMIT_RETRIES, sleep_s,
+                    " (Retry-After header)" if header_present else " (backoff)",
                 )
                 time.sleep(sleep_s)
                 continue

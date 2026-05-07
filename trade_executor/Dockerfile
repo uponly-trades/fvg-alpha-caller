@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY trade_executor/pyproject.toml ./
 COPY trade_executor/trade_executor/ ./trade_executor/
+# Shared module from project root — copied into image for circuit-breaker/limit
+COPY binance_limit.py ./binance_limit.py
 
 ENV PYTHONUNBUFFERED=1
 

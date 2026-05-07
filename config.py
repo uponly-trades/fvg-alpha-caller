@@ -1,6 +1,10 @@
 import os
 
-SYMBOLS = [
+# Core symbol set (~120 — Tier 1-3 + new high-volume narratives + memes).
+# Tier 4-5 + smaller infra moved to EXTENDED_SYMBOLS to drop cold-start REST
+# weight burst from ~1025 to ~600 (well under 75% of 2400/min Binance cap).
+# Re-enable extended set: EXTENDED_SYMBOLS_ENABLED=1
+_CORE_SYMBOLS = [
     # --- Tier 1: BTC / ETH / Major L1 ---
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
     "ADAUSDT", "DOGEUSDT", "TRXUSDT", "AVAXUSDT", "LINKUSDT",
@@ -17,16 +21,7 @@ SYMBOLS = [
     "SANDUSDT", "MANAUSDT", "AXSUSDT", "GALAUSDT", "CHZUSDT",
     "ENJUSDT", "IMXUSDT", "FLOWUSDT", "ALICEUSDT", "GMTUSDT",
     "SPELLUSDT", "STXUSDT", "JASMYUSDT", "RNDRUSDT", "FETUSDT",
-    # --- Tier 4: Infrastructure / Oracles / Storage ---
-    "THETAUSDT", "MASKUSDT", "ARUSDT", "LPTUSDT", "RLCUSDT",
-    "BANDUSDT", "KNCUSDT", "BATUSDT", "BELUSDT", "CTSIUSDT",
-    "API3USDT", "DUSKUSDT", "OGNUSDT", "PEOPLEUSDT", "ROSEUSDT",
-    # --- Tier 5: Older altcoins (still liquid) ---
-    "HBARUSDT", "VETUSDT", "NEOUSDT", "IOTAUSDT", "ZILUSDT",
-    "ONTUSDT", "QTUMUSDT", "CELRUSDT", "HOTUSDT", "ONEUSDT",
-    "MTLUSDT", "GTCUSDT", "IOTXUSDT", "ATAUSDT", "C98USDT",
-    "SKLUSDT", "COTIUSDT", "CHRUSDT", "ACHUSDT", "IDUSDT",
-    # --- NEW: High-volume narratives (added 2026-05-05) ---
+    # --- High-volume narratives (added 2026-05-05) ---
     # Privacy / PoW
     "ZECUSDT", "DASHUSDT", "XMRUSDT",
     # Major new L1/L2
@@ -45,6 +40,22 @@ SYMBOLS = [
     # Cross-chain / Infra
     "AXLUSDT", "WUSDT", "ZROUSDT", "ZKUSDT", "CFXUSDT",
     "SIGNUSDT", "ZETAUSDT", "DYMUSDT", "MOVEUSDT", "INITUSDT",
+    # High-volume memes (liquid, great for FVG)
+    "1000PEPEUSDT", "1000SHIBUSDT", "1000BONKUSDT", "1000FLOKIUSDT",
+    "WIFUSDT", "PNUTUSDT", "PENGUUSDT", "NOTUSDT", "ACTUSDT",
+    "DOGSUSDT", "HMSTRUSDT", "POPCATUSDT",
+]
+
+_EXTENDED_SYMBOLS = [
+    # --- Tier 4: Infrastructure / Oracles / Storage ---
+    "THETAUSDT", "MASKUSDT", "ARUSDT", "LPTUSDT", "RLCUSDT",
+    "BANDUSDT", "KNCUSDT", "BATUSDT", "BELUSDT", "CTSIUSDT",
+    "API3USDT", "DUSKUSDT", "OGNUSDT", "PEOPLEUSDT", "ROSEUSDT",
+    # --- Tier 5: Older altcoins (still liquid) ---
+    "HBARUSDT", "VETUSDT", "NEOUSDT", "IOTAUSDT", "ZILUSDT",
+    "ONTUSDT", "QTUMUSDT", "CELRUSDT", "HOTUSDT", "ONEUSDT",
+    "MTLUSDT", "GTCUSDT", "IOTXUSDT", "ATAUSDT", "C98USDT",
+    "SKLUSDT", "COTIUSDT", "CHRUSDT", "ACHUSDT", "IDUSDT",
     # DeFi mid-cap
     "CAKEUSDT", "KAVAUSDT", "QNTUSDT", "SUPERUSDT", "MAVUSDT",
     "DEXEUSDT", "DRIFTUSDT", "ARKMUSDT", "THEUSDT", "EULUSDT",
@@ -54,13 +65,12 @@ SYMBOLS = [
     "SCRTUSDT", "IRYSUSDT", "TNSRUSDT", "YGGUSDT", "CYBERUSDT",
     "SAGAUSDT", "EDUUSDT", "ALTUSDT", "SXTUSDT", "ANIMEUSDT",
     "HIGHUSDT", "BERAUSDT", "SUSDT",
-    # High-volume memes (liquid, great for FVG)
-    "1000PEPEUSDT", "1000SHIBUSDT", "1000BONKUSDT", "1000FLOKIUSDT",
-    "WIFUSDT", "PNUTUSDT", "PENGUUSDT", "NOTUSDT", "ACTUSDT",
-    "DOGSUSDT", "HMSTRUSDT", "POPCATUSDT",
     # NFT / Gaming new wave
     "MEUSDT", "ZORAUSDT", "SUNUSDT", "LUNA2USDT", "SPXUSDT",
 ]
+
+EXTENDED_SYMBOLS_ENABLED = os.environ.get("EXTENDED_SYMBOLS_ENABLED", "0") == "1"
+SYMBOLS = _CORE_SYMBOLS + (_EXTENDED_SYMBOLS if EXTENDED_SYMBOLS_ENABLED else [])
 
 TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h"]
 
