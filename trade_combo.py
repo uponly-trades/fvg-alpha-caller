@@ -10,8 +10,9 @@ HTF_TREND_MIN = 4.0   # 4h_ema20_dist_pct (LONG)
 LTF_VOL_MIN   = 2.0   # 15m_vol_z (LONG)
 LTF_VOL_SPIKE_RATIO_MIN = 1.5  # last closed 15m volume vs prior 20 closed candles
 VOL_Z_MAX = 20.0  # guard against partial/misaligned candle spikes
-LONG_RSI7_MAX = 75.0   # block long entries with 15m RSI7 overbought (>75 → mostly losses)
-LONG_E20_4H_MIN = 4.0  # require strong 4h momentum (1.35-1.77 weak zone removed)
+LONG_RSI7_15M_MAX = 75.0   # block long entries: 15m RSI7 overbought → mostly losses
+LONG_RSI7_4H_MAX  = 75.0   # block long entries: 4h RSI7 overbought → extended, overdue pullback
+LONG_E20_4H_MIN = 4.0      # require strong 4h momentum (1.35-1.77 weak zone removed)
 SHORT_E20D_1H_MAX = 0.0   # 1h_ema20_dist_pct must be < 0 (downtrend)
 SHORT_BB15_MAX    = 0.4   # 15m_bb_pos must be < 0.4 (lower band)
 
@@ -35,8 +36,9 @@ def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
     """
     v2 LONG filter gates (data-driven, n=48 trades):
       1. 15m RSI7 <= 75 — overbought entries lose 88% of the time
-      2. 4h_ema20_dist_pct >= 4.0 — strong HTF momentum only (1.35-1.77 zone: 3:1 loss ratio)
-      3. 15m vol_spike_ratio >= 1.5x stable (not partial candle noise)
+      2. 4h RSI7 <= 75 — extended HTF overbought = overdue pullback
+      3. 4h_ema20_dist_pct >= 4.0 — strong HTF momentum only
+      4. 15m vol_spike_ratio >= 1.5x stable (not partial candle noise)
     """
     bars_4h  = bars_by_tf.get("4h",  [])
     bars_15m = bars_by_tf.get("15m", [])
@@ -45,28 +47,33 @@ def _v2_long_decision(bars_by_tf: Dict[str, List]) -> Dict:
     f4 = extract_tf_features(bars_4h, "4h")
     f15 = extract_tf_features(bars_15m, "15m")
     e20 = f4.get("ema20_dist_pct")
+    rsi7_4h = f4.get("rsi7")
     vol_spike = f15.get("vol_spike_ratio")
     vol_z = f15.get("vol_z")
-    rsi7 = f15.get("rsi7")
-    # Gate 1: RSI7 overbought — data shows RSI7>75 → ~87.5% loss rate
-    if rsi7 is not None and rsi7 > LONG_RSI7_MAX:
+    rsi7_15m = f15.get("rsi7")
+    # Gate 1: 15m RSI7 overbought
+    if rsi7_15m is not None and rsi7_15m > LONG_RSI7_15M_MAX:
         return {"valid": False, "status": "v2 SKIP",
-                "reason": f"15m_rsi7={rsi7:.1f}>{LONG_RSI7_MAX:g} overbought"}
-    # Gate 2: volume spike quality
+                "reason": f"15m_rsi7={rsi7_15m:.1f}>{LONG_RSI7_15M_MAX:g} overbought"}
+    # Gate 2: 4h RSI7 overbought — extended HTF = bad long entry
+    if rsi7_4h is not None and rsi7_4h > LONG_RSI7_4H_MAX:
+        return {"valid": False, "status": "v2 SKIP",
+                "reason": f"4h_rsi7={rsi7_4h:.1f}>{LONG_RSI7_4H_MAX:g} HTF overbought"}
+    # Gate 3: volume spike quality
     if vol_spike is None or vol_spike < LTF_VOL_SPIKE_RATIO_MIN:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"15m_vol_spike<{LTF_VOL_SPIKE_RATIO_MIN:g}x (got {vol_spike})"}
     if vol_z is not None and vol_z > VOL_Z_MAX:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"15m_vol_z>{VOL_Z_MAX:g} unstable (got {vol_z})"}
-    # Gate 3: 4h momentum must be strong
+    # Gate 4: 4h momentum must be strong
     if e20 is None:
         return {"valid": False, "status": "v2 SKIP", "reason": "4h_ema20 missing"}
     if e20 < LONG_E20_4H_MIN:
         return {"valid": False, "status": "v2 SKIP",
                 "reason": f"4h_ema20={e20:.2f}<{LONG_E20_4H_MIN:g} weak HTF momentum"}
     return {"valid": True, "status": "v2 LONG VALID",
-            "reason": f"rsi7={rsi7:.1f} 4h_ema20={e20:.2f} 15m_vol_spike={vol_spike:.2f}x"}
+            "reason": f"15m_rsi7={rsi7_15m:.1f} 4h_rsi7={rsi7_4h:.1f} e20={e20:.2f} spike={vol_spike:.2f}x"}
 
 
 def _v2_short_decision(bars_by_tf: Dict[str, List]) -> Dict:
@@ -266,7 +273,9 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
     """
     Convert Kronos prediction response into TradeSetupResult.
     RANGING → SKIP. Direction must align with zone.direction, else SKIP.
-    SL is re-anchored to zone geometry (kronos has no zone awareness); TPs preserved.
+    SL anchored to FVG zone geometry. TP1/TP2 always recomputed from actual
+    risk (1R and 2R) so RR is always exactly 1:2 regardless of Kronos's
+    raw TP values (which can be arbitrarily small vs a wide zone SL).
     """
     zone_direction = int(zone.direction)
     direction = kronos.get("direction", "RANGING")
@@ -281,12 +290,11 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
-    # SHORT side: filter handled inside evaluate_for_mode (bars-aware).
-    # Kronos path can't see bars — leave SHORT to combo path so filter applies.
+    # SHORT side: combo path disabled — skip
     if zone_direction != 1:
         return TradeSetupResult(
-            "SKIP: SHORT VIA COMBO", False, mode,
-            "bearish FVG routed to combo path for reversal filter",
+            "SKIP: SHORT DISABLED", False, mode,
+            "short WR 25% negative EV, disabled",
             None, {}, {}, source="kronos", kronos_raw=kronos,
         )
 
@@ -302,21 +310,21 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
     entry = float(kronos["entry"])
     kronos_sl = float(kronos["sl"])
     buffer = _risk_buffer(zone)
-    # Zone-anchored SL: SL must sit beyond the FVG (never inside). Widen kronos SL
-    # toward the zone edge if it landed inside or too close. TPs preserved verbatim
-    # because they reflect kronos's predicted excursion.
-    if zone_direction == 1:
-        zone_sl = float(zone.bottom) - buffer
-        sl = min(kronos_sl, zone_sl)
-    else:
-        zone_sl = float(zone.top) + buffer
-        sl = max(kronos_sl, zone_sl)
+    # SL anchored to FVG zone bottom (never inside zone)
+    zone_sl = float(zone.bottom) - buffer
+    sl = min(kronos_sl, zone_sl)
 
-    tp1 = float(kronos["tp1"])
-    tp2 = float(kronos["tp2"])
     risk = abs(entry - sl)
-    reward = abs(tp2 - entry)
-    rr = reward / risk if risk > 0 else 0.0
+    if risk <= 0:
+        return TradeSetupResult(
+            "SKIP: INVALID RISK", False, mode,
+            "entry == sl after zone anchor",
+            None, {}, {}, source="kronos", kronos_raw=kronos,
+        )
+
+    # TP always recomputed from actual risk → guaranteed 1:2 RR
+    tp1 = entry + risk        # 1R
+    tp2 = entry + risk * 2   # 2R
 
     trade = TradeLevels(
         direction=direction.lower(),
@@ -324,7 +332,7 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
         sl=sl,
         tp1=tp1,
         tp2=tp2,
-        rr=rr,
+        rr=2.0,
     )
     status = f"{direction} VALID"
     reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"

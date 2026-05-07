@@ -98,17 +98,26 @@ class AlphaCaller:
                 None, {}, {}, source="kronos",
             )
 
-        # Shadow v2 filter — log parallel decision for compare, no impact on trade
+        # v2 filter — hard gate: if v2 says skip, override Kronos valid signal
         try:
             v2 = v2_decision(zone, bars_by_tf)
         except Exception as e:
             logger.warning("v2_decision failed: %s", e)
             v2 = None
+
+        if v2 and not v2["valid"] and setup.valid:
+            logger.info("v2 gate blocked %s %s | %s", zone.symbol, zone.tf, v2["reason"])
+            from trade_combo import TradeSetupResult
+            setup = TradeSetupResult(
+                f"SKIP: {v2['reason']}", False, setup.mode,
+                v2["reason"], None, {}, {}, source="v2_gate",
+            )
+
         return setup.__class__(
             status=setup.status, valid=setup.valid, mode=setup.mode, reason=setup.reason,
             trade=setup.trade, combo_states=setup.combo_states, sparklines=setup.sparklines,
-            source=setup.source, kronos_raw=setup.kronos_raw,
-            predicted_bars=setup.predicted_bars, v2_decision=v2,
+            source=setup.source, kronos_raw=getattr(setup, "kronos_raw", None),
+            predicted_bars=getattr(setup, "predicted_bars", None), v2_decision=v2,
         )
 
     def _save_chart_png(self, zone, chart_png: bytes) -> str:
