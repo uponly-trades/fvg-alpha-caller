@@ -13,6 +13,7 @@ class TrailState:
     entry: float
     current_sl: float
     atr: float
+    initial_sl: float = 0.0
     last_update_time: int = 0
     closed: bool = False
     close_reason: str = ""
@@ -34,6 +35,7 @@ class TrailManager:
         state = TrailState(
             signal_id=signal_id, symbol=symbol, trigger_tf=trigger_tf,
             direction=direction, entry=entry, current_sl=sl, atr=atr,
+            initial_sl=sl,
         )
         self._states[signal_id] = state
         return state
@@ -53,6 +55,8 @@ class TrailUpdate:
     direction: int
     previous_sl: float
     new_sl: float
+    entry: float = 0.0
+    initial_sl: float = 0.0
 
 
 def _new_sl_long(prev_low: float, atr_val: float) -> float:
@@ -82,6 +86,7 @@ def _on_bar_close(self, symbol: str, tf: str, bars) -> List[TrailUpdate]:
                 updates.append(TrailUpdate(
                     signal_id=state.signal_id, symbol=symbol, trigger_tf=tf,
                     direction=1, previous_sl=prev_sl, new_sl=candidate,
+                    entry=state.entry, initial_sl=state.initial_sl,
                 ))
         else:
             candidate = _new_sl_short(prev.high, state.atr)
@@ -92,6 +97,7 @@ def _on_bar_close(self, symbol: str, tf: str, bars) -> List[TrailUpdate]:
                 updates.append(TrailUpdate(
                     signal_id=state.signal_id, symbol=symbol, trigger_tf=tf,
                     direction=-1, previous_sl=prev_sl, new_sl=candidate,
+                    entry=state.entry, initial_sl=state.initial_sl,
                 ))
     return updates
 

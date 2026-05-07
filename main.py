@@ -255,6 +255,7 @@ class AlphaCaller:
             send_v2_trail_update(
                 symbol=u.symbol, trigger_tf=u.trigger_tf,
                 previous_sl=u.previous_sl, new_sl=u.new_sl, direction=u.direction,
+                entry=u.entry, initial_sl=u.initial_sl,
             )
             logger.info(
                 "v2 trail %s %s %s | %g -> %g",
