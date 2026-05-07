@@ -108,3 +108,23 @@ DATABASE_URL = os.environ.get(
 
 # Binance
 BASE_URL = "https://fapi.binance.com"
+
+
+# =====================================================
+# v2 Strategy (Multi-TF FVG Touch Confluence)
+# =====================================================
+STRATEGY_VERSION = os.environ.get("STRATEGY_VERSION", "v1")  # "v1" or "v2"
+KRONOS_ENABLED = os.environ.get("KRONOS_ENABLED", "true").lower() == "true"
+
+# v2 detection params
+V2_TRIGGER_TFS = ["15m", "30m"]              # bullish/bearish FVG touch on these
+V2_HTF_TFS = ["1h", "2h", "4h"]              # confluence sources
+V2_HTF_WEIGHTS = {"1h": 1, "2h": 2, "4h": 3} # display-only confidence score
+V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed-candle window for "currently touched"
+ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
+
+# v2 trail
+V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
+
+# v2 throttle (mitigate higher alert volume from no-Kronos)
+V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "1800"))  # 30 minutes
