@@ -43,3 +43,57 @@ class TrailManager:
 
     def get(self, signal_id: str) -> Optional[TrailState]:
         return self._states.get(signal_id)
+
+
+@dataclass
+class TrailUpdate:
+    signal_id: str
+    symbol: str
+    trigger_tf: str
+    direction: int
+    previous_sl: float
+    new_sl: float
+
+
+def _new_sl_long(prev_low: float, atr_val: float) -> float:
+    return prev_low - atr_val * V2_TRAIL_ATR_BUFFER
+
+
+def _new_sl_short(prev_high: float, atr_val: float) -> float:
+    return prev_high + atr_val * V2_TRAIL_ATR_BUFFER
+
+
+def _on_bar_close(self, symbol: str, tf: str, bars) -> List[TrailUpdate]:
+    if len(bars) < 2:
+        return []
+    prev = bars[-2]
+    updates: List[TrailUpdate] = []
+    for state in list(self._states.values()):
+        if state.closed:
+            continue
+        if state.symbol != symbol or state.trigger_tf != tf:
+            continue
+        if state.direction == 1:
+            candidate = _new_sl_long(prev.low, state.atr)
+            if candidate > state.current_sl:
+                prev_sl = state.current_sl
+                state.current_sl = candidate
+                state.last_update_time = prev.open_time
+                updates.append(TrailUpdate(
+                    signal_id=state.signal_id, symbol=symbol, trigger_tf=tf,
+                    direction=1, previous_sl=prev_sl, new_sl=candidate,
+                ))
+        else:
+            candidate = _new_sl_short(prev.high, state.atr)
+            if candidate < state.current_sl:
+                prev_sl = state.current_sl
+                state.current_sl = candidate
+                state.last_update_time = prev.open_time
+                updates.append(TrailUpdate(
+                    signal_id=state.signal_id, symbol=symbol, trigger_tf=tf,
+                    direction=-1, previous_sl=prev_sl, new_sl=candidate,
+                ))
+    return updates
+
+
+TrailManager.on_bar_close = _on_bar_close
