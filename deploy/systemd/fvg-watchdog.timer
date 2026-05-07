@@ -1,0 +1,11 @@
+[Unit]
+Description=Run fvg-watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Unit=fvg-watchdog.service
+
+[Install]
+WantedBy=timers.target

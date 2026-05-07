@@ -1,0 +1,8 @@
+[Unit]
+Description=FVG scanner watchdog (restart container on WS stuck)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fvg-watchdog.sh
