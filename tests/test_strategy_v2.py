@@ -236,3 +236,109 @@ def test_sl_uses_zone_bottom_not_wick():
     sl = _compute_sl(zone=z, atr_val=2.0)
     assert sl < z.bottom
     assert sl > z.bottom - 5.0
+
+
+from strategy_v2 import evaluate_v2_signal
+
+
+def _bars_at_zone(zone, n=25):
+    """Build n closed bars all overlapping a zone."""
+    bars = []
+    for i in range(1, n + 1):
+        bars.append(make_bar(i, zone.bottom + 0.1, zone.top + 0.1, zone.bottom - 0.1, zone.bottom + 0.2, 100.0))
+    return bars
+
+
+def _bars_far_from_zone(zone, n=25):
+    """Build n bars far above zone (no overlap)."""
+    far = zone.top + 50.0
+    return [make_bar(i, far, far + 1, far - 1, far + 0.5, 100.0) for i in range(1, n + 1)]
+
+
+def test_eval_no_15m_no_30m_zones_returns_none():
+    zones = {}
+    bars_by_tf = {tf: [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)] for tf in ("15m", "30m", "1h", "2h", "4h")}
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is None
+
+
+def test_eval_15m_touched_no_htf_confluence_returns_none():
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_15m}
+    bars_by_tf = {
+        "15m": _bars_at_zone(z_15m),
+        "30m": _bars_far_from_zone(z_15m),
+        "1h": _bars_far_from_zone(z_15m),
+        "2h": _bars_far_from_zone(z_15m),
+        "4h": _bars_far_from_zone(z_15m),
+    }
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is None
+
+
+def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_15m, "b": z_4h}
+    bars_at = _bars_at_zone(z_15m)
+    bars_by_tf = {
+        "15m": bars_at,
+        "30m": _bars_far_from_zone(z_15m),
+        "1h": _bars_far_from_zone(z_15m),
+        "2h": _bars_far_from_zone(z_15m),
+        "4h": bars_at,
+    }
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.direction == 1
+    assert sig.trigger_tf == "15m"
+    assert sig.confluence_score == 3
+    assert sig.htf_touches["4h"] is True
+    assert sig.htf_touches["1h"] is False
+
+
+def test_eval_30m_fallback_when_no_15m_zone():
+    z_30m = make_zone(tf="30m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_1h = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_30m, "b": z_1h}
+    bars_at = _bars_at_zone(z_30m)
+    bars_by_tf = {
+        "15m": _bars_far_from_zone(z_30m),
+        "30m": bars_at,
+        "1h": bars_at,
+        "2h": _bars_far_from_zone(z_30m),
+        "4h": _bars_far_from_zone(z_30m),
+    }
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.trigger_tf == "30m"
+    assert sig.confluence_score == 1
+
+
+def test_eval_short_mirror():
+    z_15m = make_zone(tf="15m", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_4h = make_zone(tf="4h", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_15m, "b": z_4h}
+    bars_at = _bars_at_zone(z_15m)
+    bars_by_tf = {
+        "15m": bars_at, "30m": _bars_far_from_zone(z_15m),
+        "1h": _bars_far_from_zone(z_15m), "2h": _bars_far_from_zone(z_15m),
+        "4h": bars_at,
+    }
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.direction == -1
+    assert sig.sl > sig.zone_top
+
+
+def test_eval_sl_below_fvg_bottom_long():
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_15m, "b": z_4h}
+    bars_at = _bars_at_zone(z_15m)
+    bars_by_tf = {tf: bars_at if tf in ("15m", "4h") else _bars_far_from_zone(z_15m)
+                  for tf in ("15m", "30m", "1h", "2h", "4h")}
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.sl < z_15m.bottom
+    assert abs(sig.sl - 99.2) < 1e-9

@@ -105,3 +105,55 @@ def _compute_sl(zone: FVGZone, atr_val: float) -> float:
     if zone.direction == 1:
         return zone.bottom - buf
     return zone.top + buf
+
+
+def evaluate_v2_signal(
+    symbol: str,
+    zones: Dict[str, FVGZone],
+    bars_by_tf: Dict[str, List],
+) -> Optional[V2Signal]:
+    """Multi-TF FVG touch confluence detector.
+
+    Returns V2Signal if:
+      1. 15m or 30m FVG (any strength, any direction) is touched on latest bar.
+      2. At least one of {1h, 2h, 4h} same-direction FVG is active+touched.
+    """
+    for direction in (1, -1):
+        for trigger_tf in V2_TRIGGER_TFS:
+            zone = _latest_active_zone(zones, symbol, trigger_tf, direction)
+            triggered = _trigger_zone_touched(zone, bars_by_tf.get(trigger_tf, []))
+            if triggered is None:
+                continue
+            score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
+            if score < 1:
+                continue
+
+            atr_val = float(triggered.atr) if triggered.atr else 0.0
+            if atr_val <= 0:
+                bars = bars_by_tf.get(trigger_tf, [])
+                if len(bars) >= 15:
+                    highs = [b.high for b in bars]
+                    lows = [b.low for b in bars]
+                    closes = [b.close for b in bars]
+                    atr_val = compute_atr(highs, lows, closes, 14) or triggered.size
+                else:
+                    atr_val = triggered.size
+
+            sl = _compute_sl(triggered, atr_val)
+            entry = float(bars_by_tf[trigger_tf][-1].close)
+
+            return V2Signal(
+                symbol=symbol,
+                direction=direction,
+                trigger_tf=trigger_tf,
+                zone_top=triggered.top,
+                zone_bottom=triggered.bottom,
+                zone_born_time=triggered.born_time,
+                entry=entry,
+                sl=sl,
+                atr=atr_val,
+                confluence_score=score,
+                htf_touches=touches,
+                indicators={},
+            )
+    return None
