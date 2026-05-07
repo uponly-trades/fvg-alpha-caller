@@ -225,3 +225,50 @@ def gate_retest_short(bars_by_tf: Dict[str, List]) -> Tuple[bool, str]:
     """
     dec = _v2_short_decision(bars_by_tf)
     return dec["valid"], dec["reason"]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HTF fade short
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_htf_fade_short(zone, current_price: float, htf_rsi7: float) -> Optional[TradeSetupResult]:
+    """
+    Fade short when a bullish FVG forms while 4h is overbought.
+    Kronos hard-gated this LONG → RANGING. We exploit the same signal as SHORT.
+
+    Entry = current_price (market, at zone touch/approach).
+    SL = zone.top + buffer (above the FVG that just formed — if price pushes above
+         the whole FVG, the fade thesis is invalidated).
+    TP1 = 1R, TP2 = 2R downward.
+    """
+    if int(zone.direction) != 1:
+        return None  # only makes sense fading a bullish FVG
+
+    buffer = _risk_buffer(zone)
+    entry = float(current_price)
+    sl = float(zone.top) + buffer   # invalidated if price clears the FVG top
+    risk = abs(sl - entry)
+    if risk <= 0 or entry >= sl:
+        return None
+
+    tp1 = entry - risk
+    tp2 = entry - risk * 2
+
+    trade = TradeLevels(
+        direction="short",
+        entry=entry,
+        sl=sl,
+        tp1=tp1,
+        tp2=tp2,
+        rr=2.0,
+    )
+    return TradeSetupResult(
+        status="HTF FADE SHORT",
+        valid=True,
+        mode="snipe",
+        reason=f"4h RSI7={htf_rsi7:.1f} OB → fade bullish FVG short (SL above zone.top)",
+        trade=trade,
+        combo_states={},
+        sparklines={},
+        source="snipe_htf_fade",
+    )

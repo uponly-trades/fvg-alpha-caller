@@ -27,7 +27,7 @@ from telegram import (
     send_snipe_alert,
     start_command_poller,
 )
-from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short
+from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
 import alert_settings
 
 logging.basicConfig(
@@ -102,6 +102,24 @@ class AlphaCaller:
         )
         if kronos is not None:
             setup = build_trade_from_kronos(kronos, zone)
+            # HTF fade short: Kronos forced RANGING by 4h hard gate on bullish FVG
+            # → exploit the same OB signal as a SHORT fade setup
+            htf_note = kronos.get("htf_note", "")
+            htf_rsi7 = kronos.get("htf_rsi7")
+            if (
+                not setup.valid
+                and kronos.get("direction") == "RANGING"
+                and "hard_gate" in htf_note
+                and int(zone.direction) == 1
+                and htf_rsi7 is not None
+            ):
+                fade = build_htf_fade_short(zone, float(current_price), htf_rsi7)
+                if fade is not None:
+                    setup = fade
+                    logger.info(
+                        "HTF fade short %s %s | 4h_rsi7=%.1f | %s",
+                        zone.symbol, zone.tf, htf_rsi7, htf_note,
+                    )
         else:
             # Kronos unavailable — skip entirely rather than fall back to combo
             from trade_combo import TradeSetupResult
@@ -249,13 +267,29 @@ class AlphaCaller:
             if event["type"] == "approaching":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
                 self._log_features(zone, price, "approach")
-                if trade_setup.valid and alert_settings.is_enabled("approach"):
+                if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
+                    self.sim_store.add_sim_trade_raw(
+                        symbol=symbol, tf=tf, mode="snipe_htf_fade",
+                        direction="short", entry=trade_setup.trade.entry,
+                        sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
+                        tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
+                        born_time=int(zone.born_time),
+                    )
+                    if alert_settings.is_enabled("snipe_htf_fade") and not getattr(zone, "_htf_fade_sent", False):
+                        zone._htf_fade_sent = True
+                        send_snipe_alert(
+                            snipe_type="htf_fade", symbol=symbol, tf=tf,
+                            trade_setup=trade_setup, chart_png=chart_png,
+                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
+                        )
+                        logger.info("HTF fade SHORT approach %s %s | entry=%.6g", symbol, tf, price)
+                elif trade_setup.valid and alert_settings.is_enabled("approach"):
                     send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                     logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
                 else:
                     logger.info("Approach SKIP %s %s | %s", symbol, tf, trade_setup.status)
                 # Snipe long: emit limit entry at zone.bottom (one alert per zone)
-                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False):
+                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False) and trade_setup.source != "snipe_htf_fade":
                     zone._snipe_long_sent = True
                     snipe_setup = build_long_snipe(zone)
                     if snipe_setup is not None:
@@ -276,13 +310,29 @@ class AlphaCaller:
             elif event["type"] == "touch":
                 self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
                 self._log_features(zone, price, "touch")
-                if trade_setup.valid and alert_settings.is_enabled("touch"):
+                if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
+                    self.sim_store.add_sim_trade_raw(
+                        symbol=symbol, tf=tf, mode="snipe_htf_fade",
+                        direction="short", entry=trade_setup.trade.entry,
+                        sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
+                        tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
+                        born_time=int(zone.born_time),
+                    )
+                    if alert_settings.is_enabled("snipe_htf_fade") and not getattr(zone, "_htf_fade_sent", False):
+                        zone._htf_fade_sent = True
+                        send_snipe_alert(
+                            snipe_type="htf_fade", symbol=symbol, tf=tf,
+                            trade_setup=trade_setup, chart_png=chart_png,
+                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
+                        )
+                        logger.info("HTF fade SHORT touch %s %s | entry=%.6g", symbol, tf, price)
+                elif trade_setup.valid and alert_settings.is_enabled("touch"):
                     send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
                     logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
                 else:
                     logger.info("Touch SKIP %s %s | %s", symbol, tf, trade_setup.status)
                 # Snipe long on touch (price entering zone — refine to zone.bottom limit)
-                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False):
+                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False) and trade_setup.source != "snipe_htf_fade":
                     zone._snipe_long_sent = True
                     snipe_setup = build_long_snipe(zone)
                     if snipe_setup is not None:
@@ -324,7 +374,24 @@ class AlphaCaller:
             chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
             await self._store_fvg_all_modes(new_zone, chart_path, price)
 
-            if trade_setup.valid and alert_settings.is_enabled("new_fvg"):
+            if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
+                self.sim_store.add_sim_trade_raw(
+                    symbol=symbol, tf=tf, mode="snipe_htf_fade",
+                    direction="short", entry=trade_setup.trade.entry,
+                    sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
+                    tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
+                    born_time=int(new_zone.born_time),
+                )
+                if alert_settings.is_enabled("snipe_htf_fade"):
+                    send_snipe_alert(
+                        snipe_type="htf_fade", symbol=symbol, tf=tf,
+                        trade_setup=trade_setup, chart_png=chart_png,
+                        zone=new_zone, timeframe_bars=self._timeframe_bars(new_zone.symbol),
+                    )
+                    logger.info("HTF fade SHORT new_fvg %s %s | entry=%.6g", symbol, tf, price)
+                else:
+                    logger.info("HTF fade SKIP (disabled) %s %s", symbol, tf)
+            elif trade_setup.valid and alert_settings.is_enabled("new_fvg"):
                 send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
                 logger.info(
                     "New FVG alert %s %s | strength=%d rsi=%s",

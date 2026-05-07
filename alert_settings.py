@@ -10,6 +10,7 @@ Available triggers:
   touch          — price touching zone alert
   snipe_long     — snipe long limit entry alert
   snipe_short    — retest short snipe alert
+  snipe_htf_fade — HTF overbought fade short (4h RSI7 hard gate triggered)
 
 Kronos v2 gate is always active regardless of these settings.
 """
@@ -25,14 +26,15 @@ logger = logging.getLogger("alert_settings")
 
 _PATH = Path(os.environ.get("ALERT_SETTINGS_PATH", "/app/data/alert_settings.json"))
 
-TRIGGER_KEYS = ("new_fvg", "approach", "touch", "snipe_long", "snipe_short")
+TRIGGER_KEYS = ("new_fvg", "approach", "touch", "snipe_long", "snipe_short", "snipe_htf_fade")
 
 _DEFAULTS: Dict[str, bool] = {
-    "new_fvg":    True,
-    "approach":   True,
-    "touch":      True,
-    "snipe_long":  True,
-    "snipe_short": True,
+    "new_fvg":        True,
+    "approach":       True,
+    "touch":          True,
+    "snipe_long":     True,
+    "snipe_short":    True,
+    "snipe_htf_fade": True,
 }
 
 _cache: Dict[str, bool] = {}

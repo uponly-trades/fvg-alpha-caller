@@ -214,6 +214,10 @@ def send_snipe_alert(
         icon = "🎯"
         title = f"SNIPE LONG (limit) | {symbol} | {tf}"
         dir_line = f"Dir   : 🟢 LONG (limit @ zone bottom)"
+    elif snipe_type == "htf_fade":
+        icon = "🌊"
+        title = f"HTF FADE SHORT | {symbol} | {tf}"
+        dir_line = f"Dir   : 🔴 SHORT (4h OB fade)"
     else:
         icon = "🩸"
         title = f"SNIPE SHORT (retest) | {symbol} | {tf}"
