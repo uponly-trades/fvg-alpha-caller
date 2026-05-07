@@ -131,11 +131,14 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
         trade = trade_setup.trade
         src = getattr(trade_setup, "source", "combo")
         src_label = "🤖 Kronos" if src == "kronos" else "📊 Combo"
+        ep = float(trade.entry)
+        def _pct_t(price: float) -> str:
+            return f" ({(price - ep) / ep * 100:+.2f}%)" if ep > 0 else ""
         lines.extend([
             f"Entry : <b>{_fmt_price(trade.entry)}</b>",
-            f"SL    : {_fmt_price(trade.sl)}",
-            f"TP1   : {_fmt_price(trade.tp1)}",
-            f"TP2   : {_fmt_price(trade.tp2)}",
+            f"SL    : {_fmt_price(trade.sl)}{_pct_t(float(trade.sl))}",
+            f"TP1   : {_fmt_price(trade.tp1)}{_pct_t(float(trade.tp1))}",
+            f"TP2   : {_fmt_price(trade.tp2)}{_pct_t(float(trade.tp2))}",
             f"RR    : 1:2  |  {src_label}",
         ])
     else:
@@ -223,14 +226,20 @@ def send_snipe_alert(
         title = f"SNIPE SHORT (retest) | {symbol} | {tf}"
         dir_line = f"Dir   : 🔴 SHORT (retest rejection)"
 
+    entry_p = float(trade.entry)
+    def _pct(price: float) -> str:
+        if entry_p <= 0:
+            return ""
+        return f" ({(price - entry_p) / entry_p * 100:+.2f}%)"
+
     lines = [
         f"{icon} <b>{title}</b>",
         "",
         dir_line,
         f"Entry : <b>{_fmt_price(trade.entry)}</b>",
-        f"SL    : {_fmt_price(trade.sl)}",
-        f"TP1   : {_fmt_price(trade.tp1)}",
-        f"TP2   : {_fmt_price(trade.tp2)}",
+        f"SL    : {_fmt_price(trade.sl)}{_pct(float(trade.sl))}",
+        f"TP1   : {_fmt_price(trade.tp1)}{_pct(float(trade.tp1))}",
+        f"TP2   : {_fmt_price(trade.tp2)}{_pct(float(trade.tp2))}",
         f"RR    : 1:2",
         f"Signal: {trade_setup.reason}",
     ]

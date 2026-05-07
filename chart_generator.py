@@ -218,14 +218,17 @@ def generate_chart(
 
         if trade_plan is not None:
             x_text = xlim[0] + (xlim[1] - xlim[0]) * 0.02
+            entry_p = float(trade_plan.entry)
             for label, price, color in [
-                ("Entry", float(trade_plan.entry), "#1f77b4"),
-                ("SL",    float(trade_plan.sl),    "#d62728"),
-                ("TP1",   float(trade_plan.tp1),   "#2ca02c"),
-                ("TP2",   float(trade_plan.tp2),   "#006400"),
+                ("Entry", entry_p,                   "#1f77b4"),
+                ("SL",    float(trade_plan.sl),      "#d62728"),
+                ("TP1",   float(trade_plan.tp1),     "#2ca02c"),
+                ("TP2",   float(trade_plan.tp2),     "#006400"),
             ]:
+                pct = (price - entry_p) / entry_p * 100 if entry_p else 0
+                pct_str = f" ({pct:+.2f}%)" if label != "Entry" else ""
                 ax_main.axhline(y=price, color=color, linestyle="-", linewidth=1.2, alpha=0.9)
-                ax_main.text(x_text, price, f" {label} {price:g} ",
+                ax_main.text(x_text, price, f" {label} {price:g}{pct_str} ",
                              color="white", fontsize=8, va="center",
                              bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color})
 

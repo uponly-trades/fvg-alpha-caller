@@ -301,9 +301,19 @@ class AlphaCaller:
                             born_time=int(zone.born_time),
                         )
                         if alert_settings.is_enabled("snipe_long"):
+                            snipe_chart = generate_chart(
+                                bars=bars,
+                                zone_top=zone.top, zone_bottom=zone.bottom,
+                                zone_direction=zone.direction,
+                                symbol=zone.symbol, tf=zone.tf,
+                                rsi_value=zone.rsi,
+                                timeframe_bars=self._timeframe_bars(zone.symbol),
+                                trade_plan=snipe_setup.trade,
+                                predicted_bars=getattr(trade_setup, "predicted_bars", None),
+                            )
                             send_snipe_alert(
                                 snipe_type="long_limit", symbol=symbol, tf=tf,
-                                trade_setup=snipe_setup, chart_png=chart_png,
+                                trade_setup=snipe_setup, chart_png=snipe_chart,
                                 zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
                             )
                             logger.info("Snipe LONG approach %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
@@ -344,9 +354,19 @@ class AlphaCaller:
                             born_time=int(zone.born_time),
                         )
                         if alert_settings.is_enabled("snipe_long"):
+                            snipe_chart = generate_chart(
+                                bars=bars,
+                                zone_top=zone.top, zone_bottom=zone.bottom,
+                                zone_direction=zone.direction,
+                                symbol=zone.symbol, tf=zone.tf,
+                                rsi_value=zone.rsi,
+                                timeframe_bars=self._timeframe_bars(zone.symbol),
+                                trade_plan=snipe_setup.trade,
+                                predicted_bars=getattr(trade_setup, "predicted_bars", None),
+                            )
                             send_snipe_alert(
                                 snipe_type="long_limit", symbol=symbol, tf=tf,
-                                trade_setup=snipe_setup, chart_png=chart_png,
+                                trade_setup=snipe_setup, chart_png=snipe_chart,
                                 zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
                             )
                             logger.info("Snipe LONG touch %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
