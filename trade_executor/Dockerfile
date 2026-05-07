@@ -10,7 +10,7 @@ COPY trade_executor/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY trade_executor/pyproject.toml ./
-COPY trade_executor/ ./trade_executor/
+COPY trade_executor/trade_executor/ ./trade_executor/
 
 ENV PYTHONUNBUFFERED=1
 
