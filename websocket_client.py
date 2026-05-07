@@ -17,7 +17,27 @@ logger = logging.getLogger(__name__)
 # Buffer cache persisted to disk so restarts skip REST warm-up
 _CACHE_PATH = Path(os.environ.get("BUFFER_CACHE_PATH", "/tmp/fvg_buffer_cache.json"))
 # Cache is stale if last bar is older than this (seconds) — 2 candles of smallest TF (15m)
-_CACHE_MAX_AGE_SEC = 30 * 60  # 30 minutes
+_CACHE_MAX_AGE_SEC = 30 * 60  # legacy fallback, not used when per-TF table covers the key
+
+# Per-TF cache TTL: ~2× the bar duration. Stale-by-1-bar cache is still useful
+# because the next WS close overwrites the tail. Avoids rejecting HTF caches
+# (e.g. 4h bar naturally has last_close up to 4h old between closes).
+_CACHE_MAX_AGE_BY_TF = {
+    "15m": 30 * 60,        # 30m
+    "30m": 60 * 60,        # 1h
+    "1h":  2 * 60 * 60,    # 2h
+    "2h":  4 * 60 * 60,    # 4h
+    "4h":  8 * 60 * 60,    # 8h
+}
+
+
+def _key_max_age_sec(key: str) -> int:
+    # key format: "SYMBOL_TF" — split from the right since SYMBOL itself never
+    # contains underscore in Binance Futures (e.g. BTCUSDT_15m → tf="15m").
+    if "_" in key:
+        tf = key.rsplit("_", 1)[1]
+        return _CACHE_MAX_AGE_BY_TF.get(tf, _CACHE_MAX_AGE_SEC)
+    return _CACHE_MAX_AGE_SEC
 
 
 class BinanceKlineWS:
@@ -95,8 +115,8 @@ class BinanceKlineWS:
                     continue
                 last_bar_ms = bar_dicts[-1]["t"]
                 age_sec = (now_ms - last_bar_ms) / 1000
-                if age_sec > _CACHE_MAX_AGE_SEC:
-                    continue  # stale — will REST-fetch this key
+                if age_sec > _key_max_age_sec(key):
+                    continue  # stale beyond per-TF tolerance — will REST-fetch this key
                 bars = [
                     Bar(open_time=b["t"], open=b["o"], high=b["h"],
                         low=b["l"], close=b["c"], volume=b["v"], is_closed=True)
