@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from chart_generator import generate_chart
-from config import TIMEFRAMES
-from fvg_engine import FVGTracker
+from config import TIMEFRAMES, STRATEGY_VERSION, KRONOS_ENABLED, V2_COOLDOWN_SEC, V2_TRIGGER_TFS
+from fvg_engine import FVGTracker, detect_fvg, calc_strength
 from sim_trades import SimTradeStore
 from trade_combo import (
     evaluate_trade_setup,
@@ -16,8 +16,14 @@ from trade_combo import (
     build_mitigated_reversal,
 )
 from feature_extractor import extract_multi_tf, btc_regime
-import kronos_client
+if STRATEGY_VERSION == "v1" and KRONOS_ENABLED:
+    import kronos_client
+else:
+    kronos_client = None  # disabled in v2
 from websocket_client import BinanceKlineWS
+from strategy_v2 import evaluate_v2_signal
+from trail_manager import TrailManager
+from cooldown import CooldownStore
 from telegram import (
     send_approach_alert,
     send_mitigated_alert,
@@ -25,7 +31,9 @@ from telegram import (
     send_touch_alert,
     send_trade_recap,
     send_snipe_alert,
-
+    send_v2_alert,
+    send_v2_trail_update,
+    send_v2_stopped,
 )
 from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
 import alert_settings
@@ -46,6 +54,9 @@ class AlphaCaller:
         self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
         self.sim_store = SimTradeStore()
         self.retest_tracker = RetestTracker()
+        # v2 components (no-op in v1 mode)
+        self.v2_trail = TrailManager()
+        self.v2_cooldown = CooldownStore(window_sec=V2_COOLDOWN_SEC)
 
     def _timeframe_bars(self, symbol: str) -> dict:
         bars_by_tf = {}
@@ -74,7 +85,13 @@ class AlphaCaller:
             logger.warning("log_features failed (%s %s): %s", zone.symbol, zone.tf, e)
 
     async def _evaluate_setup_async(self, zone, current_price: float):
-        """Kronos-only path. Combo fallback disabled (WR 15-22% vs Kronos 37-39%)."""
+        """Kronos-only path in v1; in v2 this is unused."""
+        if STRATEGY_VERSION == "v2" or not KRONOS_ENABLED or kronos_client is None:
+            from trade_combo import TradeSetupResult
+            return TradeSetupResult(
+                "SKIP: V2_MODE", False, None,
+                "v2 mode — kronos disabled", None, {}, {}, source="v2_disabled",
+            )
         bars_by_tf = self._timeframe_bars(zone.symbol)
         tf_bars = bars_by_tf.get(zone.tf, [])
         ohlcv = [
@@ -193,8 +210,110 @@ class AlphaCaller:
                     send_trade_recap(name, self.sim_store.daily_recap(now.date().isoformat()))
                 return
 
+    def _v2_capture_fvg(self, symbol: str, tf: str, bars) -> None:
+        """v2 FVG ingest: bypass MIN_STRENGTH_TO_ALERT, store ANY detected FVG."""
+        key = (symbol, tf)
+        last_time = bars[-1].open_time
+        if self.tracker.last_bar_time.get(key) == last_time:
+            return
+        if key not in self.tracker.last_bar_time:
+            self.tracker.last_bar_time[key] = last_time
+            return
+        self.tracker.last_bar_time[key] = last_time
+        fvg = detect_fvg(bars, symbol=symbol)
+        if not fvg:
+            return
+        fvg["symbol"] = symbol
+        s = calc_strength(bars, fvg, symbol=symbol, existing_zones=self.tracker.zones)
+        from fvg_engine import FVGZone
+        zone = FVGZone(
+            symbol=symbol, tf=tf, direction=fvg["direction"],
+            top=fvg["top"], bottom=fvg["bottom"], size=fvg["size"],
+            born_time=fvg["born_time"],
+            main_strength=s["main_strength"], bull_strength=s["bull_strength"],
+            bear_strength=s["bear_strength"], label=s["label"],
+            rsi=s["rsi"], atr=s["atr"], sl=s["sl"], tp1=s["tp1"], tp2=s["tp2"],
+            price=s["price"],
+            vol_change_pct=s["vol_change_pct"], price_change_pct=s["price_change_pct"],
+            candle_body_pct=s["candle_body_pct"], dist_to_zone=s["dist_to_zone"],
+            dominance_bias=s["dominance_bias"], btc_trend=s["btc_trend"],
+            dominance_state=s["dominance_state"], btc_state=s["btc_state"],
+            volume_spike_ratio=s["volume_spike_ratio"],
+            displacement_ok=s["displacement_ok"],
+            btc_alignment_ok=s["btc_alignment_ok"],
+            confluence_tf_count=s["confluence_tf_count"],
+            price_change_24h_pct=s["price_change_24h_pct"],
+            confirm_score=s["confirm_score"], confirm_label=s["confirm_label"],
+        )
+        zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
+        self.tracker.zones[zone_id] = zone
+        self.tracker._save_zones()
+
+    def _v2_handle_trail(self, symbol: str, tf: str, bars) -> None:
+        updates = self.v2_trail.on_bar_close(symbol, tf, bars)
+        for u in updates:
+            send_v2_trail_update(
+                symbol=u.symbol, trigger_tf=u.trigger_tf,
+                previous_sl=u.previous_sl, new_sl=u.new_sl, direction=u.direction,
+            )
+            logger.info(
+                "v2 trail %s %s %s | %g -> %g",
+                u.symbol, u.trigger_tf, "long" if u.direction == 1 else "short",
+                u.previous_sl, u.new_sl,
+            )
+        # Touch-based stop on latest closed bar (use both wicks for conservative check)
+        last = bars[-1]
+        for probe_price in (last.low, last.high):
+            stops = self.v2_trail.check_stop_hit(symbol, last_price=probe_price)
+            for st in stops:
+                state = self.v2_trail.get(st.signal_id)
+                send_v2_stopped(
+                    symbol=st.symbol, trigger_tf=state.trigger_tf if state else tf,
+                    direction=st.direction, entry=state.entry if state else 0.0,
+                    sl_at_stop=st.sl_at_stop, last_price=st.last_price,
+                )
+                logger.info("v2 stopped %s %s | sl=%g price=%g",
+                            st.symbol, st.signal_id, st.sl_at_stop, st.last_price)
+
+    def _v2_try_emit_signal(self, symbol: str, tf: str, bars) -> None:
+        bars_by_tf = self._timeframe_bars(symbol)
+        sig = evaluate_v2_signal(symbol, self.tracker.zones, bars_by_tf)
+        if sig is None:
+            return
+        if sig.trigger_tf != tf:
+            return  # only emit on the originating TF's bar close
+        if not self.v2_cooldown.allow(symbol, sig.direction_str):
+            logger.info("v2 cooldown skip %s %s", symbol, sig.direction_str)
+            return
+        signal_id = f"{symbol}_{sig.trigger_tf}_{sig.zone_born_time}_{sig.direction}"
+        self.v2_trail.register(
+            signal_id=signal_id, symbol=symbol, trigger_tf=sig.trigger_tf,
+            direction=sig.direction, entry=sig.entry, sl=sig.sl, atr=sig.atr,
+        )
+        send_v2_alert(sig, timeframe_bars=bars_by_tf)
+        logger.info(
+            "v2 signal %s %s %s | score=%d entry=%g sl=%g",
+            symbol, sig.trigger_tf, sig.direction_str,
+            sig.confluence_score, sig.entry, sig.sl,
+        )
+
     async def _on_bar_close(self, symbol: str, tf: str, bars):
         if len(bars) < 3:
+            return
+
+        # =====================================================
+        # v2 Strategy Path (multi-TF touch confluence)
+        # =====================================================
+        if STRATEGY_VERSION == "v2":
+            self.tracker.update_buffer(symbol, tf, bars)
+            # 1. Detect & store any FVG (any strength) on this bar
+            self._v2_capture_fvg(symbol, tf, bars)
+            # 2. Trail bookkeeping for any open v2 trades on this trigger TF
+            if tf in V2_TRIGGER_TFS:
+                self._v2_handle_trail(symbol, tf, bars)
+            # 3. Evaluate signal only on trigger TFs (15m / 30m)
+            if tf in V2_TRIGGER_TFS:
+                self._v2_try_emit_signal(symbol, tf, bars)
             return
 
         self.tracker.update_buffer(symbol, tf, bars)
