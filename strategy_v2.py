@@ -26,3 +26,23 @@ class V2Signal:
     @property
     def direction_str(self) -> str:
         return "long" if self.direction == 1 else "short"
+
+
+def _htf_active_and_touched(
+    zone: Optional[FVGZone],
+    bars: List,
+    lookback: int = 1,
+) -> bool:
+    """True if zone exists, is not fully mitigated, and price overlapped zone
+    on any of the last `lookback` closed bars."""
+    if zone is None:
+        return False
+    if zone.mitigation >= 1.0:
+        return False
+    if not bars or len(bars) < lookback:
+        return False
+    recent = bars[-lookback:]
+    for b in recent:
+        if b.high >= zone.bottom and b.low <= zone.top:
+            return True
+    return False

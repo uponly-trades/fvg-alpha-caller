@@ -65,3 +65,46 @@ def make_bear_fvg_bars(zone_low: float = 99.5, zone_high: float = 100.5) -> list
         make_bar(2, 102.0, 102.0, 99.0, 99.2, 500.0),               # prev1: displacement
         make_bar(3, 99.0, zone_low - 0.1, 98.0, 98.5, 300.0),       # curr: high=zone_low-0.1 < prev2.low
     ]
+
+
+from strategy_v2 import _htf_active_and_touched
+
+
+def test_htf_no_zone_returns_false():
+    bars = [make_bar(i, 100, 101, 99, 100.5) for i in range(1, 25)]
+    result = _htf_active_and_touched(zone=None, bars=bars, lookback=1)
+    assert result is False
+
+
+def test_htf_zone_present_but_not_touched_returns_false():
+    bars = [make_bar(i, 200, 201, 199, 200.5) for i in range(1, 25)]
+    zone = make_zone(top=100.5, bottom=99.5)
+    result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
+    assert result is False
+
+
+def test_htf_zone_touched_within_lookback_returns_true():
+    bars = [make_bar(i, 100, 101, 99, 100.5) for i in range(1, 24)]
+    bars.append(make_bar(24, 100, 100.6, 99.4, 100.0))
+    zone = make_zone(top=100.5, bottom=99.5)
+    result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
+    assert result is True
+
+
+def test_htf_zone_touched_only_outside_lookback_returns_false():
+    bars = []
+    bars.append(make_bar(1, 100, 100.6, 99.4, 100.0))
+    for i in range(2, 25):
+        bars.append(make_bar(i, 200, 201, 199, 200.5))
+    zone = make_zone(top=100.5, bottom=99.5)
+    result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
+    assert result is False
+
+
+def test_htf_zone_fully_mitigated_returns_false():
+    """Zone fully mitigated = bottom (long) breached -> not active."""
+    zone = make_zone(top=100.5, bottom=99.5, direction=1)
+    zone.mitigation = 1.0
+    bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)]
+    result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
+    assert result is False
