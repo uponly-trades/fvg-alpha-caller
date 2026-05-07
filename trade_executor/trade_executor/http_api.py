@@ -1,5 +1,12 @@
 import base64
+import logging
 
+from ccxt.base.errors import (
+    AuthenticationError,
+    ExchangeError,
+    NetworkError,
+    PermissionDenied,
+)
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
@@ -7,6 +14,8 @@ from trade_executor.account_api import account_summary, save_user_keys
 from trade_executor.config import settings
 from trade_executor.crypto import encrypt
 from trade_executor.db import create_pool
+
+log = logging.getLogger("http_api")
 
 app = FastAPI(title="trade_executor")
 _pool = None
@@ -74,9 +83,19 @@ async def save_user_keys_endpoint(
 ):
     _check_internal_token(x_internal_token)
     pool = await _pool_or_create()
-    return await save_user_keys(
-        pool,
-        telegram_id=telegram_id,
-        api_key=body.api_key,
-        api_secret=body.api_secret,
-    )
+    try:
+        return await save_user_keys(
+            pool,
+            telegram_id=telegram_id,
+            api_key=body.api_key,
+            api_secret=body.api_secret,
+        )
+    except (AuthenticationError, PermissionDenied) as e:
+        log.warning("save_user_keys auth failed tid=%s: %s", telegram_id, e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except NetworkError as e:
+        log.warning("save_user_keys network failed tid=%s: %s", telegram_id, e)
+        raise HTTPException(status_code=502, detail=f"network error: {e}") from e
+    except ExchangeError as e:
+        log.warning("save_user_keys exchange err tid=%s: %s", telegram_id, e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
