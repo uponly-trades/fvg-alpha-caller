@@ -128,3 +128,8 @@ V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
 
 # v2 throttle (mitigate higher alert volume from no-Kronos)
 V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "1800"))  # 30 minutes
+
+# v2 freshness — drop signals whose triggering bar is older than this many seconds.
+# Protects against placing orders on stale price after warmup gaps or lag spikes.
+# 0 = disabled.
+V2_MAX_SIGNAL_AGE_SEC = int(os.environ.get("V2_MAX_SIGNAL_AGE_SEC", "60"))

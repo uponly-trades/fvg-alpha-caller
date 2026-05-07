@@ -1,11 +1,18 @@
 import asyncio
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# trigger-TF duration in seconds (used by v2 freshness guard)
+_TF_SECONDS = {"15m": 15 * 60, "30m": 30 * 60, "1h": 60 * 60, "2h": 2 * 60 * 60, "4h": 4 * 60 * 60}
+
 from chart_generator import generate_chart
-from config import TIMEFRAMES, STRATEGY_VERSION, KRONOS_ENABLED, V2_COOLDOWN_SEC, V2_TRIGGER_TFS
+from config import (
+    TIMEFRAMES, STRATEGY_VERSION, KRONOS_ENABLED, V2_COOLDOWN_SEC,
+    V2_TRIGGER_TFS, V2_MAX_SIGNAL_AGE_SEC,
+)
 from fvg_engine import FVGTracker, detect_fvg, calc_strength
 from sim_trades import SimTradeStore
 from trade_combo import (
@@ -283,6 +290,17 @@ class AlphaCaller:
             return
         if sig.trigger_tf != tf:
             return  # only emit on the originating TF's bar close
+        # Freshness guard: refuse to alert/order on a stale trigger bar.
+        if V2_MAX_SIGNAL_AGE_SEC > 0 and bars:
+            tf_sec = _TF_SECONDS.get(sig.trigger_tf, 0)
+            last_close_time_ms = bars[-1].open_time + tf_sec * 1000
+            age_sec = time.time() - last_close_time_ms / 1000
+            if age_sec > V2_MAX_SIGNAL_AGE_SEC:
+                logger.warning(
+                    "v2 stale signal skip %s %s | age=%.1fs > %ds",
+                    symbol, sig.trigger_tf, age_sec, V2_MAX_SIGNAL_AGE_SEC,
+                )
+                return
         if not self.v2_cooldown.allow(symbol, sig.direction_str):
             logger.info("v2 cooldown skip %s %s", symbol, sig.direction_str)
             return
