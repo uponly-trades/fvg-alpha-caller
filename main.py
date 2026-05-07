@@ -312,11 +312,27 @@ class AlphaCaller:
         if registered is None:
             logger.warning("v2 duplicate signal_id %s — alert suppressed", signal_id)
             return
-        send_v2_alert(sig, timeframe_bars=bars_by_tf)
+        chart_png = None
+        try:
+            trigger_bars = bars_by_tf.get(sig.trigger_tf, []) or bars
+            if trigger_bars and len(trigger_bars) >= 3:
+                chart_png = generate_chart(
+                    bars=trigger_bars[-100:],
+                    zone_top=sig.zone_top,
+                    zone_bottom=sig.zone_bottom,
+                    zone_direction=sig.direction,
+                    symbol=symbol,
+                    tf=sig.trigger_tf,
+                    timeframe_bars=bars_by_tf,
+                )
+        except Exception as e:
+            logger.warning("v2 chart render failed %s %s: %s", symbol, sig.trigger_tf, e)
+        send_v2_alert(sig, timeframe_bars=bars_by_tf, chart_png=chart_png)
         logger.info(
-            "v2 signal %s %s %s | score=%d entry=%g sl=%g",
+            "v2 signal %s %s %s | score=%d entry=%g sl=%g chart=%s",
             symbol, sig.trigger_tf, sig.direction_str,
             sig.confluence_score, sig.entry, sig.sl,
+            "yes" if chart_png else "no",
         )
 
     async def _on_bar_close(self, symbol: str, tf: str, bars):
