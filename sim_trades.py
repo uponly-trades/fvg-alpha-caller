@@ -230,6 +230,10 @@ class SimTradeStore:
                 if cur.fetchone():
                     return False
                 v2 = getattr(setup, "v2_decision", None)
+                # direction: trade direction if valid, else Kronos model direction from raw
+                # (LONG/SHORT/RANGING from Kronos, or long/short from trade)
+                k_direction = (kronos_raw or {}).get("direction") if kronos_raw else None
+                direction_val = (trade.direction if trade else None) or k_direction
                 cur.execute(
                     """INSERT INTO kronos_decisions
                        (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
@@ -252,7 +256,7 @@ class SimTradeStore:
                         bool(setup.valid),
                         setup.mode,
                         setup.reason,
-                        trade.direction if trade else None,
+                        direction_val,
                         float(trade.entry) if trade else None,
                         float(trade.sl) if trade else None,
                         float(trade.tp1) if trade else None,
