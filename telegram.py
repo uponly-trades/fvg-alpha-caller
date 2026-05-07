@@ -540,3 +540,125 @@ def _send_photo(caption: str, png_bytes: bytes) -> bool:
         logger.error("Telegram photo send failed: %s", e)
         # Fallback to text-only
         return _send(caption)
+
+
+# =====================================================
+# v2 Strategy Alerts (Multi-TF FVG Touch Confluence)
+# =====================================================
+
+def _v2_confluence_stars(score: int) -> str:
+    n = max(0, min(score, 6))
+    return "⭐" * n if n > 0 else "—"
+
+
+def _v2_format_indicators(timeframe_bars: dict) -> List[str]:
+    """Display-only StochRSI per TF + vol delta. Reuses existing helpers."""
+    out: List[str] = []
+    try:
+        out.extend(_stoch_state_lines(timeframe_bars))
+    except Exception:
+        pass
+    return out
+
+
+def _v2_format_oi_vol(zone_or_symbol, timeframe_bars: dict) -> List[str]:
+    """Wrap _oi_vol_lines; tolerant to passing either FVGZone or symbol str."""
+    try:
+        if hasattr(zone_or_symbol, "symbol"):
+            return _oi_vol_lines(zone_or_symbol, timeframe_bars)
+        class _S:
+            pass
+        s = _S(); s.symbol = zone_or_symbol
+        return _oi_vol_lines(s, timeframe_bars)
+    except Exception:
+        return []
+
+
+def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = None) -> None:
+    """Send a v2 entry alert. `signal` is a strategy_v2.V2Signal instance."""
+    direction_emoji = "🟢 LONG" if signal.direction == 1 else "🔴 SHORT"
+    status_trade = "NEW LONG" if signal.direction == 1 else "NEW SHORT"
+    title = f"({status_trade} - FRESH FVG | {signal.symbol} | {signal.trigger_tf})"
+
+    sl_pct = (signal.sl - signal.entry) / signal.entry * 100 if signal.entry else 0.0
+
+    htf_line_parts = []
+    for tf in ("1h", "2h", "4h"):
+        mark = "✓" if signal.htf_touches.get(tf) else "·"
+        htf_line_parts.append(f"{tf}{mark}")
+    htf_line = " ".join(htf_line_parts)
+
+    lines = [
+        f"<b>{title}</b>",
+        "",
+        f"{direction_emoji}",
+        f"📍 Entry: <code>{signal.entry:g}</code>",
+        f"🛑 SL:    <code>{signal.sl:g}</code> ({sl_pct:+.2f}%)",
+        f"🎯 TP:    trail (RR 1:∞)",
+        "",
+        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/6)",
+        f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} FVG touch",
+        f"HTF:     {htf_line}",
+        "",
+        f"<a href='{_tv_link(signal.symbol, signal.trigger_tf)}'>📊 TradingView</a>",
+    ]
+
+    indicator_lines = _v2_format_indicators(timeframe_bars)
+    if indicator_lines:
+        lines.append("")
+        lines.extend(indicator_lines)
+
+    oi_lines = _v2_format_oi_vol(signal.symbol, timeframe_bars)
+    if oi_lines:
+        lines.append("")
+        lines.extend(oi_lines)
+
+    text = "\n".join(lines)
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+
+    if chart_png:
+        files = {"photo": ("chart.png", chart_png, "image/png")}
+        data = {"chat_id": CHAT_ID, "caption": text, "parse_mode": "HTML"}
+        try:
+            requests.post(TELEGRAM_PHOTO_URL, data=data, files=files, timeout=15)
+        except Exception as e:
+            logger.error("send_v2_alert (photo) failed: %s", e)
+    else:
+        try:
+            requests.post(TELEGRAM_URL, json=payload, timeout=15)
+        except Exception as e:
+            logger.error("send_v2_alert failed: %s", e)
+
+
+def send_v2_trail_update(symbol: str, trigger_tf: str, previous_sl: float, new_sl: float, direction: int) -> None:
+    arrow = "→"
+    pct = (new_sl - previous_sl) / previous_sl * 100 if previous_sl else 0.0
+    title = f"(TRAIL UPDATE | {symbol} | {trigger_tf})"
+    text = (
+        f"<b>{title}</b>\n"
+        f"SL: <code>{previous_sl:g}</code> {arrow} <code>{new_sl:g}</code> ({pct:+.2f}%)"
+    )
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    try:
+        requests.post(TELEGRAM_URL, json=payload, timeout=15)
+    except Exception as e:
+        logger.error("send_v2_trail_update failed: %s", e)
+
+
+def send_v2_stopped(symbol: str, trigger_tf: str, direction: int, entry: float, sl_at_stop: float, last_price: float) -> None:
+    pnl_pct = (sl_at_stop - entry) / entry * 100 if entry else 0.0
+    if direction == -1:
+        pnl_pct = -pnl_pct
+    title = f"(STOPPED | {symbol} | {trigger_tf})"
+    text = (
+        f"<b>{title}</b>\n"
+        f"Entry: <code>{entry:g}</code>\n"
+        f"Stop:  <code>{sl_at_stop:g}</code>\n"
+        f"Last:  <code>{last_price:g}</code>\n"
+        f"PnL:   {pnl_pct:+.2f}%"
+    )
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    try:
+        requests.post(TELEGRAM_URL, json=payload, timeout=15)
+    except Exception as e:
+        logger.error("send_v2_stopped failed: %s", e)
