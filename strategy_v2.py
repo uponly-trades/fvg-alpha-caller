@@ -65,3 +65,23 @@ def _latest_active_zone(
     if not candidates:
         return None
     return max(candidates, key=lambda z: z.born_time)
+
+
+def _compute_htf_confluence(
+    zones: Dict[str, FVGZone],
+    symbol: str,
+    direction: int,
+    bars_by_tf: Dict[str, List],
+) -> tuple:
+    """Returns (score, touches_dict). Score sums weights for HTFs that have an
+    active same-direction zone touched within V2_HTF_TOUCH_LOOKBACK."""
+    touches: Dict[str, bool] = {}
+    score = 0
+    for tf in V2_HTF_TFS:
+        zone = _latest_active_zone(zones, symbol, tf, direction)
+        bars = bars_by_tf.get(tf, [])
+        touched = _htf_active_and_touched(zone, bars, lookback=V2_HTF_TOUCH_LOOKBACK)
+        touches[tf] = touched
+        if touched:
+            score += V2_HTF_WEIGHTS[tf]
+    return score, touches

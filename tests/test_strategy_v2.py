@@ -142,3 +142,48 @@ def test_latest_active_zone_skips_fully_mitigated():
     zones = {"a": z_mit, "b": z_active}
     result = _latest_active_zone(zones=zones, symbol="BTCUSDT", tf="1h", direction=1)
     assert result is z_active
+
+
+from strategy_v2 import _compute_htf_confluence
+
+
+def test_confluence_no_htf_zones_returns_zero():
+    zones = {}
+    bars_by_tf = {"1h": [], "2h": [], "4h": []}
+    score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
+    assert score == 0
+    assert touches == {"1h": False, "2h": False, "4h": False}
+
+
+def test_confluence_only_4h_touched_returns_score_3():
+    z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5)
+    zones = {"a": z_4h}
+    bars_4h = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)]
+    bars_4h.append(make_bar(25, 100, 100.6, 99.4, 100.0))
+    bars_by_tf = {"1h": [], "2h": [], "4h": bars_4h}
+    score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
+    assert score == 3
+    assert touches == {"1h": False, "2h": False, "4h": True}
+
+
+def test_confluence_all_three_touched_returns_score_6():
+    bars_touch = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 24)]
+    bars_touch.append(make_bar(24, 100, 100.6, 99.4, 100.0))
+    z_1h = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5, born_time=100)
+    z_2h = make_zone(tf="2h", direction=1, top=100.5, bottom=99.5, born_time=200)
+    z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, born_time=300)
+    zones = {"a": z_1h, "b": z_2h, "c": z_4h}
+    bars_by_tf = {"1h": bars_touch, "2h": bars_touch, "4h": bars_touch}
+    score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
+    assert score == 6
+    assert touches == {"1h": True, "2h": True, "4h": True}
+
+
+def test_confluence_direction_filters():
+    bars_touch = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 24)]
+    bars_touch.append(make_bar(24, 100, 100.6, 99.4, 100.0))
+    z = make_zone(tf="1h", direction=1, top=100.5, bottom=99.5)
+    zones = {"a": z}
+    bars_by_tf = {"1h": bars_touch, "2h": [], "4h": []}
+    score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=-1, bars_by_tf=bars_by_tf)
+    assert score == 0
