@@ -119,7 +119,7 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="▶️ Resume", callback_data="resume"),
         ],
         [
-            InlineKeyboardButton(text="📉 Set Risk %", callback_data="setrisk"),
+            InlineKeyboardButton(text="📉 Risk $/Trade", callback_data="setrisk"),
             InlineKeyboardButton(text="⚡ Set Leverage", callback_data="setlev"),
         ],
         [
@@ -128,7 +128,7 @@ def main_menu() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🎯 Set RR", callback_data="setrr"),
-            InlineKeyboardButton(text="💵 Set Notional", callback_data="setnotional"),
+            InlineKeyboardButton(text="🧢 Max Notional Cap", callback_data="setnotional"),
         ],
     ])
 

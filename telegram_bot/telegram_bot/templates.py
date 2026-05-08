@@ -93,7 +93,7 @@ _ERROR_STAGE_INFO = {
             "Penyebab umum:\n"
             "• Saldo USDT kurang untuk margin.\n"
             "• Symbol tidak tradeable / pair delisted.\n"
-            "• Min notional belum tercapai (<b>Risk %</b> × balance terlalu kecil).\n"
+            "• Size hasil Risk $ terlalu kecil / kena max cap di bawah min notional.\n"
             "• API key tidak punya izin <b>Trade</b>."
         ),
     ),
