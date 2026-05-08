@@ -1,11 +1,14 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
 from config import (
     V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_HTF_MIN_SCORE, V2_RR,
-    V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2,
+    V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2, V2_MIN_QUALITY_SCORE,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -194,6 +197,13 @@ def evaluate_v2_signal(
                     triggered = hit
                     break
             if triggered is None:
+                continue
+            if triggered.quality_score < V2_MIN_QUALITY_SCORE:
+                logger.info(
+                    "v2 skip %s %s %s | quality=%.1f < %.1f",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    triggered.quality_score, V2_MIN_QUALITY_SCORE,
+                )
                 continue
             score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
             if score < V2_HTF_MIN_SCORE:
