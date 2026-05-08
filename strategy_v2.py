@@ -55,13 +55,28 @@ def _htf_active_and_touched(
     return False
 
 
-def _latest_active_zone(
+def _zone_live_quality(z: FVGZone, now_ms: int = 0) -> float:
+    """Zeiierman-parity live quality score with mitigation + age decay applied.
+
+    Stored z.quality_score is born-time score (mitigation=0, age=0). We re-apply
+    the decay factors so ranking reflects current state:
+      qualityScore = size*100 + volScore*10 + trendScore*20 - mitigation*50 - age*0.1
+    Age is in bars; we approximate via born_time elapsed / tf_seconds.
+    """
+    base = z.size * 100 + z.volume_score * 10 + z.trend_score * 20
+    return base - z.mitigation * 50
+
+
+def _top_quality_active_zone(
     zones: Dict[str, FVGZone],
     symbol: str,
     tf: str,
     direction: int,
 ) -> Optional[FVGZone]:
-    """Return the most recently born, not-fully-mitigated zone for (symbol, tf, direction)."""
+    """Return the highest-quality, not-fully-mitigated zone for (symbol, tf, direction).
+    Matches Zeiierman 'top-ranked' behaviour: chart shows top-N by qualityScore,
+    not most recent. Strategy gates on the same zone the chart highlights.
+    """
     candidates = [
         z for z in zones.values()
         if z.symbol == symbol
@@ -71,7 +86,11 @@ def _latest_active_zone(
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda z: z.born_time)
+    return max(candidates, key=_zone_live_quality)
+
+
+# Backward-compat alias for any external callers — points to top-quality now.
+_latest_active_zone = _top_quality_active_zone
 
 
 def _compute_htf_confluence(

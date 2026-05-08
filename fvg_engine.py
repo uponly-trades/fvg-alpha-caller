@@ -315,6 +315,9 @@ class FVGZone:
     tp1: float = 0.0
     tp2: float = 0.0
     price: float = 0.0
+    quality_score: float = 0.0    # Zeiierman-parity ranking
+    volume_score: float = 0.0     # volume / volumeMA at born
+    trend_score: float = 0.0      # 1.0 if dir aligns with trendEMA at born else 0.0
     # Extra metrics
     vol_change_pct: float = 0.0   # vs previous bar
     price_change_pct: float = 0.0 # bar change percent
@@ -507,12 +510,17 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     tp1 = fvg["top"] + atr_val * 1.5 if direction == 1 else fvg["bottom"] - atr_val * 1.5
     tp2 = fvg["top"] + atr_val * 2.5 if direction == 1 else fvg["bottom"] - atr_val * 2.5
 
+    # Zeiierman-parity quality score (mitigation=0 at born, age=0 at born).
+    # qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mitigation*50 - age*0.1
+    quality_score = fvg["size"] * 100 + vol_score * 10 + trend_score * 20
+
     return {
         "main_strength": main_strength,
         "bull_strength": bull_str,
         "bear_strength": bear_str,
         "vol_score": vol_score,
         "trend_score": trend_score,
+        "quality_score": quality_score,
         "vol_change_pct": round(vol_change_pct, 1),
         "price_change_pct": round(price_change_pct, 2),
         "price_change_24h_pct": round(price_change_24h_pct, 2),
@@ -590,6 +598,9 @@ class FVGTracker:
             "invalidated": zone.invalidated,
             "invalid_reason": zone.invalid_reason,
             "indicator_context": zone.indicator_context,
+            "quality_score": zone.quality_score,
+            "volume_score": zone.volume_score,
+            "trend_score": zone.trend_score,
         }
 
     def _dict_to_zone(self, d: dict) -> FVGZone:
@@ -634,6 +645,9 @@ class FVGTracker:
             invalidated=d.get("invalidated", False),
             invalid_reason=d.get("invalid_reason", ""),
             indicator_context=d.get("indicator_context", ""),
+            quality_score=d.get("quality_score", 0.0),
+            volume_score=d.get("volume_score", 0.0),
+            trend_score=d.get("trend_score", 0.0),
         )
 
     def _save_zones(self):
@@ -661,6 +675,10 @@ class FVGTracker:
                     dropped += 1
                     continue
                 zone = self._dict_to_zone(d)
+                # Backfill quality_score for legacy zones (pre-Zeiierman parity).
+                # size*100 alone gives a non-zero baseline so ranking works.
+                if zone.quality_score == 0.0 and zone.size > 0:
+                    zone.quality_score = zone.size * 100
                 self.zones[zid] = zone
                 loaded += 1
             logger.info("Zones loaded: %d loaded, %d dropped (stale)", loaded, dropped)
@@ -730,6 +748,9 @@ class FVGTracker:
             price_change_24h_pct=strength["price_change_24h_pct"],
             confirm_score=strength["confirm_score"],
             confirm_label=strength["confirm_label"],
+            quality_score=strength.get("quality_score", 0.0),
+            volume_score=strength.get("vol_score", 0.0),
+            trend_score=strength.get("trend_score", 0.0),
         )
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
