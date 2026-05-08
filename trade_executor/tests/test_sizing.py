@@ -34,3 +34,24 @@ def test_qty_rounded_to_step():
     meta = SymbolMeta(step_size=0.01, min_notional=5.0)
     res = compute_size(balance=100, risk_pct=2, entry=100, sl=95, leverage=5, meta=meta)
     assert math.isclose(res.qty, 0.40, abs_tol=1e-9)
+
+
+def test_compute_size_fixed_notional_ignores_risk_percent():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=100, risk_pct=10, entry=100, sl=95, leverage=5,
+        meta=meta, fixed_notional_usdt=25,
+    )
+    assert res.notional_usdt == pytest.approx(25.0)
+    assert res.qty == pytest.approx(0.25)
+    assert res.margin_usdt == pytest.approx(5.0)
+
+
+def test_compute_size_fixed_notional_below_exchange_min_skips():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=100, risk_pct=2, entry=100, sl=95, leverage=5,
+        meta=meta, fixed_notional_usdt=4.99,
+    )
+    assert res.skip_reason == "min_notional"
+    assert res.notional_usdt == pytest.approx(4.99)

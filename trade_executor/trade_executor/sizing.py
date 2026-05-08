@@ -32,14 +32,20 @@ def compute_size(
     sl: float,
     leverage: int,
     meta: SymbolMeta,
+    fixed_notional_usdt: float | None = None,
 ) -> SizeResult:
     if entry <= 0 or sl <= 0:
         return SizeResult(skip_reason="bad_levels")
     sl_distance_pct = abs(entry - sl) / entry * 100
     if sl_distance_pct <= 0:
         return SizeResult(skip_reason="zero_sl_distance")
-    risk_usdt = balance * risk_pct / 100
-    notional = risk_usdt / (sl_distance_pct / 100)
+
+    if fixed_notional_usdt is not None and fixed_notional_usdt > 0:
+        notional = fixed_notional_usdt
+    else:
+        risk_usdt = balance * risk_pct / 100
+        notional = risk_usdt / (sl_distance_pct / 100)
+
     if notional < meta.min_notional:
         return SizeResult(notional_usdt=notional, skip_reason="min_notional")
     qty_raw = notional / entry

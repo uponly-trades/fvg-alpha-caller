@@ -32,7 +32,8 @@ async def user_row(conn, *, telegram_id: int):
     return await conn.fetchrow(
         """
         SELECT id, enabled, paused_until, pause_reason, api_key_tail, risk_pct,
-               leverage, max_concurrent, daily_loss_cap_pct
+               leverage, max_concurrent, daily_loss_cap_pct, rr_ratio,
+               fixed_notional_usdt
         FROM users WHERE telegram_id=$1
         """,
         telegram_id,
@@ -51,8 +52,11 @@ async def set_enabled(conn, *, telegram_id: int, enabled: bool) -> None:
     )
 
 
-async def update_setting(conn, *, telegram_id: int, field: str, value: float | int) -> None:
-    allowed = {"risk_pct", "leverage", "max_concurrent", "daily_loss_cap_pct"}
+async def update_setting(conn, *, telegram_id: int, field: str, value: float | int | None) -> None:
+    allowed = {
+        "risk_pct", "leverage", "max_concurrent", "daily_loss_cap_pct",
+        "rr_ratio", "fixed_notional_usdt",
+    }
     if field not in allowed:
         raise ValueError("invalid setting")
     await conn.execute(
@@ -86,7 +90,8 @@ async def stats(conn, *, telegram_id: int) -> dict[str, Any]:
     row = await conn.fetchrow(
         """
         SELECT u.id, u.enabled, u.risk_pct, u.leverage, u.max_concurrent,
-               u.daily_loss_cap_pct, u.api_key_tail,
+               u.daily_loss_cap_pct, u.rr_ratio, u.fixed_notional_usdt,
+               u.api_key_tail,
                COALESCE(d.realized_pnl_usdt, 0) AS today_pnl_usdt,
                COALESCE(d.realized_pnl_pct, 0) AS today_pnl_pct,
                COALESCE(d.trades_count, 0) AS today_trades,
@@ -131,6 +136,11 @@ async def stats(conn, *, telegram_id: int) -> dict[str, Any]:
         "leverage":       int(row["leverage"] or 0),
         "max_concurrent": int(row["max_concurrent"] or 0),
         "daily_loss_cap_pct": float(row["daily_loss_cap_pct"] or 0),
+        "rr_ratio":       float(row["rr_ratio"] or 1.0),
+        "fixed_notional_usdt": (
+            float(row["fixed_notional_usdt"])
+            if row["fixed_notional_usdt"] is not None else None
+        ),
         "api_key_tail":   row["api_key_tail"] or "",
         "today_pnl_usdt": float(row["today_pnl_usdt"] or 0),
         "today_pnl_pct":  float(row["today_pnl_pct"] or 0),

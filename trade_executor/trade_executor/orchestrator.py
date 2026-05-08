@@ -66,17 +66,26 @@ async def handle_signal_for_user(
     leverage: int,
     max_concurrent: int,
     daily_loss_cap_pct: float,
+    rr_ratio: float = 1.0,
+    fixed_notional_usdt: float | None = None,
 ) -> OrchResult:
     decision_id = signal["id"]
     symbol = signal["symbol"]
     direction = signal["direction"]
     entry = float(signal["entry"])
     sl = float(signal["sl"])
-    tp1 = float(signal["tp1"])
-    tp2 = float(signal["tp2"])
+    rr_ratio = max(1.0, float(rr_ratio or 1.0))
+    risk_distance = abs(entry - sl)
+    if direction == "long":
+        tp1 = entry + risk_distance
+        tp2 = entry + risk_distance * rr_ratio
+    else:
+        tp1 = entry - risk_distance
+        tp2 = entry - risk_distance * rr_ratio
 
     async with pool.acquire() as conn:
-        balance = (await ex.fetch_balance()).get("USDT", {}).get("free", 0)
+        usdt_balance = (await ex.fetch_balance()).get("USDT", {})
+        balance = usdt_balance.get("total") or usdt_balance.get("free") or 0
         gate = check_user_gate(
             user={
                 "id": user_id, "enabled": True, "paused_until": None,
@@ -102,7 +111,7 @@ async def handle_signal_for_user(
         meta = await _symbol_meta(ex, symbol)
         size = compute_size(
             balance=float(balance), risk_pct=risk_pct, entry=entry, sl=sl,
-            leverage=leverage, meta=meta,
+            leverage=leverage, meta=meta, fixed_notional_usdt=fixed_notional_usdt,
         )
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",

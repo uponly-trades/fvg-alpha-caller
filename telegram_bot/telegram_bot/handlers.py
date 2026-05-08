@@ -126,6 +126,10 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔢 Max Trades", callback_data="setmax"),
             InlineKeyboardButton(text="🛑 Daily Loss Cap", callback_data="setloss"),
         ],
+        [
+            InlineKeyboardButton(text="🎯 Set RR", callback_data="setrr"),
+            InlineKeyboardButton(text="💵 Set Notional", callback_data="setnotional"),
+        ],
     ])
 
 
@@ -393,6 +397,25 @@ def register_handlers(dp: Dispatcher, pool) -> None:
                 "Saran: 3–5%. Resume manual via ▶️ Resume."
             ),
         ),
+        "setrr": dict(
+            field="rr_ratio", min_v=1, max_v=10, integer=False,
+            label="RR ratio", hint="1–10", suffix=":1",
+            howto=(
+                "🎯 <b>RR ratio</b> — target TP berdasarkan jarak Entry → SL.\n"
+                "1 = TP 1:1, 1.5 = TP 1.5:1, 2 = TP 2:1.\n"
+                "Minimal 1 supaya reward tidak lebih kecil dari risk."
+            ),
+        ),
+        "setnotional": dict(
+            field="fixed_notional_usdt", min_v=0, max_v=100000, integer=False,
+            label="Fixed notional", hint="0=off atau ≥5 USDT", suffix=" USDT",
+            howto=(
+                "💵 <b>Fixed notional</b> — nilai posisi per trade.\n"
+                "Contoh: isi 5 berarti bot open sekitar $5 notional per signal; "
+                "margin = notional ÷ leverage.\n"
+                "Isi 0 untuk OFF dan kembali pakai Risk %."
+            ),
+        ),
     }
 
     async def _current_value(telegram_id: int, field: str) -> str:
@@ -403,6 +426,8 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         v = row[field]
         if field == "leverage" or field == "max_concurrent":
             return str(int(v))
+        if field == "fixed_notional_usdt" and v is None:
+            return "OFF"
         return f"{float(v):.2f}"
 
     async def _ask_numeric(target, state: FSMContext, key: str):
@@ -436,7 +461,13 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     @dp.message(Command("setloss"))
     async def on_setloss_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setloss")
 
-    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss"}))
+    @dp.message(Command("setrr"))
+    async def on_setrr_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setrr")
+
+    @dp.message(Command("setnotional"))
+    async def on_setnotional_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setnotional")
+
+    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr", "setnotional"}))
     async def cb_numeric(cb: CallbackQuery, state: FSMContext):
         await _ask_numeric(cb, state, cb.data)
 
@@ -452,7 +483,12 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             raw = float((m.text or "").strip())
             if raw < cfg["min_v"] or raw > cfg["max_v"]:
                 raise ValueError(f"must be {cfg['hint']}")
-            value = int(raw) if cfg["integer"] else raw
+            if key == "setnotional":
+                value = None if raw == 0 else raw
+                if value is not None and value < 5:
+                    raise ValueError("must be 0=off or ≥5 USDT")
+            else:
+                value = int(raw) if cfg["integer"] else raw
         except (ValueError, TypeError) as e:
             await _edit_or_reply(
                 m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
@@ -465,9 +501,10 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         async with pool.acquire() as conn:
             await update_setting(conn, telegram_id=m.from_user.id, field=cfg["field"], value=value)
         suffix = cfg.get("suffix", "")
+        shown_value = "OFF" if value is None else f"{value}{suffix}"
         dashboard = await _dashboard_text(pool, m.from_user.id)
         await _edit_or_reply(
             m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
-            text=f"✅ {cfg['label']} set to {value}{suffix}\n\n{dashboard}",
+            text=f"✅ {cfg['label']} set to {shown_value}\n\n{dashboard}",
             reply_markup=main_menu(), parse_mode="HTML",
         )

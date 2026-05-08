@@ -133,7 +133,8 @@ def fmt_daily(*, date: str, trades: int, wins: int, pnl_usdt: float, pnl_pct: fl
 def fmt_help() -> str:
     return (
         "🤖 <b>FVG Live Trading</b>\n\n"
-        "Gunakan tombol di bawah untuk manage akun trading kamu."
+        "Gunakan tombol di bawah untuk manage akun trading kamu.\n"
+        "Commands: /setkeys /balance /resume /pause /settings"
     )
 
 
@@ -178,9 +179,12 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
     lev     = int(summary.get("leverage", 10))
     maxc    = int(summary.get("max_concurrent", 3))
     dloss   = float(summary.get("daily_loss_cap_pct", 5))
+    rr      = float(summary.get("rr_ratio", 1.0) or 1.0)
+    fixed_notional = summary.get("fixed_notional_usdt")
     key_tail = summary.get("api_key_tail") or "—"
+    sizing_mode = f"Fixed ${float(fixed_notional):.2f}" if fixed_notional is not None else f"Risk {risk:.2f}%"
     settings_line = (
-        f"⚙️ Risk <b>{risk:.2f}%</b>  |  Lev <b>{lev}x</b>  |  "
+        f"⚙️ <b>{sizing_mode}</b>  |  RR <b>{rr:.2f}:1</b>  |  Lev <b>{lev}x</b>  |  "
         f"Max <b>{maxc}</b> trades  |  Daily cap <b>{dloss:.1f}%</b>"
     )
 
@@ -212,18 +216,29 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
     bal_total = float(bal.get("total", 0) or 0)
     est_lines = ""
     if bal_total > 0:
-        # Reference SL distance: 1% (typical FVG entry). Show 1% and 2% so
-        # user understands range — closer SL = bigger position.
-        est_1 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=1.0)
-        est_2 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=2.0)
-        max_concurrent_margin = est_1["margin"] * maxc
-        est_lines = (
-            f"\n📐 <b>Per-Trade Size</b> (estimate)\n"
-            f"  Risk/trade: <b>${est_1['risk']:.2f}</b>\n"
-            f"  SL 1.0%: notional <b>${est_1['notional']:.2f}</b>  margin <b>${est_1['margin']:.2f}</b>\n"
-            f"  SL 2.0%: notional <b>${est_2['notional']:.2f}</b>  margin <b>${est_2['margin']:.2f}</b>\n"
-            f"  Max exposure (×{maxc}): margin <b>${max_concurrent_margin:.2f}</b>"
-        )
+        if fixed_notional is not None:
+            notional = float(fixed_notional)
+            margin = notional / max(1, lev)
+            max_concurrent_margin = margin * maxc
+            est_lines = (
+                f"\n📐 <b>Per-Trade Size</b> (fixed)\n"
+                f"  Notional/trade: <b>${notional:.2f}</b>  margin <b>${margin:.2f}</b>\n"
+                f"  TP target: <b>{rr:.2f}:1</b> dari jarak SL\n"
+                f"  Max exposure (×{maxc}): margin <b>${max_concurrent_margin:.2f}</b>"
+            )
+        else:
+            # Reference SL distance: 1% (typical FVG entry). Show 1% and 2% so
+            # user understands range — closer SL = bigger position.
+            est_1 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=1.0)
+            est_2 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=2.0)
+            max_concurrent_margin = est_1["margin"] * maxc
+            est_lines = (
+                f"\n📐 <b>Per-Trade Size</b> (estimate)\n"
+                f"  Risk/trade: <b>${est_1['risk']:.2f}</b>  TP target: <b>{rr:.2f}:1</b>\n"
+                f"  SL 1.0%: notional <b>${est_1['notional']:.2f}</b>  margin <b>${est_1['margin']:.2f}</b>\n"
+                f"  SL 2.0%: notional <b>${est_2['notional']:.2f}</b>  margin <b>${est_2['margin']:.2f}</b>\n"
+                f"  Max exposure (×{maxc}): margin <b>${max_concurrent_margin:.2f}</b>"
+            )
 
     return (
         f"🤖 <b>FVG Alpha Caller</b>\n\n"
@@ -260,10 +275,13 @@ def fmt_settings(row) -> str:
     if not row:
         return "Send /start first."
     state = "enabled" if row["enabled"] else "paused"
+    fixed_notional = row.get("fixed_notional_usdt")
+    fixed_notional_text = "OFF" if fixed_notional is None else f"${float(fixed_notional):.2f}"
     return (
         f"⚙️ <b>Settings</b> ({state})\n"
         f"Risk: {float(row['risk_pct']):.2f}%\n"
-        f"Leverage: {int(row['leverage'])}x\n"
+        f"Fixed notional: {fixed_notional_text}\n"
+        f"RR ratio: {float(row.get('rr_ratio') or 1.0):.2f}:1\n"        f"Leverage: {int(row['leverage'])}x\n"
         f"Max trades: {int(row['max_concurrent'])}\n"
         f"Daily loss cap: {float(row['daily_loss_cap_pct']):.2f}%\n"
         f"API key: ...{row['api_key_tail'] or 'not set'}"
@@ -295,11 +313,14 @@ def fmt_stats(s: dict) -> str:
     lev     = int(s.get("leverage", 0) or 0)
     maxc    = int(s.get("max_concurrent", 0) or 0)
     dloss   = float(s.get("daily_loss_cap_pct", 0) or 0)
+    rr      = float(s.get("rr_ratio", 1.0) or 1.0)
+    fixed_notional = s.get("fixed_notional_usdt")
+    sizing = f"Fixed ${float(fixed_notional):.2f}" if fixed_notional is not None else f"Risk {risk:.2f}%"
     state   = "✅ Active" if enabled else "⏸ Paused"
     cfg_block = (
         "⚙️ <b>Config</b>\n"
         f"  Status: <b>{state}</b>\n"
-        f"  Risk: <b>{risk:.2f}%</b>  |  Lev: <b>{lev}x</b>  |  Max: <b>{maxc}</b>  |  Cap: <b>{dloss:.1f}%</b>\n\n"
+        f"  Size: <b>{sizing}</b>  |  RR: <b>{rr:.2f}:1</b>  |  Lev: <b>{lev}x</b>  |  Max: <b>{maxc}</b>  |  Cap: <b>{dloss:.1f}%</b>\n\n"
     )
 
     # ── today ─────────────────────────────────────────────────────
