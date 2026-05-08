@@ -4,7 +4,12 @@ from datetime import date
 import pytest
 
 from trade_executor import db
-from trade_executor.pnl_aggregator import reconcile_user, classify_close
+from trade_executor.pnl_aggregator import (
+    _infer_day_start_balance,
+    _pct_of_day_start,
+    classify_close,
+    reconcile_user,
+)
 
 
 def test_classify_close_tp2_long():
@@ -36,7 +41,20 @@ class FakeEx:
         return self._fills.get(symbol, [])
 
     async def fetch_balance(self):
-        return {"USDT": {"free": 100.0}}
+        return {"USDT": {"free": 100.0, "total": 100.0}}
+
+    async def fapiPrivateV2GetBalance(self):
+        return [{"asset": "USDT", "balance": "100.0", "availableBalance": "100.0"}]
+
+
+def test_daily_pnl_pct_uses_actual_day_start_balance_not_hardcoded_100():
+    assert _pct_of_day_start(-10.0, 1000.0) == pytest.approx(-1.0)
+    assert _pct_of_day_start(25.0, 500.0) == pytest.approx(5.0)
+
+
+def test_infer_day_start_balance_from_current_equity_after_close():
+    assert _infer_day_start_balance(990.0, -10.0) == pytest.approx(1000.0)
+    assert _infer_day_start_balance(1025.0, 25.0) == pytest.approx(1000.0)
 
 
 @pytestmark_db
@@ -68,9 +86,11 @@ async def test_reconcile_marks_tp2_close_and_updates_daily():
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT status, pnl_usdt, fees_usdt FROM user_trades WHERE id=$1",
                                        f"{uid}-p-1")
-            day = await conn.fetchrow("SELECT realized_pnl_usdt, trades_count, wins_count FROM user_daily_pnl WHERE user_id=$1 AND day=CURRENT_DATE", uid)
+            day = await conn.fetchrow("SELECT realized_pnl_usdt, realized_pnl_pct, day_start_balance_usdt, trades_count, wins_count FROM user_daily_pnl WHERE user_id=$1 AND day=CURRENT_DATE", uid)
         assert row["status"] == "closed_tp2"
         assert row["pnl_usdt"] == pytest.approx(10.0, rel=1e-2)
+        assert day["realized_pnl_pct"] == pytest.approx(10.0 / 90.0 * 100, rel=1e-6)
+        assert day["day_start_balance_usdt"] == pytest.approx(90.0)
         assert day["trades_count"] == 1
         assert day["wins_count"] == 1
     finally:

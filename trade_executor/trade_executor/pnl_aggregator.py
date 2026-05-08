@@ -46,6 +46,41 @@ async def _fetch_positions(ex) -> dict[str, float]:
     return out
 
 
+async def _fetch_total_usdt_balance(ex) -> float:
+    """Return current futures total USDT equity, or 0 if unavailable."""
+    try:
+        rows = await ex.fapiPrivateV2GetBalance()
+        for item in rows:
+            if item.get("asset") == "USDT":
+                return float(item.get("balance") or 0)
+    except Exception as e:
+        log.warning("fetch futures balance failed: %s", e)
+
+    try:
+        usdt = (await ex.fetch_balance()).get("USDT", {})
+        return float(usdt.get("total") or usdt.get("free") or 0)
+    except Exception as e:
+        log.warning("fetch balance fallback failed: %s", e)
+        return 0.0
+
+
+def _pct_of_day_start(pnl_usdt: float, day_start_balance_usdt: float) -> float:
+    if day_start_balance_usdt <= 0:
+        return 0.0
+    return pnl_usdt / day_start_balance_usdt * 100
+
+
+def _infer_day_start_balance(current_balance_usdt: float, first_close_pnl_usdt: float) -> float:
+    """Estimate day-start equity when inserting today's first realized close.
+
+    Reconciliation runs after Binance has already applied the close PnL, so for
+    the first close of the day: day_start = current equity - first realized pnl.
+    Existing daily rows keep their original stored day_start_balance_usdt.
+    """
+    inferred = current_balance_usdt - first_close_pnl_usdt
+    return inferred if inferred > 0 else current_balance_usdt
+
+
 _CLOSE_PROXIMITY_PCT = 0.005  # 0.5% — close fill within this band of tp/sl = that exit
 
 
@@ -88,6 +123,7 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
     # We must reconcile via positions because algo SL/TP fills carry CHILD
     # market order IDs that don't match our stored algoId.
     positions = await _fetch_positions(ex)
+    current_balance_usdt = await _fetch_total_usdt_balance(ex)
 
     by_symbol: dict[str, list[dict]] = {}
     for r in rows:
@@ -175,7 +211,13 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
                     close_ts or int(time.time() * 1000),
                     t["id"],
                 )
-                await _upsert_daily(conn, user_id, pnl_usdt, won=(pnl_usdt > 0))
+                await _upsert_daily(
+                    conn,
+                    user_id,
+                    pnl_usdt,
+                    won=(pnl_usdt > 0),
+                    current_balance_usdt=current_balance_usdt,
+                )
                 await notify(conn, "trade_closed",
                              {"user_id": user_id, "trade_id": t["id"], "status": new_status,
                               "pnl_usdt": pnl_usdt, "pnl_pct": pnl_pct})
@@ -199,20 +241,30 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
             await notify(conn, "daily_summary", {"user_id": user_id, "paused": True})
 
 
-async def _upsert_daily(conn, user_id: int, pnl_usdt: float, *, won: bool) -> None:
+async def _upsert_daily(
+    conn,
+    user_id: int,
+    pnl_usdt: float,
+    *,
+    won: bool,
+    current_balance_usdt: float,
+) -> None:
+    day_start_balance = _infer_day_start_balance(current_balance_usdt, pnl_usdt)
     await conn.execute(
         """
         INSERT INTO user_daily_pnl (user_id, day, realized_pnl_usdt, realized_pnl_pct,
                                     trades_count, wins_count, day_start_balance_usdt)
-        VALUES ($1, CURRENT_DATE, $2, $3, 1, $4, 100.0)
+        VALUES ($1, CURRENT_DATE, $2, $3, 1, $4, $5)
         ON CONFLICT (user_id, day) DO UPDATE SET
           realized_pnl_usdt = user_daily_pnl.realized_pnl_usdt + EXCLUDED.realized_pnl_usdt,
           realized_pnl_pct  = (user_daily_pnl.realized_pnl_usdt + EXCLUDED.realized_pnl_usdt)
-                              / COALESCE(user_daily_pnl.day_start_balance_usdt, 100.0) * 100,
+                              / NULLIF(user_daily_pnl.day_start_balance_usdt, 0) * 100,
           trades_count      = user_daily_pnl.trades_count + 1,
           wins_count        = user_daily_pnl.wins_count + EXCLUDED.wins_count
         """,
-        user_id, pnl_usdt,
-        (pnl_usdt / 100.0) * 100,
+        user_id,
+        pnl_usdt,
+        _pct_of_day_start(pnl_usdt, day_start_balance),
         1 if won else 0,
+        day_start_balance,
     )
