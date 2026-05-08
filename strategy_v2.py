@@ -245,6 +245,14 @@ def evaluate_v2_signal(
                 htf_touches=touches,
                 fvg_buy_volume=getattr(triggered, "fvg_buy_volume", 0.0),
                 fvg_sell_volume=getattr(triggered, "fvg_sell_volume", 0.0),
-                indicators={},
+                indicators={
+                    "rsi": getattr(triggered, "rsi", 50.0),
+                    "volume_score": getattr(triggered, "volume_score", 0.0),
+                    "trend_score": getattr(triggered, "trend_score", 0.0),
+                    "quality_score": getattr(triggered, "quality_score", 0.0),
+                    "main_strength": getattr(triggered, "main_strength", 0),
+                    "bull_strength": getattr(triggered, "bull_strength", 0),
+                    "bear_strength": getattr(triggered, "bear_strength", 0),
+                },
             )
     return None

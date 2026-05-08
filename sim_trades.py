@@ -304,6 +304,13 @@ class SimTradeStore:
                     "fvg_buy_volume": float(signal.fvg_buy_volume),
                     "fvg_sell_volume": float(signal.fvg_sell_volume),
                     "atr": float(signal.atr),
+                    "rsi": float(signal.indicators.get("rsi", 50.0)),
+                    "volume_score": float(signal.indicators.get("volume_score", 0.0)),
+                    "trend_score": float(signal.indicators.get("trend_score", 0.0)),
+                    "quality_score": float(signal.indicators.get("quality_score", 0.0)),
+                    "main_strength": int(signal.indicators.get("main_strength", 0)),
+                    "bull_strength": int(signal.indicators.get("bull_strength", 0)),
+                    "bear_strength": int(signal.indicators.get("bear_strength", 0)),
                 }
                 cur.execute(
                     """INSERT INTO kronos_decisions

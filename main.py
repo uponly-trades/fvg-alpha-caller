@@ -109,6 +109,11 @@ class AlphaCaller:
                 confluence_tf_count=s["confluence_tf_count"],
                 price_change_24h_pct=s["price_change_24h_pct"],
                 confirm_score=s["confirm_score"], confirm_label=s["confirm_label"],
+                fvg_buy_volume=s["fvg_buy_volume"],
+                fvg_sell_volume=s["fvg_sell_volume"],
+                volume_score=s["vol_score"],
+                trend_score=s["trend_score"],
+                quality_score=s["quality_score"],
             )
             self.tracker.zones[zone_id] = zone
 
@@ -163,6 +168,11 @@ class AlphaCaller:
             confluence_tf_count=s["confluence_tf_count"],
             price_change_24h_pct=s["price_change_24h_pct"],
             confirm_score=s["confirm_score"], confirm_label=s["confirm_label"],
+            fvg_buy_volume=s["fvg_buy_volume"],
+            fvg_sell_volume=s["fvg_sell_volume"],
+            volume_score=s["vol_score"],
+            trend_score=s["trend_score"],
+            quality_score=s["quality_score"],
         )
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
         self.tracker.zones[zone_id] = zone
