@@ -782,7 +782,10 @@ class FVGTracker:
                     fill_dist = curr.high - zone.bottom
 
             if touched:
-                zone_size = max(zone.top - zone.bottom, 0.01)
+                # Min divisor matches Pine's syminfo.mintick — proportional to
+                # zone size, not hardcoded 0.01 (broke for low-price symbols
+                # like 1000PEPE where 0.01 > zone size).
+                zone_size = max(zone.top - zone.bottom, zone.size * 1e-6 or 1e-9)
                 zone.mitigation = min(max(fill_dist / zone_size, 0), 1)
 
             invalid_reason = compute_invalid_reason(zone, bars)

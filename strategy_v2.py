@@ -55,28 +55,35 @@ def _htf_active_and_touched(
     return False
 
 
-def _zone_live_quality(z: FVGZone, now_ms: int = 0) -> float:
-    """Zeiierman-parity live quality score with mitigation + age decay applied.
+_TF_SECONDS = {"15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400}
 
-    Stored z.quality_score is born-time score (mitigation=0, age=0). We re-apply
-    the decay factors so ranking reflects current state:
-      qualityScore = size*100 + volScore*10 + trendScore*20 - mitigation*50 - age*0.1
-    Age is in bars; we approximate via born_time elapsed / tf_seconds.
+
+def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
+    """Zeiierman-parity live quality score with mitigation + age decay.
+
+    qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mit*50 - age*0.1
+    age = bars elapsed since born_time (approximated via tf_seconds).
     """
     base = z.size * 100 + z.volume_score * 10 + z.trend_score * 20
-    return base - z.mitigation * 50
+    tf_sec = _TF_SECONDS.get(z.tf, 900)
+    age_bars = max(0, (now_ms - z.born_time) // (tf_sec * 1000))
+    return base - z.mitigation * 50 - age_bars * 0.1
 
 
-def _top_quality_active_zone(
+# Top-N zones the chart actually displays. Pine default maxZones=10.
+_VISIBLE_TOP_N = 10
+
+
+def _visible_top_zones(
     zones: Dict[str, FVGZone],
     symbol: str,
     tf: str,
     direction: int,
-) -> Optional[FVGZone]:
-    """Return the highest-quality, not-fully-mitigated zone for (symbol, tf, direction).
-    Matches Zeiierman 'top-ranked' behaviour: chart shows top-N by qualityScore,
-    not most recent. Strategy gates on the same zone the chart highlights.
-    """
+) -> List[FVGZone]:
+    """Top-N zones the chart displays — Pine indicator default maxZones=10.
+    Sorted by live quality_score descending."""
+    import time
+    now_ms = int(time.time() * 1000)
     candidates = [
         z for z in zones.values()
         if z.symbol == symbol
@@ -85,12 +92,25 @@ def _top_quality_active_zone(
         and z.mitigation < 1.0
     ]
     if not candidates:
+        return []
+    candidates.sort(key=lambda z: _zone_live_quality(z, now_ms), reverse=True)
+    return candidates[:_VISIBLE_TOP_N]
+
+
+def _latest_active_zone(
+    zones: Dict[str, FVGZone],
+    symbol: str,
+    tf: str,
+    direction: int,
+) -> Optional[FVGZone]:
+    """Pine alert behaviour: of the top-N visible zones (the ones the chart
+    actually shows), return the one most recently born. This preserves v1
+    'fresh signal' behaviour while filtering out micro low-quality zones the
+    user can't see on their chart."""
+    visible = _visible_top_zones(zones, symbol, tf, direction)
+    if not visible:
         return None
-    return max(candidates, key=_zone_live_quality)
-
-
-# Backward-compat alias for any external callers — points to top-quality now.
-_latest_active_zone = _top_quality_active_zone
+    return max(visible, key=lambda z: z.born_time)
 
 
 def _compute_htf_confluence(
@@ -113,7 +133,7 @@ def _compute_htf_confluence(
     return score, touches
 
 
-_TRIGGER_TOUCH_LOOKBACK = 3
+_TRIGGER_TOUCH_LOOKBACK = 1  # Pine alert fires on current bar only — match parity
 
 
 def _trigger_zone_touched(zone: Optional[FVGZone], bars: List) -> Optional[FVGZone]:
@@ -157,8 +177,20 @@ def evaluate_v2_signal(
     """
     for direction in (1, -1):
         for trigger_tf in V2_TRIGGER_TFS:
-            zone = _latest_active_zone(zones, symbol, trigger_tf, direction)
-            triggered = _trigger_zone_touched(zone, bars_by_tf.get(trigger_tf, []))
+            # Walk visible top-N zones (chart-displayed). Newest born first
+            # to favor recent setups, but only zones that actually appear on
+            # the user's Zeiierman chart (top-10 by quality).
+            visible = _visible_top_zones(zones, symbol, trigger_tf, direction)
+            if not visible:
+                continue
+            visible.sort(key=lambda z: z.born_time, reverse=True)
+            triggered = None
+            bars = bars_by_tf.get(trigger_tf, [])
+            for z in visible:
+                hit = _trigger_zone_touched(z, bars)
+                if hit is not None:
+                    triggered = hit
+                    break
             if triggered is None:
                 continue
             score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
