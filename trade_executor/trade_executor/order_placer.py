@@ -54,7 +54,7 @@ async def place_full_sequence(
             "side": close_side,
             "type": "STOP_MARKET",
             "algoType": "CONDITIONAL",
-            "stopPrice": ex.price_to_precision(symbol, sl_price),
+            "triggerPrice": ex.price_to_precision(symbol, sl_price),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         })
@@ -76,7 +76,7 @@ async def place_full_sequence(
             "side": close_side,
             "type": "TAKE_PROFIT_MARKET",
             "algoType": "CONDITIONAL",
-            "stopPrice": ex.price_to_precision(symbol, tp_price),
+            "triggerPrice": ex.price_to_precision(symbol, tp_price),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         })
