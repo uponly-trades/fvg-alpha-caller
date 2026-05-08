@@ -395,12 +395,26 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         ),
     }
 
+    async def _current_value(telegram_id: int, field: str) -> str:
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=telegram_id)
+        if not row or row.get(field) is None:
+            return "—"
+        v = row[field]
+        if field == "leverage" or field == "max_concurrent":
+            return str(int(v))
+        return f"{float(v):.2f}"
+
     async def _ask_numeric(target, state: FSMContext, key: str):
         cfg = _NUMERIC_CONFIG[key]
         await state.set_state(NumericSetup.waiting_for_value)
+        tid = target.from_user.id
+        cur = await _current_value(tid, cfg["field"])
+        suffix = cfg.get("suffix", "")
         text = (
             f"{cfg['howto']}\n\n"
-            f"Masukkan <b>{cfg['label']}</b> ({cfg['hint']}):"
+            f"Current <b>{cfg['label']}</b>: <b>{cur}{suffix}</b>\n"
+            f"Masukkan nilai baru ({cfg['hint']}):"
         )
         if isinstance(target, CallbackQuery):
             await target.answer()

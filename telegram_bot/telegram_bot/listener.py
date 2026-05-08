@@ -4,7 +4,7 @@ import json
 import logging
 
 from telegram_bot.templates import (
-    fmt_breakeven, fmt_error, fmt_opened, fmt_sl, fmt_tp2,
+    fmt_breakeven, fmt_error, fmt_manual_close, fmt_opened, fmt_sl, fmt_tp2,
 )
 
 log = logging.getLogger("listener")
@@ -54,6 +54,8 @@ async def handle_payload(pool, bot, channel: str, payload: dict) -> None:
             await bot.send_message(chat, fmt_tp2(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
         elif t["status"] == "closed_breakeven":
             await bot.send_message(chat, fmt_breakeven(symbol=t["symbol"], pnl_usdt=pnl_usdt))
+        elif t["status"] == "manual_close":
+            await bot.send_message(chat, fmt_manual_close(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
         else:
             await bot.send_message(chat, fmt_sl(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
     elif channel == "error":

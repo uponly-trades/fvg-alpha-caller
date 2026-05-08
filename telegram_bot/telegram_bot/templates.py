@@ -35,6 +35,10 @@ def fmt_breakeven(*, symbol: str, pnl_usdt: float) -> str:
     return f"🔁 BREAKEVEN  {symbol}  TP1 trailed → SL hit at TP1 closed {_money(pnl_usdt)}"
 
 
+def fmt_manual_close(*, symbol: str, pnl_usdt: float, pnl_pct: float) -> str:
+    return f"✋ MANUAL CLOSE  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})"
+
+
 _ERROR_STAGE_INFO = {
     "leverage": (
         "Gagal set leverage di Binance",

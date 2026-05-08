@@ -1,8 +1,15 @@
 from telegram_bot.templates import (
-    fmt_opened, fmt_tp2, fmt_sl, fmt_breakeven,
+    fmt_opened, fmt_tp2, fmt_sl, fmt_breakeven, fmt_manual_close,
     fmt_error, fmt_daily, fmt_balance, fmt_stats, fmt_trade_list,
     fmt_settings, fmt_key_saved, fmt_help,
 )
+
+
+def test_fmt_manual_close_neutral_label():
+    msg = fmt_manual_close(symbol="DOGEUSDT", pnl_usdt=-0.09, pnl_pct=-0.04)
+    assert "MANUAL CLOSE" in msg
+    assert "DOGEUSDT" in msg
+    assert "-$0.09" in msg or "-0.09" in msg
 
 
 def test_fmt_opened_long():

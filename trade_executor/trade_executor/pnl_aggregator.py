@@ -46,11 +46,34 @@ async def _fetch_positions(ex) -> dict[str, float]:
     return out
 
 
+_CLOSE_PROXIMITY_PCT = 0.005  # 0.5% — close fill within this band of tp/sl = that exit
+
+
+def _classify_close(*, close_px: float, status_before: str, sl: float,
+                    sl_current: float, tp1: float, tp2: float, direction: str) -> str:
+    """Decide closed_tp2 / closed_sl / closed_breakeven / manual_close from
+    proximity of close_px to stored levels. Manual closes (e.g. user clicks
+    close on Binance UI) land between the bands and get tagged accurately."""
+    def near(a: float, b: float) -> bool:
+        return b > 0 and abs(a - b) / b <= _CLOSE_PROXIMITY_PCT
+
+    if near(close_px, tp2) or (direction == "long" and close_px >= tp2 > 0) \
+            or (direction == "short" and 0 < close_px <= tp2):
+        return "closed_tp2"
+    # SL band — sl_current trumps original sl for tp1_trailed flow
+    sl_check = sl_current if status_before == "tp1_trailed" and sl_current else sl
+    if near(close_px, sl_check) or (direction == "long" and close_px <= sl_check) \
+            or (direction == "short" and close_px >= sl_check > 0):
+        return "closed_breakeven" if status_before == "tp1_trailed" else "closed_sl"
+    return "manual_close"
+
+
 async def reconcile_user(pool, *, ex, user_id: int) -> None:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, symbol, direction, qty, entry, status,
+                   sl, sl_current, tp1, tp2,
                    sl_order_id, tp_order_id, opened_at
             FROM user_trades
             WHERE user_id=$1 AND status IN ('open','tp1_trailed')
@@ -131,16 +154,15 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
             pnl_usdt = gross - cum_fee
             pnl_pct = (pnl_usdt / (qty * entry_px)) * 100 if entry_px else 0.0
 
-            # Decide TP vs SL by direction: long closed below entry = SL,
-            # above = TP. Mirror for short. tp1_trailed → SL hit = breakeven.
-            if t["direction"] == "long":
-                hit_tp = close_px > entry_px
-            else:
-                hit_tp = close_px < entry_px
-            if hit_tp:
-                new_status = "closed_tp2"
-            else:
-                new_status = "closed_breakeven" if t["status"] == "tp1_trailed" else "closed_sl"
+            new_status = _classify_close(
+                close_px=close_px,
+                status_before=t["status"],
+                sl=float(t["sl"] or 0),
+                sl_current=float(t["sl_current"] or 0),
+                tp1=float(t["tp1"] or 0),
+                tp2=float(t["tp2"] or 0),
+                direction=t["direction"],
+            )
 
             async with pool.acquire() as conn:
                 await conn.execute(
