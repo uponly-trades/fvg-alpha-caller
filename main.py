@@ -40,7 +40,6 @@ from telegram import (
     send_trade_recap,
     send_snipe_alert,
     send_v2_alert,
-    send_v2_stopped,
 )
 from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
 import alert_settings
@@ -330,17 +329,13 @@ class AlphaCaller:
                 u.symbol, u.trigger_tf, "long" if u.direction == 1 else "short",
                 u.previous_sl, u.new_sl,
             )
-        # Touch-based stop on latest closed bar (use both wicks for conservative check)
+        # Touch-based stop on latest closed bar (use both wicks for conservative check).
+        # STOPPED messages no longer broadcast to channel — per-trade close
+        # outcomes (win/loss) belong in user trading bot, not public channel.
         last = bars[-1]
         for probe_price in (last.low, last.high):
             stops = self.v2_trail.check_stop_hit(symbol, last_price=probe_price)
             for st in stops:
-                state = self.v2_trail.get(st.signal_id)
-                send_v2_stopped(
-                    symbol=st.symbol, trigger_tf=state.trigger_tf if state else tf,
-                    direction=st.direction, entry=state.entry if state else 0.0,
-                    sl_at_stop=st.sl_at_stop, last_price=st.last_price,
-                )
                 logger.info("v2 stopped %s %s | sl=%g price=%g",
                             st.symbol, st.signal_id, st.sl_at_stop, st.last_price)
 

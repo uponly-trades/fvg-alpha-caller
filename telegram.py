@@ -676,20 +676,3 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
             logger.error("send_v2_alert failed: %s", e)
 
 
-def send_v2_stopped(symbol: str, trigger_tf: str, direction: int, entry: float, sl_at_stop: float, last_price: float) -> None:
-    pnl_pct = (sl_at_stop - entry) / entry * 100 if entry else 0.0
-    if direction == -1:
-        pnl_pct = -pnl_pct
-    title = f"(STOPPED | {symbol} | {trigger_tf})"
-    text = (
-        f"<b>{title}</b>\n"
-        f"Entry: <code>{entry:g}</code>\n"
-        f"Stop:  <code>{sl_at_stop:g}</code>\n"
-        f"Last:  <code>{last_price:g}</code>\n"
-        f"PnL:   {pnl_pct:+.2f}%"
-    )
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    try:
-        requests.post(TELEGRAM_URL, json=payload, timeout=15)
-    except Exception as e:
-        logger.error("send_v2_stopped failed: %s", e)
