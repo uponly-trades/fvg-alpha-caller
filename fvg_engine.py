@@ -16,7 +16,18 @@ from config import (
     VOL_SPIKE_HIGH, VOL_SPIKE_MED, VOL_WEIGHT,
 )
 
-ZONE_TTL_MS = 24 * 60 * 60 * 1000  # 24 hours
+_HOUR_MS = 60 * 60 * 1000
+# Per-TF TTL — keep enough closed bars per TF so HTF zones don't get prematurely
+# expired from disk cache (Pine indicator keeps zones until mitigated, no time
+# limit). Balanced: ~50 closed bars at each TF.
+_ZONE_TTL_BY_TF = {
+    "15m": 24 * _HOUR_MS,        # 24h ≈ 96 bars
+    "30m": 36 * _HOUR_MS,        # 36h ≈ 72 bars
+    "1h": 3 * 24 * _HOUR_MS,     # 3 days ≈ 72 bars
+    "2h": 5 * 24 * _HOUR_MS,     # 5 days ≈ 60 bars
+    "4h": 10 * 24 * _HOUR_MS,    # 10 days ≈ 60 bars
+}
+ZONE_TTL_MS = _ZONE_TTL_BY_TF["4h"]  # widest fallback
 PERSIST_PATH = os.environ.get("ZONE_PERSIST_PATH", "/app/data/zones.json")
 
 logger = logging.getLogger(__name__)
@@ -644,14 +655,15 @@ class FVGTracker:
             loaded = 0
             dropped = 0
             for zid, d in raw.items():
-                # Drop stale zones (> 24h old)
-                if now_ms - d.get("born_time", 0) > ZONE_TTL_MS:
+                tf = d.get("tf", "")
+                ttl = _ZONE_TTL_BY_TF.get(tf, ZONE_TTL_MS)
+                if now_ms - d.get("born_time", 0) > ttl:
                     dropped += 1
                     continue
                 zone = self._dict_to_zone(d)
                 self.zones[zid] = zone
                 loaded += 1
-            logger.info("Zones loaded: %d loaded, %d dropped (stale/weak)", loaded, dropped)
+            logger.info("Zones loaded: %d loaded, %d dropped (stale)", loaded, dropped)
         except Exception as e:
             logger.warning("Zone load failed: %s", e)
 

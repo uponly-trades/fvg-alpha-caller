@@ -37,6 +37,10 @@ class FakeOK:
     def price_to_precision(self, symbol, price):
         return f"{price:.4f}"
 
+    async def fapiPublicGetPremiumIndex(self, params):
+        self.calls.append(("premiumIndex", params))
+        return {"markPrice": "100.0"}
+
     async def create_order(self, symbol, type_, side, amount, price=None, params=None):
         self.calls.append(("create", type_, side, amount, params))
         if type_ == "MARKET":

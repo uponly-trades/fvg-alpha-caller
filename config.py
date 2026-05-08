@@ -1,8 +1,9 @@
 import os
 
-# Core symbol set (~120 — Tier 1-3 + new high-volume narratives + memes).
-# Tier 4-5 + smaller infra moved to EXTENDED_SYMBOLS to drop cold-start REST
-# weight burst from ~1025 to ~600 (well under 75% of 2400/min Binance cap).
+# Core symbol set (~97 — Tier 1-2 + new high-volume narratives + top memes).
+# Tier 3 gaming/metaverse + low-liquidity tier-2 + lesser memes moved to
+# EXTENDED to lower cold-start REST weight + reduce ongoing rate-limit pressure
+# (was 127 → 97, ~24% drop).
 # Re-enable extended set: EXTENDED_SYMBOLS_ENABLED=1
 _CORE_SYMBOLS = [
     # --- Tier 1: BTC / ETH / Major L1 ---
@@ -12,15 +13,11 @@ _CORE_SYMBOLS = [
     "ETCUSDT", "XLMUSDT", "ATOMUSDT", "ICPUSDT", "APTUSDT",
     "FILUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "SUIUSDT",
     "SEIUSDT", "TIAUSDT", "PYTHUSDT", "WLDUSDT", "STRKUSDT",
-    # --- Tier 2: DeFi blue chips ---
+    # --- Tier 2: DeFi blue chips (liquid only) ---
     "DYDXUSDT", "AAVEUSDT", "PENDLEUSDT", "COMPUSDT", "CRVUSDT",
-    "YFIUSDT", "SNXUSDT", "RUNEUSDT", "SUSHIUSDT", "1INCHUSDT",
-    "LDOUSDT", "GRTUSDT", "TAOUSDT", "ENSUSDT", "STGUSDT",
-    "LQTYUSDT", "SSVUSDT", "JUPUSDT", "WOOUSDT", "APEUSDT",
-    # --- Tier 3: Gaming / Metaverse ---
-    "SANDUSDT", "MANAUSDT", "AXSUSDT", "GALAUSDT", "CHZUSDT",
-    "ENJUSDT", "IMXUSDT", "FLOWUSDT", "ALICEUSDT", "GMTUSDT",
-    "SPELLUSDT", "STXUSDT", "JASMYUSDT", "RNDRUSDT", "FETUSDT",
+    "YFIUSDT", "SNXUSDT", "RUNEUSDT",
+    "LDOUSDT", "GRTUSDT", "TAOUSDT", "ENSUSDT",
+    "JUPUSDT",
     # --- High-volume narratives (added 2026-05-05) ---
     # Privacy / PoW
     "ZECUSDT", "DASHUSDT", "XMRUSDT",
@@ -37,16 +34,27 @@ _CORE_SYMBOLS = [
     "KAITOUSDT", "TRBUSDT", "IOUSDT", "VANAUSDT", "0GUSDT",
     # Ordinals / BTC ecosystem
     "ORDIUSDT", "1000SATSUSDT", "BLURUSDT",
-    # Cross-chain / Infra
-    "AXLUSDT", "WUSDT", "ZROUSDT", "ZKUSDT", "CFXUSDT",
-    "SIGNUSDT", "ZETAUSDT", "DYMUSDT", "MOVEUSDT", "INITUSDT",
+    # Cross-chain / Infra (top liquidity only)
+    "AXLUSDT", "WUSDT", "ZROUSDT", "ZKUSDT",
+    "ZETAUSDT", "DYMUSDT", "MOVEUSDT",
     # High-volume memes (liquid, great for FVG)
     "1000PEPEUSDT", "1000SHIBUSDT", "1000BONKUSDT", "1000FLOKIUSDT",
-    "WIFUSDT", "PNUTUSDT", "PENGUUSDT", "NOTUSDT", "ACTUSDT",
-    "DOGSUSDT", "HMSTRUSDT", "POPCATUSDT",
+    "WIFUSDT", "NOTUSDT",
 ]
 
 _EXTENDED_SYMBOLS = [
+    # --- Tier 2 mid (less liquid) ---
+    "SUSHIUSDT", "1INCHUSDT", "STGUSDT", "LQTYUSDT", "SSVUSDT",
+    "WOOUSDT", "APEUSDT",
+    # --- Tier 3: Gaming / Metaverse (declining liquidity 2026) ---
+    "SANDUSDT", "MANAUSDT", "AXSUSDT", "GALAUSDT", "CHZUSDT",
+    "ENJUSDT", "IMXUSDT", "FLOWUSDT", "ALICEUSDT", "GMTUSDT",
+    "SPELLUSDT", "STXUSDT", "JASMYUSDT", "RNDRUSDT", "FETUSDT",
+    # --- Lesser memes ---
+    "PNUTUSDT", "PENGUUSDT", "ACTUSDT", "DOGSUSDT", "HMSTRUSDT",
+    "POPCATUSDT",
+    # --- Lesser cross-chain / infra ---
+    "CFXUSDT", "SIGNUSDT", "INITUSDT",
     # --- Tier 4: Infrastructure / Oracles / Storage ---
     "THETAUSDT", "MASKUSDT", "ARUSDT", "LPTUSDT", "RLCUSDT",
     "BANDUSDT", "KNCUSDT", "BATUSDT", "BELUSDT", "CTSIUSDT",

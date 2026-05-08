@@ -6,6 +6,13 @@ import logging
 
 import websockets
 
+from trade_executor.algo_orders import (
+    adjust_sl_for_mark,
+    algo_id_of,
+    cancel_algo,
+    fetch_mark_price,
+    place_algo_stop,
+)
 from trade_executor.notify import notify
 
 log = logging.getLogger("trail_manager")
@@ -41,17 +48,23 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
             continue
 
         if t["sl_order_id"]:
-            try:
-                await ex.cancel_order(t["sl_order_id"], symbol)
-            except Exception as e:
-                log.warning("cancel sl_order_id=%s failed: %s", t["sl_order_id"], e)
+            await cancel_algo(ex, symbol=symbol, algo_id=t["sl_order_id"])
 
         close_side = "SELL" if is_long else "BUY"
-        new_sl = await ex.create_order(
-            symbol, "STOP_MARKET", close_side, float(t["qty"]), None,
-            {"stopPrice": float(t["tp1"]), "closePosition": True, "workingType": "MARK_PRICE"},
-        )
-        new_sl_id = str(new_sl.get("id"))
+        side = "long" if is_long else "short"
+        trail_price = float(t["tp1"])
+        mark = await fetch_mark_price(ex, symbol)
+        if mark:
+            trail_price = adjust_sl_for_mark(side=side, sl_price=trail_price, mark=mark)
+        try:
+            new_sl = await place_algo_stop(
+                ex, symbol=symbol, close_side=close_side,
+                trigger_price=trail_price, order_type="STOP_MARKET",
+            )
+        except Exception as e:
+            log.error("trail SL placement failed for %s/%s: %s", symbol, t["id"], e)
+            continue
+        new_sl_id = algo_id_of(new_sl)
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -60,7 +73,7 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
                 SET status='tp1_trailed', sl_current=$1, sl_order_id=$2
                 WHERE id=$3 AND status='open'
                 """,
-                float(t["tp1"]), new_sl_id, t["id"],
+                trail_price, new_sl_id, t["id"],
             )
             await notify(conn, "trade_tp1_trailed",
                          {"user_id": t["user_id"], "trade_id": t["id"]})
