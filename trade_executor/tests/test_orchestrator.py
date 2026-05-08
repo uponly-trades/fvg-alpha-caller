@@ -77,8 +77,9 @@ async def test_orchestrator_writes_open_trade(monkeypatch):
         assert row["entry"] == pytest.approx(100.5)
         assert row["sl_order_id"] == "s1"
         assert row["tp_order_id"] == "t1"
-        assert row["tp1"] == pytest.approx(105.0)
-        assert row["tp2"] == pytest.approx(105.0)
+        assert row["sl"] == pytest.approx(95.0)
+        assert row["tp1"] == pytest.approx(106.0)
+        assert row["tp2"] == pytest.approx(106.0)
         # Uses total equity ($100), not free balance ($30): $2 risk / 5% SL = $40 notional.
         assert row["notional_usdt"] == pytest.approx(40.0)
         assert row["margin_usdt"] == pytest.approx(8.0)
@@ -108,7 +109,7 @@ async def test_orchestrator_applies_user_rr_and_fixed_risk_cap(monkeypatch):
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM user_trades WHERE id=$1", f"{uid}-dec-rr-fixed")
-        assert row["tp1"] == pytest.approx(90.0)
+        assert row["tp1"] == pytest.approx(85.0)
         assert row["tp2"] == pytest.approx(85.0)
         # Fixed-risk mode takes priority, but max_notional caps tight-SL sizing.
         assert row["notional_usdt"] == pytest.approx(30.0)

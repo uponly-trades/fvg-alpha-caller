@@ -27,6 +27,8 @@ class PlacedOrders:
     sl_order_id: str | None
     tp_order_id: str | None
     avg_price: float
+    sl_price: float
+    tp_price: float
 
 
 async def place_full_sequence(
@@ -38,6 +40,7 @@ async def place_full_sequence(
     sl_price: float,
     tp_price: float,
     leverage: int,
+    rr_ratio: float = 1.0,
 ) -> PlacedOrders:
     if not (sl_price and sl_price > 0):
         raise OrderError("sl", f"invalid sl_price={sl_price}")
@@ -76,6 +79,12 @@ async def place_full_sequence(
 
     close_side = "SELL" if side == "BUY" else "BUY"
     entry_side = "long" if side == "BUY" else "short"
+    planned_risk_distance = abs(avg - sl_price)
+    rr_ratio = max(1.0, float(rr_ratio or 1.0))
+    if side == "BUY":
+        tp_price = avg + planned_risk_distance * rr_ratio
+    else:
+        tp_price = avg - planned_risk_distance * rr_ratio
 
     # Re-validate SL vs current mark — entry slippage may have moved mark past
     # planned SL, which would trigger -2021 "Order would immediately trigger".
@@ -114,4 +123,11 @@ async def place_full_sequence(
     except Exception as e:
         log.error("TP placement failed for %s: %s — SL still active", symbol, e)
 
-    return PlacedOrders(entry_order_id=entry_id, sl_order_id=sl_id, tp_order_id=tp_id, avg_price=avg)
+    return PlacedOrders(
+        entry_order_id=entry_id,
+        sl_order_id=sl_id,
+        tp_order_id=tp_id,
+        avg_price=avg,
+        sl_price=sl_price,
+        tp_price=tp_price,
+    )

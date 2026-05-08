@@ -66,6 +66,22 @@ async def test_full_sequence_returns_ids_and_avg():
     assert res.sl_order_id == "sl-1"
     assert res.tp_order_id == "tp-1"
     assert res.avg_price == pytest.approx(100.5)
+    assert res.sl_price == pytest.approx(95.0)
+    assert res.tp_price == pytest.approx(106.0)
+    tp_call = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "TAKE_PROFIT_MARKET"][0]
+    assert float(tp_call[1]["triggerPrice"]) == pytest.approx(106.0)
+
+
+@pytest.mark.asyncio
+async def test_full_sequence_reanchors_short_tp_to_avg_fill():
+    ex = FakeOK()
+    res = await place_full_sequence(
+        ex, symbol="BTCUSDT", side="SELL", qty=0.01,
+        sl_price=105.0, tp_price=90.0, leverage=5, rr_ratio=1.0,
+    )
+    assert res.avg_price == pytest.approx(100.5)
+    assert res.sl_price == pytest.approx(105.0)
+    assert res.tp_price == pytest.approx(96.0)
 
 
 @pytest.mark.asyncio

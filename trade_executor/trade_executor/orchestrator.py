@@ -155,7 +155,7 @@ async def handle_signal_for_user(
     try:
         placed = await place_full_sequence(
             ex, symbol=symbol, side=side, qty=size.qty,
-            sl_price=sl, tp_price=tp2, leverage=leverage,
+            sl_price=sl, tp_price=tp2, leverage=leverage, rr_ratio=rr_ratio,
         )
     except OrderError as e:
         async with pool.acquire() as conn:
@@ -172,11 +172,11 @@ async def handle_signal_for_user(
             """
             UPDATE user_trades SET
               status='open',
-              entry=$1, sl_current=$2,
-              entry_order_id=$3, sl_order_id=$4, tp_order_id=$5
-            WHERE id=$6
+              entry=$1, sl=$2, sl_current=$3, tp1=$4, tp2=$5,
+              entry_order_id=$6, sl_order_id=$7, tp_order_id=$8
+            WHERE id=$9
             """,
-            placed.avg_price, sl,
+            placed.avg_price, placed.sl_price, placed.sl_price, placed.tp_price, placed.tp_price,
             placed.entry_order_id, placed.sl_order_id, placed.tp_order_id,
             trade_id,
         )
