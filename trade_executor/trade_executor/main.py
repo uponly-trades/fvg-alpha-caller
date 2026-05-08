@@ -16,6 +16,7 @@ from trade_executor.pnl_aggregator import reconcile_user
 from trade_executor.resume import resume_in_flight
 from trade_executor.signal_poller import (load_last_seen, poll_once,
                                           save_last_seen, list_enabled_users)
+from trade_executor.trail_manager import run_mark_price_ws
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
@@ -118,13 +119,15 @@ async def run():
     await resume_in_flight(pool, ex_factory=ex_factory)
     log.info("Restart resume complete")
 
-    # trail_manager.run_mark_price_ws disabled — caused excessive cancel/replace
-    # of SL via WS mark-price stream, racking up trading fees. SL/TP terpasang
-    # statis sejak entry, biar Binance Algo Order eksekusi otomatis.
     await asyncio.gather(
         http_server(),
         signal_loop(pool),
         reconcile_loop(pool),
+        run_mark_price_ws(
+            pool, ex_factory=ex_factory,
+            get_active_symbols=lambda: get_active_symbols(pool),
+            proxy_url=settings.BINANCE_PROXY_URL,
+        ),
     )
 
 
