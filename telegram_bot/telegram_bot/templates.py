@@ -39,8 +39,51 @@ def fmt_breakeven(*, symbol: str, pnl_usdt: float) -> str:
     return f"🔁 BREAKEVEN  {symbol}  TP1 trailed → SL hit at TP1 closed {_money(pnl_usdt)}"
 
 
+_ERROR_STAGE_INFO = {
+    "leverage": (
+        "Gagal set leverage di Binance",
+        (
+            "Cek di Binance:\n"
+            "1. <b>API Management</b> → pastikan key punya izin <b>Enable Futures</b>.\n"
+            "2. <b>Futures</b> → mode <b>One-way</b> (bukan Hedge).\n"
+            "3. <b>Asset Mode</b> → <b>Single-Asset</b> (bukan Multi-Assets).\n"
+            "4. Pastikan symbol-nya tradeable (USDT-M perp aktif)."
+        ),
+    ),
+    "entry": (
+        "Gagal place entry order (MARKET)",
+        (
+            "Penyebab umum:\n"
+            "• Saldo USDT kurang untuk margin.\n"
+            "• Symbol tidak tradeable / pair delisted.\n"
+            "• Min notional belum tercapai (<b>Risk %</b> × balance terlalu kecil).\n"
+            "• API key tidak punya izin <b>Trade</b>."
+        ),
+    ),
+    "sl": (
+        "Gagal pasang Stop Loss (algo order)",
+        (
+            "Cek:\n"
+            "• API key butuh izin <b>Enable Futures</b> + <b>Trade</b>.\n"
+            "• Harga SL terlalu dekat ke mark price (auto-trigger).\n"
+            "Posisi sudah di-emergency-close untuk safety."
+        ),
+    ),
+    "tp": (
+        "Gagal pasang Take Profit (algo order)",
+        "Posisi tetap aktif dengan SL terpasang. Bisa close manual via Binance kalau perlu.",
+    ),
+}
+
+
 def fmt_error(*, symbol: str, reason: str) -> str:
-    return f"⚠️ ERROR  {symbol} — {reason}"
+    info = _ERROR_STAGE_INFO.get((reason or "").lower())
+    if info:
+        title, howto = info
+        sym = f" <b>{symbol}</b>" if symbol else ""
+        return f"⚠️ {title}{sym}\n\n{howto}"
+    sym_part = f" {symbol}" if symbol else ""
+    return f"⚠️ ERROR{sym_part} — {reason or 'unknown'}"
 
 
 def fmt_daily(*, date: str, trades: int, wins: int, pnl_usdt: float, pnl_pct: float) -> str:
@@ -175,6 +218,19 @@ def fmt_stats(s: dict) -> str:
     if not s.get("registered"):
         return "Send /start first."
 
+    # ── config (so user always sees what bot is doing) ────────────
+    enabled = s.get("enabled", True)
+    risk    = float(s.get("risk_pct", 0) or 0)
+    lev     = int(s.get("leverage", 0) or 0)
+    maxc    = int(s.get("max_concurrent", 0) or 0)
+    dloss   = float(s.get("daily_loss_cap_pct", 0) or 0)
+    state   = "✅ Active" if enabled else "⏸ Paused"
+    cfg_block = (
+        "⚙️ <b>Config</b>\n"
+        f"  Status: <b>{state}</b>\n"
+        f"  Risk: <b>{risk:.2f}%</b>  |  Lev: <b>{lev}x</b>  |  Max: <b>{maxc}</b>  |  Cap: <b>{dloss:.1f}%</b>\n\n"
+    )
+
     # ── today ─────────────────────────────────────────────────────
     tt   = s["today_trades"]
     tw   = s["today_wins"]
@@ -202,6 +258,7 @@ def fmt_stats(s: dict) -> str:
 
     return (
         "📊 <b>Trading Stats</b>\n\n"
+        + cfg_block +
 
         "📅 <b>Today</b>\n"
         f"  Trades: <b>{tt}</b>  (W {tw} / L {tl})"

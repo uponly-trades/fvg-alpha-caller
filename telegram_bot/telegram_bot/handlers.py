@@ -356,22 +356,58 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     # ── numeric settings (FSM) ────────────────────────────────────────────────
 
     _NUMERIC_CONFIG = {
-        "setrisk":  dict(field="risk_pct",           min_v=0.1,  max_v=10,  integer=False, label="Risk %",          hint="0.1–10"),
-        "setlev":   dict(field="leverage",            min_v=5,    max_v=20,  integer=True,  label="Leverage",        hint="5–20"),
-        "setmax":   dict(field="max_concurrent",      min_v=1,    max_v=10,  integer=True,  label="Max trades",      hint="1–10"),
-        "setloss":  dict(field="daily_loss_cap_pct",  min_v=1,    max_v=50,  integer=False, label="Daily loss cap %", hint="1–50"),
+        "setrisk":  dict(
+            field="risk_pct", min_v=0.1, max_v=10, integer=False,
+            label="Risk %", hint="0.1–10", suffix="%",
+            howto=(
+                "📉 <b>Risk %</b> — % saldo yang dirisk per trade.\n"
+                "Dipakai buat hitung position size: <code>qty = (balance × risk%) / SL distance</code>.\n"
+                "Contoh: balance $1000, risk 1% → max loss $10 per trade."
+            ),
+        ),
+        "setlev":   dict(
+            field="leverage", min_v=5, max_v=20, integer=True,
+            label="Leverage", hint="5–20", suffix="x",
+            howto=(
+                "⚡ <b>Leverage</b> — multiplier margin di Binance Futures.\n"
+                "Bot auto-set <b>ISOLATED</b> mode di symbol-nya.\n"
+                "Tidak mengubah risk per trade (risk % yang nentuin loss). "
+                "Lev tinggi = margin lebih kecil, liquidation lebih dekat."
+            ),
+        ),
+        "setmax":   dict(
+            field="max_concurrent", min_v=1, max_v=10, integer=True,
+            label="Max trades", hint="1–10", suffix="",
+            howto=(
+                "🔢 <b>Max concurrent trades</b> — batas posisi terbuka bareng.\n"
+                "Kalau sudah penuh, signal baru di-skip (di-log, tidak entry).\n"
+                "Saran: 2–4 buat akun kecil biar margin gak ke-spread tipis."
+            ),
+        ),
+        "setloss":  dict(
+            field="daily_loss_cap_pct", min_v=1, max_v=50, integer=False,
+            label="Daily loss cap %", hint="1–50", suffix="%",
+            howto=(
+                "🛑 <b>Daily loss cap</b> — kalau realized PnL hari ini ≤ −X% balance, "
+                "bot auto-pause sampai besok (UTC).\n"
+                "Saran: 3–5%. Resume manual via ▶️ Resume."
+            ),
+        ),
     }
 
     async def _ask_numeric(target, state: FSMContext, key: str):
         cfg = _NUMERIC_CONFIG[key]
         await state.set_state(NumericSetup.waiting_for_value)
-        text = f"Enter {cfg['label']} ({cfg['hint']}):"
+        text = (
+            f"{cfg['howto']}\n\n"
+            f"Masukkan <b>{cfg['label']}</b> ({cfg['hint']}):"
+        )
         if isinstance(target, CallbackQuery):
             await target.answer()
-            await target.message.edit_text(text, reply_markup=back_button())
+            await target.message.edit_text(text, reply_markup=back_button(), parse_mode="HTML")
             await state.update_data(numeric_key=key, prompt_msg_id=target.message.message_id)
         else:
-            sent = await target.answer(text, reply_markup=back_button())
+            sent = await target.answer(text, reply_markup=back_button(), parse_mode="HTML")
             await state.update_data(numeric_key=key, prompt_msg_id=sent.message_id)
 
     @dp.message(Command("setrisk"))
@@ -414,7 +450,7 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
         async with pool.acquire() as conn:
             await update_setting(conn, telegram_id=m.from_user.id, field=cfg["field"], value=value)
-        suffix = "x" if cfg["field"] == "leverage" else "%"
+        suffix = cfg.get("suffix", "")
         dashboard = await _dashboard_text(pool, m.from_user.id)
         await _edit_or_reply(
             m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,

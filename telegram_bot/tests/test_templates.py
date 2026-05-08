@@ -44,6 +44,34 @@ def test_fmt_error_critical():
     assert "SL" in msg
 
 
+def test_fmt_error_known_stage_leverage_includes_howto():
+    msg = fmt_error(symbol="DOGEUSDT", reason="leverage")
+    # User-friendly: should include how-to hints, not just stage code.
+    assert "leverage" in msg.lower()
+    assert "DOGEUSDT" in msg
+    assert "Futures" in msg
+
+
+def test_fmt_error_known_stage_entry_includes_howto():
+    msg = fmt_error(symbol="ETHUSDT", reason="entry")
+    assert "entry" in msg.lower() or "MARKET" in msg
+    assert "ETHUSDT" in msg
+    assert "USDT" in msg or "Trade" in msg
+
+
+def test_fmt_stats_includes_config_block():
+    msg = fmt_stats({
+        "registered": True,
+        "enabled": True,
+        "risk_pct": 1.5, "leverage": 10, "max_concurrent": 3, "daily_loss_cap_pct": 5.0,
+        "today_trades": 0, "today_wins": 0, "today_pnl_usdt": 0.0, "today_pnl_pct": 0.0,
+        "closed_trades": 0, "wins": 0, "winrate": 0.0, "pnl_usdt": 0.0,
+    })
+    assert "Config" in msg
+    assert "10x" in msg
+    assert "1.50%" in msg
+
+
 def test_fmt_daily_summary():
     msg = fmt_daily(date="2026-05-06", trades=8, wins=5, pnl_usdt=12.34, pnl_pct=12.34)
     assert "DAILY" in msg.upper()

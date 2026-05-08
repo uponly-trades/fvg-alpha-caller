@@ -85,7 +85,8 @@ async def list_trades(conn, *, telegram_id: int, closed: bool) -> list[dict[str,
 async def stats(conn, *, telegram_id: int) -> dict[str, Any]:
     row = await conn.fetchrow(
         """
-        SELECT u.id,
+        SELECT u.id, u.enabled, u.risk_pct, u.leverage, u.max_concurrent,
+               u.daily_loss_cap_pct, u.api_key_tail,
                COALESCE(d.realized_pnl_usdt, 0) AS today_pnl_usdt,
                COALESCE(d.realized_pnl_pct, 0) AS today_pnl_pct,
                COALESCE(d.trades_count, 0) AS today_trades,
@@ -125,6 +126,12 @@ async def stats(conn, *, telegram_id: int) -> dict[str, Any]:
     gl       = float(all_time["gross_loss"] or 0)
     return {
         "registered":     True,
+        "enabled":        bool(row["enabled"]),
+        "risk_pct":       float(row["risk_pct"] or 0),
+        "leverage":       int(row["leverage"] or 0),
+        "max_concurrent": int(row["max_concurrent"] or 0),
+        "daily_loss_cap_pct": float(row["daily_loss_cap_pct"] or 0),
+        "api_key_tail":   row["api_key_tail"] or "",
         "today_pnl_usdt": float(row["today_pnl_usdt"] or 0),
         "today_pnl_pct":  float(row["today_pnl_pct"] or 0),
         "today_trades":   int(row["today_trades"] or 0),
