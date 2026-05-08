@@ -361,12 +361,12 @@ def register_handlers(dp: Dispatcher, pool) -> None:
 
     _NUMERIC_CONFIG = {
         "setrisk":  dict(
-            field="risk_pct", min_v=0.1, max_v=10, integer=False,
-            label="Risk %", hint="0.1–10", suffix="%",
+            field="fixed_risk_usdt", min_v=0.5, max_v=1000, integer=False,
+            label="Risk target", hint="0.5–1000 USDT", suffix=" USDT",
             howto=(
-                "📉 <b>Risk %</b> — % saldo yang dirisk per trade.\n"
-                "Dipakai buat hitung position size: <code>qty = (balance × risk%) / SL distance</code>.\n"
-                "Contoh: balance $1000, risk 1% → max loss $10 per trade."
+                "📉 <b>Risk target</b> — target win/loss per trade pada RR 1:1.\n"
+                "Bot auto-adjust notional dari jarak Entry → SL.\n"
+                "Contoh: isi 5 berarti TP/SL 1R sekitar ±$5, kecuali kena max notional cap."
             ),
         ),
         "setlev":   dict(
@@ -407,13 +407,12 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             ),
         ),
         "setnotional": dict(
-            field="fixed_notional_usdt", min_v=0, max_v=100000, integer=False,
-            label="Fixed notional", hint="0=off atau ≥5 USDT", suffix=" USDT",
+            field="max_notional_usdt", min_v=5, max_v=100000, integer=False,
+            label="Max notional cap", hint="≥5 USDT", suffix=" USDT",
             howto=(
-                "💵 <b>Fixed notional</b> — nilai posisi per trade.\n"
-                "Contoh: isi 5 berarti bot open sekitar $5 notional per signal; "
-                "margin = notional ÷ leverage.\n"
-                "Isi 0 untuk OFF dan kembali pakai Risk %."
+                "🧢 <b>Max notional cap</b> — batas maksimal size posisi.\n"
+                "Bot tetap target Risk $, tapi kalau SL terlalu dekat dan butuh size besar, "
+                "notional dipotong sampai cap ini supaya tidak over-size."
             ),
         ),
     }

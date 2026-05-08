@@ -68,6 +68,8 @@ async def handle_signal_for_user(
     daily_loss_cap_pct: float,
     rr_ratio: float = 1.0,
     fixed_notional_usdt: float | None = None,
+    fixed_risk_usdt: float | None = None,
+    max_notional_usdt: float | None = None,
 ) -> OrchResult:
     decision_id = signal["id"]
     symbol = signal["symbol"]
@@ -118,6 +120,7 @@ async def handle_signal_for_user(
         size = compute_size(
             balance=float(balance), risk_pct=risk_pct, entry=entry, sl=sl,
             leverage=leverage, meta=meta, fixed_notional_usdt=fixed_notional_usdt,
+            fixed_risk_usdt=fixed_risk_usdt, max_notional_usdt=max_notional_usdt,
         )
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",
