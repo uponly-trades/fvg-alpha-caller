@@ -211,7 +211,10 @@ def evaluate_v2_signal(
                     atr_val = triggered.size
 
             sl = _compute_sl(triggered, atr_val)
-            entry = float(bars_by_tf[trigger_tf][-1].close)
+            # Zeiierman parity: entry at FVG zone edge (not close price)
+            # LONG: enter at zone.top (above bullish FVG)
+            # SHORT: enter at zone.bottom (below bearish FVG)
+            entry = float(triggered.top) if direction == 1 else float(triggered.bottom)
             r = abs(entry - sl)
             tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
 
