@@ -9,6 +9,14 @@ class FakeOK:
     def __init__(self):
         self.calls = []
 
+    async def fapiPrivatePostMultiAssetsMargin(self, params):
+        self.calls.append(("multiAssets", params))
+        return {}
+
+    async def fapiPrivatePostPositionSideDual(self, params):
+        self.calls.append(("posSide", params))
+        return {}
+
     async def fapiPrivatePostLeverage(self, params):
         self.calls.append(("leverage", params))
         return {"leverage": params["leverage"]}
@@ -17,22 +25,29 @@ class FakeOK:
         self.calls.append(("marginType", params))
         return {}
 
+    async def fapiPrivatePostOrder(self, params):
+        self.calls.append(("fapiOrder", params))
+        if params["type"] == "STOP_MARKET":
+            return {"orderId": "sl-1", "status": "NEW"}
+        if params["type"] == "TAKE_PROFIT_MARKET":
+            return {"orderId": "tp-1", "status": "NEW"}
+        raise AssertionError(f"unexpected type {params['type']}")
+
+    def price_to_precision(self, symbol, price):
+        return f"{price:.4f}"
+
     async def create_order(self, symbol, type_, side, amount, price=None, params=None):
         self.calls.append(("create", type_, side, amount, params))
         if type_ == "MARKET":
             return {"id": "entry-1", "status": "FILLED", "average": 100.5}
-        if type_ == "STOP_MARKET":
-            return {"id": "sl-1", "status": "NEW"}
-        if type_ == "TAKE_PROFIT_MARKET":
-            return {"id": "tp-1", "status": "NEW"}
         raise AssertionError(f"unexpected type {type_}")
 
 
 class FakeSLFails(FakeOK):
-    async def create_order(self, symbol, type_, side, amount, price=None, params=None):
-        if type_ == "STOP_MARKET":
+    async def fapiPrivatePostOrder(self, params):
+        if params["type"] == "STOP_MARKET":
             raise Exception("SL placement failed")
-        return await super().create_order(symbol, type_, side, amount, price, params)
+        return await super().fapiPrivatePostOrder(params)
 
 
 @pytest.mark.asyncio
