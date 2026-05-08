@@ -132,7 +132,7 @@ V2_HTF_TFS = ["30m", "1h", "2h", "4h"]                      # confluence sources
 V2_HTF_WEIGHTS = {"30m": 1, "1h": 1, "2h": 2, "4h": 3}      # weighted: HTF lebih lama = score lebih besar; max 7
 V2_HTF_MIN_SCORE = int(os.environ.get("V2_HTF_MIN_SCORE", "2"))  # require ≥2 same-direction HTF matches (weighted)
 V2_RR = float(os.environ.get("V2_RR", "2.0"))               # display TP = entry ± R×RR
-V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "2"))  # 1-2 closed-candle window for HTF "fresh touch"
+V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed-candle window for HTF "fresh touch"
 ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
 
 # v2 trail

@@ -49,24 +49,30 @@ def _confidence_label(score: int) -> str:
 
 
 def _oi_vol_lines(zone, timeframe_bars: dict) -> List[str]:
-    """OI/vol_change_15m context. Compute live from 15m bars."""
+    """Pine-parity volume score (vol / SMA20) + OI delta on 15m bars."""
     try:
         from feature_extractor import extract_tf_features
     except ImportError:
         return []
     bars = timeframe_bars.get("15m", [])
-    if len(bars) < 30:
+    if len(bars) < 21:
         return []
     try:
         f = extract_tf_features(bars, "15m", symbol=zone.symbol, with_ls_ratio=True)
     except Exception:
-        return []
-    vc = f.get("vol_change_pct")
-    oi = f.get("oi_change_pct")
+        f = {}
     out = []
-    if vc is not None:
-        emoji = "🔥" if vc >= 100 else "📈" if vc >= 50 else "↔️"
-        out.append(f"Vol Δ : {emoji} {vc:+.1f}%  (15m)")
+    # Pine `volScore`: ratio current vol vs 20-bar SMA. Same metric Zeiierman shows.
+    try:
+        vols = [float(b.volume) for b in bars[-21:]]
+        sma20 = sum(vols[:-1]) / 20 if len(vols) >= 21 else 0.0
+        if sma20 > 0:
+            ratio = vols[-1] / sma20
+            emoji = "🔥" if ratio >= 2.0 else "📈" if ratio >= 1.3 else "↔️"
+            out.append(f"Vol×  : {emoji} {ratio:.2f}× SMA20  (15m)")
+    except Exception:
+        pass
+    oi = (f or {}).get("oi_change_pct")
     if oi is not None:
         emoji = "📈" if oi > 0 else "📉" if oi < 0 else "↔️"
         out.append(f"OI Δ  : {emoji} {oi:+.2f}%  (15m)")

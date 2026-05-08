@@ -432,23 +432,9 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     btc_state = get_btc_state(btc_tr)
     is_btc = symbol == "BTCUSDT"
 
-    context_adj = 0.0
-    if is_btc:
-        if direction == 1 and btc_state == "UP":
-            context_adj = 6
-        elif direction == -1 and btc_state == "DOWN":
-            context_adj = 6
-        elif btc_state != "NEUTRAL":
-            context_adj = -6
-    else:
-        if direction == 1 and dom_state == "ALT":
-            context_adj = 6
-        elif direction == -1 and dom_state == "BTC":
-            context_adj = 6
-        elif dom_state != "NEUTRAL":
-            context_adj = -6
-
-    total = gap_strength + vol_strength + trend_strength + candle_strength + context_adj
+    # Pine parity: no context_adj. Pure indicator strength = gap+vol+trend+candle.
+    # Dominance/BTC state still surfaced as zone metadata for filtering downstream.
+    total = gap_strength + vol_strength + trend_strength + candle_strength
     main_strength = int(max(min(total, 100), 0))
     bull_str = main_strength if direction == 1 else 100 - main_strength
     bear_str = main_strength if direction == -1 else 100 - main_strength
@@ -662,10 +648,6 @@ class FVGTracker:
                 if now_ms - d.get("born_time", 0) > ZONE_TTL_MS:
                     dropped += 1
                     continue
-                # Drop weak zones (should not happen, but safety)
-                if d.get("main_strength", 0) < MIN_STRENGTH_TO_ALERT:
-                    dropped += 1
-                    continue
                 zone = self._dict_to_zone(d)
                 self.zones[zid] = zone
                 loaded += 1
@@ -699,8 +681,9 @@ class FVGTracker:
 
         fvg["symbol"] = symbol
         strength = calc_strength(bars, fvg, symbol=symbol, existing_zones=self.zones)
-        if strength["main_strength"] < MIN_STRENGTH_TO_ALERT:
-            return None
+        # No strength gate — match Pine indicator philosophy (store all FVGs,
+        # tier them via main_strength label only). v2 trigger gates on HTF
+        # confluence + touch, not strength.
 
         zone = FVGZone(
             symbol=symbol,

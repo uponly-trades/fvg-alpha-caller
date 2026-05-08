@@ -34,18 +34,24 @@ def _htf_active_and_touched(
     bars: List,
     lookback: int = 1,
 ) -> bool:
-    """True if zone exists, is not fully mitigated, and price overlapped zone
-    on any of the last `lookback` closed bars."""
+    """Pine-parity touch: bull → low <= zone.top, bear → high >= zone.bottom.
+    Single-edge probe over last `lookback` closed bars."""
     if zone is None:
         return False
     if zone.mitigation >= 1.0:
         return False
-    if not bars or len(bars) < lookback:
+    if not bars:
         return False
-    recent = bars[-lookback:]
-    for b in recent:
-        if b.high >= zone.bottom and b.low <= zone.top:
-            return True
+    n = min(lookback, len(bars))
+    recent = bars[-n:]
+    if zone.direction == 1:
+        for b in recent:
+            if b.low <= zone.top:
+                return True
+    else:
+        for b in recent:
+            if b.high >= zone.bottom:
+                return True
     return False
 
 
@@ -88,15 +94,26 @@ def _compute_htf_confluence(
     return score, touches
 
 
+_TRIGGER_TOUCH_LOOKBACK = 3
+
+
 def _trigger_zone_touched(zone: Optional[FVGZone], bars: List) -> Optional[FVGZone]:
-    """Return zone if last closed bar touched it (and zone is not fully mitigated)."""
+    """Pine-parity touch on last `_TRIGGER_TOUCH_LOOKBACK` closed bars.
+    Bull: low <= zone.top. Bear: high >= zone.bottom."""
     if zone is None or zone.mitigation >= 1.0:
         return None
     if not bars:
         return None
-    last = bars[-1]
-    if last.high >= zone.bottom and last.low <= zone.top:
-        return zone
+    n = min(_TRIGGER_TOUCH_LOOKBACK, len(bars))
+    recent = bars[-n:]
+    if zone.direction == 1:
+        for b in recent:
+            if b.low <= zone.top:
+                return zone
+    else:
+        for b in recent:
+            if b.high >= zone.bottom:
+                return zone
     return None
 
 

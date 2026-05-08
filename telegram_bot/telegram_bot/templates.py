@@ -100,6 +100,22 @@ def fmt_help() -> str:
     )
 
 
+def _estimate_trade_size(balance_total: float, risk_pct: float, leverage: int, sl_distance_pct: float = 1.0) -> dict:
+    """Return per-trade size estimate at given SL distance.
+
+    Formula matches trade_executor.sizing.compute_size:
+      risk_usdt   = balance * risk_pct/100
+      notional    = risk_usdt / (sl_distance_pct/100)
+      margin      = notional / leverage
+    """
+    if balance_total <= 0 or risk_pct <= 0 or sl_distance_pct <= 0:
+        return {"risk": 0.0, "notional": 0.0, "margin": 0.0}
+    risk_usdt = balance_total * risk_pct / 100
+    notional = risk_usdt / (sl_distance_pct / 100)
+    margin = notional / max(1, int(leverage))
+    return {"risk": risk_usdt, "notional": notional, "margin": margin}
+
+
 def fmt_dashboard(summary: dict, stats: dict) -> str:
     """Rich home screen with live status, balance, and today's stats."""
     # ── status line ──────────────────────────────────────────────
@@ -155,12 +171,30 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
         f"PnL <b>{sign_all}${pnl_all:.2f}</b>"
     )
 
+    # ── per-trade size estimate ──────────────────────────────────
+    bal_total = float(bal.get("total", 0) or 0)
+    est_lines = ""
+    if bal_total > 0:
+        # Reference SL distance: 1% (typical FVG entry). Show 1% and 2% so
+        # user understands range — closer SL = bigger position.
+        est_1 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=1.0)
+        est_2 = _estimate_trade_size(bal_total, risk, lev, sl_distance_pct=2.0)
+        max_concurrent_margin = est_1["margin"] * maxc
+        est_lines = (
+            f"\n📐 <b>Per-Trade Size</b> (estimate)\n"
+            f"  Risk/trade: <b>${est_1['risk']:.2f}</b>\n"
+            f"  SL 1.0%: notional <b>${est_1['notional']:.2f}</b>  margin <b>${est_1['margin']:.2f}</b>\n"
+            f"  SL 2.0%: notional <b>${est_2['notional']:.2f}</b>  margin <b>${est_2['margin']:.2f}</b>\n"
+            f"  Max exposure (×{maxc}): margin <b>${max_concurrent_margin:.2f}</b>"
+        )
+
     return (
         f"🤖 <b>FVG Alpha Caller</b>\n\n"
         f"{status_line}\n"
         f"{bal_line}\n\n"
         f"{settings_line}\n"
-        f"🔑 Key: <code>...{key_tail}</code>\n\n"
+        f"🔑 Key: <code>...{key_tail}</code>\n"
+        f"{est_lines}\n\n"
         f"{today_line}\n"
         f"{alltime_line}"
     )
