@@ -142,7 +142,7 @@ V2_HTF_MIN_SCORE = int(os.environ.get("V2_HTF_MIN_SCORE", "2"))  # require ≥2 
 V2_RR = float(os.environ.get("V2_RR", "2.0"))               # display TP = entry ± R×RR
 V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed-candle window for HTF "fresh touch"
 ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
-V2_MIN_QUALITY_SCORE = float(os.environ.get("V2_MIN_QUALITY_SCORE", "50.0"))  # minimum FVG quality score to trigger (Zeiierman hides weak zones)
+V2_MIN_QUALITY_SCORE = float(os.environ.get("V2_MIN_QUALITY_SCORE", "0.0"))  # 0 = disabled; rely on Zeiierman top-N ranking only
 
 # v2 trail
 V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer

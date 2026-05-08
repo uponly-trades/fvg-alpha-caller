@@ -69,7 +69,9 @@ def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
     qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mit*50 - age*0.1
     age = bars elapsed since born_time (approximated via tf_seconds).
     """
-    base = z.size * 100 + z.volume_score * 10 + z.trend_score * 20
+    # Zeiierman: fvgSize = gap / atr * 100 (ATR-normalized)
+    fvg_size_pct = (z.size / z.atr * 100) if z.atr > 0 else 0.0
+    base = fvg_size_pct * 100 + z.volume_score * 10 + z.trend_score * 20
     tf_sec = _TF_SECONDS.get(z.tf, 900)
     age_bars = max(0, (now_ms - z.born_time) // (tf_sec * 1000))
     return base - z.mitigation * 50 - age_bars * 0.1

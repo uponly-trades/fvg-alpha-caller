@@ -523,8 +523,10 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     tp2 = fvg["top"] + atr_val * 2.5 if direction == 1 else fvg["bottom"] - atr_val * 2.5
 
     # Zeiierman-parity quality score (mitigation=0 at born, age=0 at born).
+    # fvgSize = gap / atr * 100  (ATR-normalized, % of ATR)
     # qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mitigation*50 - age*0.1
-    quality_score = fvg["size"] * 100 + vol_score * 10 + trend_score * 20
+    fvg_size_pct = (fvg["size"] / atr_val * 100) if atr_val > 0 else 0.0
+    quality_score = fvg_size_pct * 100 + vol_score * 10 + trend_score * 20
 
     return {
         "main_strength": main_strength,
