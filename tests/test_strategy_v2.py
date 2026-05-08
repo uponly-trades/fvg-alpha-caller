@@ -44,11 +44,19 @@ def make_zone(
     born_time: int = 1700000000000,
     atr_val: float = 1.0,
 ) -> FVGZone:
-    return FVGZone(
+    zone = FVGZone(
         symbol=symbol, tf=tf, direction=direction,
         top=top, bottom=bottom, size=top - bottom,
         born_time=born_time, atr=atr_val,
     )
+    zone.volume_score = 1.2
+    if direction == 1:
+        zone.fvg_buy_volume = 120.0
+        zone.fvg_sell_volume = 80.0
+    else:
+        zone.fvg_buy_volume = 80.0
+        zone.fvg_sell_volume = 120.0
+    return zone
 
 
 def make_bull_fvg_bars(zone_low: float = 99.5, zone_high: float = 100.5) -> list:
@@ -221,7 +229,7 @@ def test_trigger_zone_fully_mitigated_returns_none():
     assert _trigger_zone_touched(zone=z, bars=bars) is None
 
 
-from strategy_v2 import _compute_sl
+from strategy_v2 import _compute_sl, _volume_confirmation
 
 
 def test_sl_long_below_zone_bottom():
@@ -241,6 +249,47 @@ def test_sl_uses_zone_bottom_not_wick():
     sl = _compute_sl(zone=z, atr_val=2.0)
     assert sl < z.bottom
     assert sl > z.bottom - 5.0
+
+
+def test_volume_confirmation_long_requires_spike_imbalance_and_buy_alignment():
+    z = make_zone(direction=1)
+    z.volume_score = 1.2
+    z.fvg_buy_volume = 120.0
+    z.fvg_sell_volume = 80.0
+    ok, metrics = _volume_confirmation(z)
+    assert ok is True
+    assert metrics["fvg_volume_imbalance"] == pytest.approx(0.2)
+    assert metrics["fvg_volume_aligned"] is True
+
+
+def test_volume_confirmation_rejects_low_volume_score_even_when_aligned():
+    z = make_zone(direction=1)
+    z.volume_score = 0.9
+    z.fvg_buy_volume = 140.0
+    z.fvg_sell_volume = 60.0
+    ok, metrics = _volume_confirmation(z)
+    assert ok is False
+    assert metrics["fvg_volume_aligned"] is True
+
+
+def test_volume_confirmation_rejects_low_imbalance_churn():
+    z = make_zone(direction=-1)
+    z.volume_score = 2.0
+    z.fvg_buy_volume = 101.0
+    z.fvg_sell_volume = 99.0
+    ok, metrics = _volume_confirmation(z)
+    assert ok is False
+    assert metrics["fvg_volume_imbalance"] == pytest.approx(0.01)
+
+
+def test_volume_confirmation_short_requires_sell_alignment():
+    z = make_zone(direction=-1)
+    z.volume_score = 1.5
+    z.fvg_buy_volume = 140.0
+    z.fvg_sell_volume = 60.0
+    ok, metrics = _volume_confirmation(z)
+    assert ok is False
+    assert metrics["fvg_volume_aligned"] is False
 
 
 from strategy_v2 import evaluate_v2_signal
@@ -279,6 +328,24 @@ def test_eval_15m_touched_no_htf_confluence_returns_none():
     }
     sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
     assert sig is None
+
+
+def test_eval_rejects_touched_zone_without_volume_confirmation():
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m.volume_score = 0.8
+    z_15m.fvg_buy_volume = 120.0
+    z_15m.fvg_sell_volume = 80.0
+    z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    zones = {"a": z_15m, "b": z_4h}
+    bars_at = _bars_at_zone(z_15m)
+    bars_by_tf = {
+        "15m": bars_at,
+        "30m": _bars_far_from_zone(z_15m),
+        "1h": _bars_far_from_zone(z_15m),
+        "2h": _bars_far_from_zone(z_15m),
+        "4h": bars_at,
+    }
+    assert evaluate_v2_signal("BTCUSDT", zones, bars_by_tf) is None
 
 
 def test_eval_15m_touched_with_4h_confluence_returns_long_signal():

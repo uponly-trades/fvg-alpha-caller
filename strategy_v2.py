@@ -5,6 +5,7 @@ from typing import Dict, Optional, List
 from config import (
     V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_HTF_MIN_SCORE, V2_RR,
     V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2, V2_MIN_QUALITY_SCORE,
+    V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE, V2_REQUIRE_DIRECTIONAL_VOLUME,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
 
@@ -193,6 +194,32 @@ def _compute_sl(zone: FVGZone, atr_val: float) -> float:
     return zone.top + buf
 
 
+def _volume_confirmation(zone: FVGZone) -> tuple[bool, dict]:
+    """Return whether the FVG formation volume confirms the zone direction.
+
+    Imbalance = abs(buy-sell)/(buy+sell). Directional alignment means:
+    - long/bullish FVG: taker buy volume > taker sell volume
+    - short/bearish FVG: taker sell volume > taker buy volume
+    """
+    buy = float(getattr(zone, "fvg_buy_volume", 0.0) or 0.0)
+    sell = float(getattr(zone, "fvg_sell_volume", 0.0) or 0.0)
+    total = buy + sell
+    imbalance = abs(buy - sell) / total if total > 0 else 0.0
+    volume_score = float(getattr(zone, "volume_score", 0.0) or 0.0)
+    aligned = (buy > sell) if zone.direction == 1 else (sell > buy)
+    passed = (
+        volume_score >= V2_MIN_VOLUME_SCORE
+        and imbalance >= V2_MIN_VOLUME_IMBALANCE
+        and (aligned or not V2_REQUIRE_DIRECTIONAL_VOLUME)
+    )
+    return passed, {
+        "fvg_total_volume": total,
+        "fvg_volume_imbalance": imbalance,
+        "fvg_volume_aligned": aligned,
+        "volume_score": volume_score,
+    }
+
+
 def evaluate_v2_signal(
     symbol: str,
     zones: Dict[str, FVGZone],
@@ -231,6 +258,16 @@ def evaluate_v2_signal(
                     "v2 skip %s %s %s | quality=%.1f < %.1f",
                     symbol, trigger_tf, "long" if direction == 1 else "short",
                     triggered.quality_score, V2_MIN_QUALITY_SCORE,
+                )
+                continue
+
+            volume_ok, volume_metrics = _volume_confirmation(triggered)
+            if not volume_ok:
+                logger.info(
+                    "v2 skip %s %s %s | volume_score=%.2f imbalance=%.3f aligned=%s thresholds=(%.2f, %.2f)",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    volume_metrics["volume_score"], volume_metrics["fvg_volume_imbalance"],
+                    volume_metrics["fvg_volume_aligned"], V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE,
                 )
                 continue
 
@@ -279,6 +316,9 @@ def evaluate_v2_signal(
                     "main_strength": getattr(triggered, "main_strength", 0),
                     "bull_strength": getattr(triggered, "bull_strength", 0),
                     "bear_strength": getattr(triggered, "bear_strength", 0),
+                    "fvg_total_volume": volume_metrics["fvg_total_volume"],
+                    "fvg_volume_imbalance": volume_metrics["fvg_volume_imbalance"],
+                    "fvg_volume_aligned": volume_metrics["fvg_volume_aligned"],
                 },
             )
     return None

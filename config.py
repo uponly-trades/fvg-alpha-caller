@@ -144,6 +144,12 @@ V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed
 ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
 V2_MIN_QUALITY_SCORE = float(os.environ.get("V2_MIN_QUALITY_SCORE", "0.0"))  # 0 = disabled; rely on Zeiierman top-N ranking only
 
+# v2 volume confirmation. Directional imbalance is abs(buy-sell)/(buy+sell),
+# and must align with signal direction (long: buy > sell, short: sell > buy).
+V2_MIN_VOLUME_SCORE = float(os.environ.get("V2_MIN_VOLUME_SCORE", "1.0"))
+V2_MIN_VOLUME_IMBALANCE = float(os.environ.get("V2_MIN_VOLUME_IMBALANCE", "0.10"))
+V2_REQUIRE_DIRECTIONAL_VOLUME = os.environ.get("V2_REQUIRE_DIRECTIONAL_VOLUME", "1") == "1"
+
 # v2 trail
 V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
 
