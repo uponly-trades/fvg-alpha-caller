@@ -11,38 +11,16 @@ _TF_SECONDS = {"15m": 15 * 60, "30m": 30 * 60, "1h": 60 * 60, "2h": 2 * 60 * 60,
 
 from chart_generator import generate_chart
 from config import (
-    TIMEFRAMES, STRATEGY_VERSION, KRONOS_ENABLED, V2_COOLDOWN_SEC,
+    TIMEFRAMES, STRATEGY_VERSION, V2_COOLDOWN_SEC,
     V2_TRIGGER_TFS, V2_MAX_SIGNAL_AGE_SEC,
 )
 from fvg_engine import FVGTracker, detect_fvg, calc_strength
 from sim_trades import SimTradeStore
-from trade_combo import (
-    evaluate_trade_setup,
-    build_trade_from_kronos,
-    v2_decision,
-    build_mitigated_breakout,
-    build_mitigated_reversal,
-)
-from feature_extractor import extract_multi_tf, btc_regime
-if STRATEGY_VERSION == "v1" and KRONOS_ENABLED:
-    import kronos_client
-else:
-    kronos_client = None  # disabled in v2
 from websocket_client import BinanceKlineWS
 from strategy_v2 import evaluate_v2_signal
 from trail_manager import TrailManager
 from cooldown import CooldownStore
-from telegram import (
-    send_approach_alert,
-    send_mitigated_alert,
-    send_new_fvg_alert,
-    send_touch_alert,
-    send_trade_recap,
-    send_snipe_alert,
-    send_v2_alert,
-)
-from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
-import alert_settings
+from telegram import send_trade_recap, send_v2_alert
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,16 +29,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("alpha")
 
-CHART_DIR = Path("/app/data/charts")
-
 
 class AlphaCaller:
     def __init__(self):
         self.tracker = FVGTracker()
         self.poller = BinanceKlineWS(on_bar_close=self._on_bar_close)
         self.sim_store = SimTradeStore()
-        self.retest_tracker = RetestTracker()
-        # v2 components (no-op in v1 mode)
         self.v2_trail = TrailManager()
         self.v2_cooldown = CooldownStore(window_sec=V2_COOLDOWN_SEC)
 
@@ -72,133 +46,6 @@ class AlphaCaller:
                 bars = self.poller._buffers.get(f"{symbol}_{tf}", [])
             bars_by_tf[tf] = bars
         return bars_by_tf
-
-    def _evaluate_setup(self, zone, current_price: float):
-        return evaluate_trade_setup(zone, current_price, self._timeframe_bars(zone.symbol))
-
-    def _btc_bars_by_tf(self) -> dict:
-        return self._timeframe_bars("BTCUSDT")
-
-    def _log_features(self, zone, current_price: float, event_type: str) -> None:
-        """Read-only ML logger: snapshot all-TF indicator state at decision time."""
-        try:
-            decision_id = self.sim_store.make_decision_id(zone, current_price, event_type)
-            bars_by_tf = self._timeframe_bars(zone.symbol)
-            features = extract_multi_tf(bars_by_tf, symbol=zone.symbol, with_ls_ratio=True)
-            btc_ctx = btc_regime(self._btc_bars_by_tf())
-            self.sim_store.add_signal_features(decision_id, zone, features, btc_ctx)
-        except Exception as e:
-            logger.warning("log_features failed (%s %s): %s", zone.symbol, zone.tf, e)
-
-    async def _evaluate_setup_async(self, zone, current_price: float):
-        """Kronos-only path in v1; in v2 this is unused."""
-        if STRATEGY_VERSION == "v2" or not KRONOS_ENABLED or kronos_client is None:
-            from trade_combo import TradeSetupResult
-            return TradeSetupResult(
-                "SKIP: V2_MODE", False, None,
-                "v2 mode — kronos disabled", None, {}, {}, source="v2_disabled",
-            )
-        bars_by_tf = self._timeframe_bars(zone.symbol)
-        tf_bars = bars_by_tf.get(zone.tf, [])
-        ohlcv = [
-            {"open": float(b.open), "high": float(b.high), "low": float(b.low),
-             "close": float(b.close), "volume": float(b.volume)}
-            for b in tf_bars
-        ]
-        atr = float(getattr(zone, "atr", 0.0) or 0.0)
-
-        htf_raw = bars_by_tf.get("4h", [])
-        htf_bars = [
-            {"open": float(b.open), "high": float(b.high), "low": float(b.low),
-             "close": float(b.close), "volume": float(b.volume)}
-            for b in htf_raw
-        ] if htf_raw else None
-
-        kronos = await kronos_client.predict(
-            bars=ohlcv,
-            current_price=float(current_price),
-            atr=atr,
-            zone_direction=int(zone.direction),
-            symbol=zone.symbol,
-            tf=zone.tf,
-            htf_bars=htf_bars,
-        )
-        if kronos is not None:
-            setup = build_trade_from_kronos(kronos, zone)
-            # HTF fade short: Kronos forced RANGING by 4h hard gate on bullish FVG
-            # → exploit the same OB signal as a SHORT fade setup
-            htf_note = kronos.get("htf_note", "")
-            htf_rsi7 = kronos.get("htf_rsi7")
-            if (
-                not setup.valid
-                and kronos.get("direction") == "RANGING"
-                and "hard_gate" in htf_note
-                and int(zone.direction) == 1
-                and htf_rsi7 is not None
-            ):
-                fade = build_htf_fade_short(zone, float(current_price), htf_rsi7)
-                if fade is not None:
-                    setup = fade
-                    logger.info(
-                        "HTF fade short %s %s | 4h_rsi7=%.1f | %s",
-                        zone.symbol, zone.tf, htf_rsi7, htf_note,
-                    )
-        else:
-            # Kronos unavailable — skip entirely rather than fall back to combo
-            from trade_combo import TradeSetupResult
-            setup = TradeSetupResult(
-                "SKIP: KRONOS UNAVAILABLE", False, None,
-                "Kronos offline, combo path disabled",
-                None, {}, {}, source="kronos",
-            )
-
-        # v2 filter — hard gate: if v2 says skip, override Kronos valid signal
-        try:
-            v2 = v2_decision(zone, bars_by_tf)
-        except Exception as e:
-            logger.warning("v2_decision failed: %s", e)
-            v2 = None
-
-        if v2 and not v2["valid"] and setup.valid:
-            logger.info("v2 gate blocked %s %s | %s", zone.symbol, zone.tf, v2["reason"])
-            from trade_combo import TradeSetupResult
-            setup = TradeSetupResult(
-                f"SKIP: {v2['reason']}", False, setup.mode,
-                v2["reason"], None, {}, {}, source="v2_gate",
-            )
-
-        return setup.__class__(
-            status=setup.status, valid=setup.valid, mode=setup.mode, reason=setup.reason,
-            trade=setup.trade, combo_states=setup.combo_states, sparklines=setup.sparklines,
-            source=setup.source, kronos_raw=getattr(setup, "kronos_raw", None),
-            predicted_bars=getattr(setup, "predicted_bars", None), v2_decision=v2,
-        )
-
-    def _save_chart_png(self, zone, chart_png: bytes) -> str:
-        """Persist chart PNG to disk, return path string."""
-        try:
-            CHART_DIR.mkdir(parents=True, exist_ok=True)
-            fname = f"{zone.symbol}_{zone.tf}_{int(zone.born_time)}.png"
-            path = CHART_DIR / fname
-            path.write_bytes(chart_png)
-            return str(path)
-        except Exception as e:
-            logger.error("chart save failed: %s", e)
-            return ""
-
-    async def _store_fvg_all_modes(self, zone, chart_path: str, current_price: float) -> None:
-        """Save FVG record + simulate trade via Kronos (fallback: StochRSI combo)."""
-        self.sim_store.add_fvg(zone, chart_path=chart_path or None)
-        bars_by_tf = self._timeframe_bars(zone.symbol)
-        buf_summary = {tf: len(b) for tf, b in bars_by_tf.items()}
-        logger.info("store_fvg_all_modes %s | bars=%s", zone.symbol, buf_summary)
-        # Use Kronos for sim trade (same path as alert)
-        setup = await self._evaluate_setup_async(zone, current_price)
-        logger.info("  kronos/combo status=%s valid=%s", setup.status, setup.valid)
-        self.sim_store.add_kronos_decision(zone, setup, current_price, "new_fvg")
-        self._log_features(zone, current_price, "new_fvg")
-        if setup.valid:
-            self.sim_store.add_sim_trade(zone, setup, zone.born_time)
 
     def _maybe_send_recap(self, now=None) -> None:
         now = now or datetime.now(timezone.utc)
@@ -411,277 +258,34 @@ class AlphaCaller:
         if len(bars) < 3:
             return
 
-        # =====================================================
-        # v2 Strategy Path (multi-TF touch confluence)
-        # =====================================================
-        if STRATEGY_VERSION == "v2":
-            self.tracker.update_buffer(symbol, tf, bars)
-            self.sim_store.update_open_trades(symbol, bars[-1])
-            self._maybe_send_recap()
-            # 1. Mitigation pass — drops fully-mitigated zones so HTF/trigger checks
-            # don't include stale ones. Fixes "active forever" bug.
-            self.tracker.check_mitigation(symbol, tf, bars)
-            # 2. Detect & store any FVG (any strength) on this bar
-            self._v2_capture_fvg(symbol, tf, bars)
-            # 3. Trail bookkeeping for any open v2 trades on this trigger TF
-            if tf in V2_TRIGGER_TFS:
-                self._v2_handle_trail(symbol, tf, bars)
-            # 4. Evaluate signal only on trigger TFs (15m / 30m)
-            if tf in V2_TRIGGER_TFS:
-                self._v2_try_emit_signal(symbol, tf, bars)
+        if STRATEGY_VERSION != "v2":
+            logger.warning("Only v2 strategy is supported. Current: %s", STRATEGY_VERSION)
             return
 
         self.tracker.update_buffer(symbol, tf, bars)
         self.sim_store.update_open_trades(symbol, bars[-1])
         self._maybe_send_recap()
-
-        # Check mitigation
-        mitigated = self.tracker.check_mitigation(symbol, tf, bars)
-        for zone in mitigated:
-            send_mitigated_alert(zone)
-            # Log dual shadow hypotheses (continuation vs reversal) for WR study.
-            price = bars[-1].close
-            breakout = build_mitigated_breakout(zone, price)
-            reversal = build_mitigated_reversal(zone, price)
-            self.sim_store.add_kronos_decision(zone, breakout, price, "mitigated_breakout")
-            self.sim_store.add_kronos_decision(zone, reversal, price, "mitigated_reversal")
-            # Features attach to the breakout decision (one snapshot per mitigation —
-            # state is identical across both hypotheses; FK requires an existing
-            # kronos_decisions.id, so reuse event_type='mitigated_breakout').
-            self._log_features(zone, price, "mitigated_breakout")
-            # Register bullish FVG for retest-short monitoring
-            if int(zone.direction) == 1:
-                self.retest_tracker.add(zone)
-
-        # Check retest short on active retest zones
-        retest_hit = self.retest_tracker.check(symbol, tf, bars[-1])
-        if retest_hit is not None:
-            price = bars[-1].close
-            bars_by_tf = self._timeframe_bars(symbol)
-            passed, gate_reason = gate_retest_short(bars_by_tf)
-            if passed:
-                snipe_setup = build_retest_short(retest_hit, price)
-                if snipe_setup is not None and snipe_setup.trade is not None:
-                    self.sim_store.add_sim_trade_raw(
-                        symbol=symbol, tf=tf, mode="snipe",
-                        direction="short", entry=snipe_setup.trade.entry,
-                        sl=snipe_setup.trade.sl, tp1=snipe_setup.trade.tp1,
-                        tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
-                        born_time=retest_hit.born_time,
-                    )
-                    if alert_settings.is_enabled("snipe_short"):
-                        retest_chart = generate_chart(
-                            bars=bars,
-                            zone_top=retest_hit.zone_top,
-                            zone_bottom=retest_hit.resistance,
-                            zone_direction=-1,
-                            symbol=symbol, tf=tf,
-                            timeframe_bars=bars_by_tf,
-                            trade_plan=snipe_setup.trade,
-                        )
-                        send_snipe_alert(
-                            snipe_type="retest_short",
-                            symbol=symbol, tf=tf,
-                            trade_setup=snipe_setup,
-                            chart_png=retest_chart,
-                            timeframe_bars=bars_by_tf,
-                        )
-                    logger.info("Retest SHORT snipe %s %s | entry=%.6g", symbol, tf, price)
-            else:
-                logger.info("Retest SHORT snipe SKIP %s %s | %s", symbol, tf, gate_reason)
-
-        # Check approaching + touch on strong zones
-        interactions = self.tracker.check_interaction(symbol, tf, bars)
-        for event in interactions:
-            zone = event["zone"]
-            price = bars[-1].close
-            trade_setup = await self._evaluate_setup_async(zone, price)
-            chart_png = generate_chart(
-                bars=bars,
-                zone_top=zone.top,
-                zone_bottom=zone.bottom,
-                zone_direction=zone.direction,
-                symbol=zone.symbol,
-                tf=zone.tf,
-                rsi_value=zone.rsi,
-                timeframe_bars=self._timeframe_bars(zone.symbol),
-                trade_plan=trade_setup.trade,
-                predicted_bars=getattr(trade_setup, "predicted_bars", None),
-            )
-            if event["type"] == "approaching":
-                self.sim_store.add_kronos_decision(zone, trade_setup, price, "approach")
-                self._log_features(zone, price, "approach")
-                if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
-                    self.sim_store.add_sim_trade_raw(
-                        symbol=symbol, tf=tf, mode="snipe_htf_fade",
-                        direction="short", entry=trade_setup.trade.entry,
-                        sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
-                        tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
-                        born_time=int(zone.born_time),
-                    )
-                    if alert_settings.is_enabled("snipe_htf_fade") and not getattr(zone, "_htf_fade_sent", False):
-                        zone._htf_fade_sent = True
-                        send_snipe_alert(
-                            snipe_type="htf_fade", symbol=symbol, tf=tf,
-                            trade_setup=trade_setup, chart_png=chart_png,
-                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                        )
-                        logger.info("HTF fade SHORT approach %s %s | entry=%.6g", symbol, tf, price)
-                elif trade_setup.valid and alert_settings.is_enabled("approach"):
-                    send_approach_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
-                    logger.info("Approach alert %s %s | price=%s", symbol, tf, price)
-                else:
-                    logger.info("Approach SKIP %s %s | %s", symbol, tf, trade_setup.status)
-                # Snipe long: emit limit entry at zone.bottom (one alert per zone)
-                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False) and trade_setup.source != "snipe_htf_fade":
-                    zone._snipe_long_sent = True
-                    snipe_setup = build_long_snipe(zone)
-                    if snipe_setup is not None:
-                        self.sim_store.add_sim_trade_raw(
-                            symbol=symbol, tf=tf, mode="snipe_long",
-                            direction="long", entry=snipe_setup.trade.entry,
-                            sl=snipe_setup.trade.sl, tp1=snipe_setup.trade.tp1,
-                            tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
-                            born_time=int(zone.born_time),
-                        )
-                        if alert_settings.is_enabled("snipe_long"):
-                            snipe_chart = generate_chart(
-                                bars=bars,
-                                zone_top=zone.top, zone_bottom=zone.bottom,
-                                zone_direction=zone.direction,
-                                symbol=zone.symbol, tf=zone.tf,
-                                rsi_value=zone.rsi,
-                                timeframe_bars=self._timeframe_bars(zone.symbol),
-                                trade_plan=snipe_setup.trade,
-                                predicted_bars=getattr(trade_setup, "predicted_bars", None),
-                            )
-                            send_snipe_alert(
-                                snipe_type="long_limit", symbol=symbol, tf=tf,
-                                trade_setup=snipe_setup, chart_png=snipe_chart,
-                                zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                            )
-                            logger.info("Snipe LONG approach %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
-            elif event["type"] == "touch":
-                self.sim_store.add_kronos_decision(zone, trade_setup, price, "touch")
-                self._log_features(zone, price, "touch")
-                if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
-                    self.sim_store.add_sim_trade_raw(
-                        symbol=symbol, tf=tf, mode="snipe_htf_fade",
-                        direction="short", entry=trade_setup.trade.entry,
-                        sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
-                        tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
-                        born_time=int(zone.born_time),
-                    )
-                    if alert_settings.is_enabled("snipe_htf_fade") and not getattr(zone, "_htf_fade_sent", False):
-                        zone._htf_fade_sent = True
-                        send_snipe_alert(
-                            snipe_type="htf_fade", symbol=symbol, tf=tf,
-                            trade_setup=trade_setup, chart_png=chart_png,
-                            zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                        )
-                        logger.info("HTF fade SHORT touch %s %s | entry=%.6g", symbol, tf, price)
-                elif trade_setup.valid and alert_settings.is_enabled("touch"):
-                    send_touch_alert(zone, price, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(zone.symbol))
-                    logger.info("Touch alert %s %s | price=%s", symbol, tf, price)
-                else:
-                    logger.info("Touch SKIP %s %s | %s", symbol, tf, trade_setup.status)
-                # Snipe long on touch (price entering zone — refine to zone.bottom limit)
-                if int(zone.direction) == 1 and not getattr(zone, "_snipe_long_sent", False) and trade_setup.source != "snipe_htf_fade":
-                    zone._snipe_long_sent = True
-                    snipe_setup = build_long_snipe(zone)
-                    if snipe_setup is not None:
-                        self.sim_store.add_sim_trade_raw(
-                            symbol=symbol, tf=tf, mode="snipe_long",
-                            direction="long", entry=snipe_setup.trade.entry,
-                            sl=snipe_setup.trade.sl, tp1=snipe_setup.trade.tp1,
-                            tp2=snipe_setup.trade.tp2, reason=snipe_setup.reason,
-                            born_time=int(zone.born_time),
-                        )
-                        if alert_settings.is_enabled("snipe_long"):
-                            snipe_chart = generate_chart(
-                                bars=bars,
-                                zone_top=zone.top, zone_bottom=zone.bottom,
-                                zone_direction=zone.direction,
-                                symbol=zone.symbol, tf=zone.tf,
-                                rsi_value=zone.rsi,
-                                timeframe_bars=self._timeframe_bars(zone.symbol),
-                                trade_plan=snipe_setup.trade,
-                                predicted_bars=getattr(trade_setup, "predicted_bars", None),
-                            )
-                            send_snipe_alert(
-                                snipe_type="long_limit", symbol=symbol, tf=tf,
-                                trade_setup=snipe_setup, chart_png=snipe_chart,
-                                zone=zone, timeframe_bars=self._timeframe_bars(zone.symbol),
-                            )
-                            logger.info("Snipe LONG touch %s %s | limit=%.6g", symbol, tf, snipe_setup.trade.entry)
-
-        # Check new FVG
-        new_zone = self.tracker.check_new_fvg(symbol, tf)
-        if new_zone and not new_zone.alerted:
-            new_zone.alerted = True
-            price = bars[-1].close
-            trade_setup = await self._evaluate_setup_async(new_zone, price)
-
-            chart_png = generate_chart(
-                bars=bars,
-                zone_top=new_zone.top,
-                zone_bottom=new_zone.bottom,
-                zone_direction=new_zone.direction,
-                symbol=new_zone.symbol,
-                tf=new_zone.tf,
-                rsi_value=new_zone.rsi,
-                timeframe_bars=self._timeframe_bars(new_zone.symbol),
-                trade_plan=trade_setup.trade,
-                predicted_bars=getattr(trade_setup, "predicted_bars", None),
-            )
-
-            chart_path = self._save_chart_png(new_zone, chart_png) if chart_png else ""
-            await self._store_fvg_all_modes(new_zone, chart_path, price)
-
-            if trade_setup.valid and trade_setup.source == "snipe_htf_fade":
-                self.sim_store.add_sim_trade_raw(
-                    symbol=symbol, tf=tf, mode="snipe_htf_fade",
-                    direction="short", entry=trade_setup.trade.entry,
-                    sl=trade_setup.trade.sl, tp1=trade_setup.trade.tp1,
-                    tp2=trade_setup.trade.tp2, reason=trade_setup.reason,
-                    born_time=int(new_zone.born_time),
-                )
-                if alert_settings.is_enabled("snipe_htf_fade"):
-                    send_snipe_alert(
-                        snipe_type="htf_fade", symbol=symbol, tf=tf,
-                        trade_setup=trade_setup, chart_png=chart_png,
-                        zone=new_zone, timeframe_bars=self._timeframe_bars(new_zone.symbol),
-                    )
-                    logger.info("HTF fade SHORT new_fvg %s %s | entry=%.6g", symbol, tf, price)
-                else:
-                    logger.info("HTF fade SKIP (disabled) %s %s", symbol, tf)
-            elif trade_setup.valid and alert_settings.is_enabled("new_fvg"):
-                send_new_fvg_alert(new_zone, chart_png=chart_png, trade_setup=trade_setup, timeframe_bars=self._timeframe_bars(new_zone.symbol))
-                logger.info(
-                    "New FVG alert %s %s | strength=%d rsi=%s",
-                    symbol, tf, new_zone.main_strength, new_zone.rsi,
-                )
-            else:
-                logger.info("New FVG SKIP %s %s | %s", symbol, tf, trade_setup.status)
+        # 1. Mitigation pass — drops fully-mitigated zones
+        self.tracker.check_mitigation(symbol, tf, bars)
+        # 2. Detect & store any FVG (any strength) on this bar
+        self._v2_capture_fvg(symbol, tf, bars)
+        # 3. Trail bookkeeping for any open v2 trades on this trigger TF
+        if tf in V2_TRIGGER_TFS:
+            self._v2_handle_trail(symbol, tf, bars)
+        # 4. Evaluate signal only on trigger TFs (15m / 30m)
+        if tf in V2_TRIGGER_TFS:
+            self._v2_try_emit_signal(symbol, tf, bars)
 
     async def _v2_backfill_when_warm(self) -> None:
         """Periodically backfill zones from WS warm-up buffers until coverage
         stabilises. Idempotent (zone_id dedup) so safe to re-fire.
-
-        Why a loop: cold-start REST may be 418-banned for many minutes per
-        symbol — a single fixed deadline hits empty/partial buffers and never
-        retries. Continuous polling keeps registering newly-warmed keys as the
-        REST fetch grinds through the fleet.
         """
-        if STRATEGY_VERSION != "v2":
-            return
         from config import SYMBOLS
         target = len(SYMBOLS) * len(TIMEFRAMES)
         full_threshold = max(1, int(target * 0.95))
         hard_deadline = time.time() + 60 * 60  # 60 min absolute cap
         last_count = -1
         stable_since: float | None = None
-        # Wait briefly for any buffers to populate before first scan
         while time.time() < hard_deadline:
             ready = len(self.poller._buffers)
             if ready > 0:
@@ -716,7 +320,6 @@ class AlphaCaller:
             len(TIMEFRAMES),
         )
         backfill_task = asyncio.create_task(self._v2_backfill_when_warm())
-        # start_command_poller() — disabled: dedicated telegram_bot handles all commands
         try:
             await self.poller.run()
         finally:
