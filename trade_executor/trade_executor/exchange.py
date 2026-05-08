@@ -69,9 +69,14 @@ _ACCOUNT_MODE_INITIALIZED: set = set()
 
 
 def _is_no_change_error(msg: str) -> bool:
-    """Binance returns -4046 / -4059 / 'No need to change' when target state matches."""
-    return ("4046" in msg or "4059" in msg
-            or "No need to change" in msg or "no need to change" in msg.lower())
+    """Binance returns -4046 / -4059 / -4171 when target state matches.
+    -4046: leverage/marginType already set
+    -4059: positionSide/dual already set
+    -4171: multiAssetsMargin already set
+    """
+    return ("4046" in msg or "4059" in msg or "4171" in msg
+            or "no need to" in msg.lower()
+            or "does not need to be adjusted" in msg.lower())
 
 
 async def ensure_account_mode(ex) -> None:

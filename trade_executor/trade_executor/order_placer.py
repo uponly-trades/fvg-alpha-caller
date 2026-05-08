@@ -51,7 +51,7 @@ async def place_full_sequence(
     try:
         sl = await ex.create_order(
             symbol, "STOP_MARKET", close_side, qty, None,
-            {"stopPrice": sl_price, "closePosition": True, "workingType": "MARK_PRICE"},
+            {"stopPrice": sl_price, "reduceOnly": True, "workingType": "MARK_PRICE"},
         )
         sl_id = str(sl.get("id"))
     except Exception as e:
@@ -68,7 +68,7 @@ async def place_full_sequence(
     try:
         tp = await ex.create_order(
             symbol, "TAKE_PROFIT_MARKET", close_side, qty, None,
-            {"stopPrice": tp_price, "closePosition": True, "workingType": "MARK_PRICE"},
+            {"stopPrice": tp_price, "reduceOnly": True, "workingType": "MARK_PRICE"},
         )
         tp_id = str(tp.get("id"))
     except Exception as e:
