@@ -35,6 +35,7 @@ class Bar:
     close: float
     volume: float
     is_closed: bool
+    taker_buy_volume: float = 0.0  # base-asset volume bought by takers (k[9])
 
 
 def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
@@ -97,6 +98,7 @@ def fetch_klines(symbol: str, tf: str, limit: int = KLINES_LIMIT) -> List[Bar]:
             close=float(k[4]),
             volume=float(k[5]),
             is_closed=True,  # REST klines are all closed (last one is forming but we ignore it)
+            taker_buy_volume=float(k[9]) if len(k) > 9 else 0.0,
         ))
     # Drop the last bar — it's the currently forming (not closed) candle
     if bars:

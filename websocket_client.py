@@ -96,6 +96,7 @@ class BinanceKlineWS:
                     {
                         "t": b.open_time, "o": b.open, "h": b.high,
                         "l": b.low, "c": b.close, "v": b.volume,
+                        "V": b.taker_buy_volume,
                     }
                     for b in bars
                 ]
@@ -124,7 +125,8 @@ class BinanceKlineWS:
                     continue  # stale beyond per-TF tolerance — will REST-fetch this key
                 bars = [
                     Bar(open_time=b["t"], open=b["o"], high=b["h"],
-                        low=b["l"], close=b["c"], volume=b["v"], is_closed=True)
+                        low=b["l"], close=b["c"], volume=b["v"], is_closed=True,
+                        taker_buy_volume=float(b.get("V", 0.0)))
                     for b in bar_dicts
                 ]
                 self._buffers[key] = bars
@@ -194,6 +196,7 @@ class BinanceKlineWS:
             close=float(kline["c"]),
             volume=float(kline["v"]),
             is_closed=bool(kline["x"]),
+            taker_buy_volume=float(kline.get("V", 0.0)),
         )
 
     async def _handle_message(self, raw: str) -> None:

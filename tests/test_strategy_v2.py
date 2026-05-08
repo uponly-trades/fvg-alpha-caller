@@ -164,11 +164,12 @@ def test_confluence_only_4h_touched_returns_score_1():
     bars_4h.append(make_bar(25, 100, 100.6, 99.4, 100.0))
     bars_by_tf = {"30m": [], "1h": [], "2h": [], "4h": bars_4h}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
-    assert score == 1
+    # Weights: 30m=1, 1h=1, 2h=2, 4h=3 → only 4h touched = 3.
+    assert score == 3
     assert touches == {"30m": False, "1h": False, "2h": False, "4h": True}
 
 
-def test_confluence_all_four_touched_returns_score_4():
+def test_confluence_all_four_touched_returns_score_7():
     bars_touch = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 24)]
     bars_touch.append(make_bar(24, 100, 100.6, 99.4, 100.0))
     z_30m = make_zone(tf="30m", direction=1, top=100.5, bottom=99.5, born_time=50)
@@ -178,7 +179,8 @@ def test_confluence_all_four_touched_returns_score_4():
     zones = {"a": z_1h, "b": z_2h, "c": z_4h, "d": z_30m}
     bars_by_tf = {"30m": bars_touch, "1h": bars_touch, "2h": bars_touch, "4h": bars_touch}
     score, touches = _compute_htf_confluence(zones, "BTCUSDT", direction=1, bars_by_tf=bars_by_tf)
-    assert score == 4
+    # Weighted max = 1+1+2+3 = 7.
+    assert score == 7
     assert touches == {"30m": True, "1h": True, "2h": True, "4h": True}
 
 
@@ -295,7 +297,8 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     assert sig is not None
     assert sig.direction == 1
     assert sig.trigger_tf == "15m"
-    assert sig.confluence_score == 1
+    # 4h weight = 3 (≥ V2_HTF_MIN_SCORE = 2 → passes gate alone).
+    assert sig.confluence_score == 3
     assert sig.htf_touches["4h"] is True
     assert sig.htf_touches["1h"] is False
     # tp = entry + 2R for long

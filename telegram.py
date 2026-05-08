@@ -574,6 +574,30 @@ def _v2_format_oi_vol(zone_or_symbol, timeframe_bars: dict) -> List[str]:
         return []
 
 
+def _v2_taker_buy_sell_lines(timeframe_bars: dict, tf: str = "15m") -> List[str]:
+    """Buy/sell vol % from taker buy base volume on latest closed `tf` bar."""
+    try:
+        bars = timeframe_bars.get(tf, [])
+        if not bars:
+            return []
+        last = bars[-1]
+        vol = float(getattr(last, "volume", 0) or 0)
+        buy = float(getattr(last, "taker_buy_volume", 0) or 0)
+        if vol <= 0:
+            return []
+        buy_pct = max(0.0, min(100.0, buy / vol * 100))
+        sell_pct = 100.0 - buy_pct
+        if vol >= 1e6:
+            vol_str = f"{vol/1e6:.2f}M"
+        elif vol >= 1e3:
+            vol_str = f"{vol/1e3:.1f}k"
+        else:
+            vol_str = f"{vol:.0f}"
+        return [f"Vol {tf}: {vol_str} (buy {buy_pct:.0f}% / sell {sell_pct:.0f}%)"]
+    except Exception:
+        return []
+
+
 def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = None) -> None:
     """Send a v2 entry alert. `signal` is a strategy_v2.V2Signal instance."""
     direction_emoji = "🟢 LONG" if signal.direction == 1 else "🔴 SHORT"
@@ -584,11 +608,15 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
     tp = getattr(signal, "tp", None)
     tp_pct = (tp - signal.entry) / signal.entry * 100 if (tp and signal.entry) else 0.0
 
+    # Direction-aware HTF marker. ✓ shown ONLY for same-direction zone touch.
+    # 🟢 long match, 🔴 short match, · no active+touched zone in that direction.
+    dir_emoji = "🟢" if signal.direction == 1 else "🔴"
     htf_line_parts = []
     for tf in ("30m", "1h", "2h", "4h"):
-        mark = "✓" if signal.htf_touches.get(tf) else "·"
+        mark = dir_emoji if signal.htf_touches.get(tf) else "·"
         htf_line_parts.append(f"{tf}{mark}")
     htf_line = " ".join(htf_line_parts)
+    htf_max = 1 + 1 + 2 + 3  # weighted max
 
     tp_line = (
         f"🎯 TP:    <code>{tp:g}</code> ({tp_pct:+.2f}%) RR 1:2"
@@ -604,7 +632,7 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         f"🛑 SL:    <code>{signal.sl:g}</code> ({sl_pct:+.2f}%)",
         tp_line,
         "",
-        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/4)",
+        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/{htf_max})",
         f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} touch",
         f"HTF:     {htf_line}",
         "",
@@ -620,6 +648,10 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
     if oi_lines:
         lines.append("")
         lines.extend(oi_lines)
+
+    taker_lines = _v2_taker_buy_sell_lines(timeframe_bars, signal.trigger_tf)
+    if taker_lines:
+        lines.extend(taker_lines)
 
     text = "\n".join(lines)
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
