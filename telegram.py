@@ -580,26 +580,46 @@ def _v2_format_oi_vol(zone_or_symbol, timeframe_bars: dict) -> List[str]:
         return []
 
 
+def _fmt_vol(v: float) -> str:
+    if v >= 1e6: return f"{v/1e6:.2f}M"
+    if v >= 1e3: return f"{v/1e3:.1f}k"
+    return f"{v:.0f}"
+
+
+def _v2_fvg_buy_sell_line(buy: float, sell: float) -> Optional[str]:
+    """Buy/sell volume of the 3-bar FVG formation with sentiment emoji.
+
+    🟢 = strong buy dominance (>60%)
+    🟩 = mild buy lean (50-60%)
+    🟥 = mild sell lean (40-50%)
+    🔴 = strong sell dominance (<40%)
+    ⚪ = balanced or no data
+    """
+    total = buy + sell
+    if total <= 0:
+        return None
+    buy_pct = buy / total * 100
+    sell_pct = 100 - buy_pct
+    if buy_pct >= 60: emoji = "🟢"
+    elif buy_pct >= 50: emoji = "🟩"
+    elif buy_pct >= 40: emoji = "🟥"
+    elif buy_pct > 0: emoji = "🔴"
+    else: emoji = "⚪"
+    return f"FVG vol: {emoji} {_fmt_vol(total)}  (buy {buy_pct:.0f}% / sell {sell_pct:.0f}%)"
+
+
 def _v2_taker_buy_sell_lines(timeframe_bars: dict, tf: str = "15m") -> List[str]:
-    """Buy/sell vol % from taker buy base volume on latest closed `tf` bar."""
+    """Latest bar buy/sell — kept as supplementary line."""
     try:
         bars = timeframe_bars.get(tf, [])
-        if not bars:
-            return []
+        if not bars: return []
         last = bars[-1]
         vol = float(getattr(last, "volume", 0) or 0)
         buy = float(getattr(last, "taker_buy_volume", 0) or 0)
-        if vol <= 0:
-            return []
+        if vol <= 0: return []
         buy_pct = max(0.0, min(100.0, buy / vol * 100))
         sell_pct = 100.0 - buy_pct
-        if vol >= 1e6:
-            vol_str = f"{vol/1e6:.2f}M"
-        elif vol >= 1e3:
-            vol_str = f"{vol/1e3:.1f}k"
-        else:
-            vol_str = f"{vol:.0f}"
-        return [f"Vol {tf}: {vol_str} (buy {buy_pct:.0f}% / sell {sell_pct:.0f}%)"]
+        return [f"Vol {tf}: {_fmt_vol(vol)} (buy {buy_pct:.0f}% / sell {sell_pct:.0f}%)"]
     except Exception:
         return []
 
@@ -654,6 +674,12 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
     if oi_lines:
         lines.append("")
         lines.extend(oi_lines)
+
+    fvg_buy = getattr(signal, "fvg_buy_volume", 0.0)
+    fvg_sell = getattr(signal, "fvg_sell_volume", 0.0)
+    fvg_vol_line = _v2_fvg_buy_sell_line(fvg_buy, fvg_sell)
+    if fvg_vol_line:
+        lines.append(fvg_vol_line)
 
     taker_lines = _v2_taker_buy_sell_lines(timeframe_bars, signal.trigger_tf)
     if taker_lines:

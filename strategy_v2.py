@@ -22,6 +22,8 @@ class V2Signal:
     atr: float
     confluence_score: int             # 1-4 (flat weights)
     htf_touches: Dict[str, bool]      # {"30m": bool, "1h": bool, "2h": bool, "4h": bool}
+    fvg_buy_volume: float = 0.0       # taker buy volume of the 3-bar FVG formation
+    fvg_sell_volume: float = 0.0
     indicators: Dict[str, float] = field(default_factory=dict)
 
     @property
@@ -226,6 +228,8 @@ def evaluate_v2_signal(
                 atr=atr_val,
                 confluence_score=score,
                 htf_touches=touches,
+                fvg_buy_volume=getattr(triggered, "fvg_buy_volume", 0.0),
+                fvg_sell_volume=getattr(triggered, "fvg_sell_volume", 0.0),
                 indicators={},
             )
     return None

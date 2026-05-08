@@ -318,6 +318,8 @@ class FVGZone:
     quality_score: float = 0.0    # Zeiierman-parity ranking
     volume_score: float = 0.0     # volume / volumeMA at born
     trend_score: float = 0.0      # 1.0 if dir aligns with trendEMA at born else 0.0
+    fvg_buy_volume: float = 0.0   # taker buy base-asset volume across 3-bar FVG formation
+    fvg_sell_volume: float = 0.0  # = total - taker_buy across 3 bars
     # Extra metrics
     vol_change_pct: float = 0.0   # vs previous bar
     price_change_pct: float = 0.0 # bar change percent
@@ -424,6 +426,13 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     vol_ma = sma(volumes, VOL_MA_LEN)
     vol_score = volumes[-1] / vol_ma if vol_ma and vol_ma != 0 else 1.0
 
+    # FVG formation taker volume across the 3 bars that formed the gap.
+    # Buy = taker buy base-asset volume; Sell = total - buy.
+    fvg_3bar = bars[-3:] if len(bars) >= 3 else bars
+    fvg_buy_vol = sum(float(getattr(b, "taker_buy_volume", 0) or 0) for b in fvg_3bar)
+    fvg_total_vol = sum(float(b.volume) for b in fvg_3bar)
+    fvg_sell_vol = max(0.0, fvg_total_vol - fvg_buy_vol)
+
     trend_ema = ema(closes, TREND_EMA_LEN)
     if trend_ema is not None:
         trend_score = 1.0 if (direction == 1 and curr.close > trend_ema) or (direction == -1 and curr.close < trend_ema) else 0.0
@@ -435,7 +444,10 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     vol_strength = min(vol_score, 2.0) / 2.0 * VOL_WEIGHT
     trend_strength = trend_score * TREND_WEIGHT
 
-    candle_range = max(curr.high - curr.low, 0.01)
+    # Pine: max(high-low, syminfo.mintick). Bot has no mintick; use a tiny
+    # float epsilon proportional to the candle so low-priced symbols don't
+    # get artificially deflated candle_strength.
+    candle_range = max(curr.high - curr.low, abs(curr.close) * 1e-6 or 1e-9)
     candle_strength = abs(curr.close - curr.open) / candle_range * CANDLE_WEIGHT
     candle_body_pct = abs(curr.close - curr.open) / candle_range * 100 if candle_range > 0 else 0.0
 
@@ -521,6 +533,8 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
         "vol_score": vol_score,
         "trend_score": trend_score,
         "quality_score": quality_score,
+        "fvg_buy_volume": fvg_buy_vol,
+        "fvg_sell_volume": fvg_sell_vol,
         "vol_change_pct": round(vol_change_pct, 1),
         "price_change_pct": round(price_change_pct, 2),
         "price_change_24h_pct": round(price_change_24h_pct, 2),
@@ -601,6 +615,8 @@ class FVGTracker:
             "quality_score": zone.quality_score,
             "volume_score": zone.volume_score,
             "trend_score": zone.trend_score,
+            "fvg_buy_volume": zone.fvg_buy_volume,
+            "fvg_sell_volume": zone.fvg_sell_volume,
         }
 
     def _dict_to_zone(self, d: dict) -> FVGZone:
@@ -648,6 +664,8 @@ class FVGTracker:
             quality_score=d.get("quality_score", 0.0),
             volume_score=d.get("volume_score", 0.0),
             trend_score=d.get("trend_score", 0.0),
+            fvg_buy_volume=d.get("fvg_buy_volume", 0.0),
+            fvg_sell_volume=d.get("fvg_sell_volume", 0.0),
         )
 
     def _save_zones(self):
@@ -751,6 +769,8 @@ class FVGTracker:
             quality_score=strength.get("quality_score", 0.0),
             volume_score=strength.get("vol_score", 0.0),
             trend_score=strength.get("trend_score", 0.0),
+            fvg_buy_volume=strength.get("fvg_buy_volume", 0.0),
+            fvg_sell_volume=strength.get("fvg_sell_volume", 0.0),
         )
 
         zone_id = f"{symbol}_{tf}_{zone.born_time}_{zone.direction}"
