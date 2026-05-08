@@ -82,7 +82,10 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
 ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_valid  BOOLEAN;
 ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_status TEXT;
 ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_reason TEXT;
+ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS confluence_score SMALLINT;
+ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS fvg_data JSONB;
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_v2_valid ON kronos_decisions(v2_valid);
+CREATE INDEX IF NOT EXISTS idx_kronos_decisions_confluence ON kronos_decisions(confluence_score);
 
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
 CREATE INDEX IF NOT EXISTS idx_kronos_decisions_date ON kronos_decisions(date);
@@ -293,12 +296,21 @@ class SimTradeStore:
                 cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (signal_id,))
                 if cur.fetchone():
                     return False
+                fvg_data = {
+                    "zone_top": float(signal.zone_top),
+                    "zone_bottom": float(signal.zone_bottom),
+                    "zone_born_time": int(signal.zone_born_time),
+                    "htf_touches": signal.htf_touches,
+                    "fvg_buy_volume": float(signal.fvg_buy_volume),
+                    "fvg_sell_volume": float(signal.fvg_sell_volume),
+                    "atr": float(signal.atr),
+                }
                 cur.execute(
                     """INSERT INTO kronos_decisions
                        (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
                         current_price, source, status, valid, mode, reason,
-                        direction, entry, sl, tp1, tp2)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        direction, entry, sl, tp1, tp2, confluence_score, fvg_data)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (
                         signal_id,
                         fvg_id,
@@ -319,6 +331,8 @@ class SimTradeStore:
                         float(signal.sl),
                         tp1,
                         tp2,
+                        int(signal.confluence_score),
+                        psycopg2.extras.Json(fvg_data),
                     ),
                 )
             return True
