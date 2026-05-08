@@ -5,11 +5,12 @@ import logging
 
 from telegram_bot.templates import (
     fmt_breakeven, fmt_error, fmt_manual_close, fmt_opened, fmt_sl, fmt_tp2,
+    fmt_trade_skipped,
 )
 
 log = logging.getLogger("listener")
 
-CHANNELS = ("trade_opened", "trade_closed", "error")
+CHANNELS = ("trade_opened", "trade_closed", "trade_skipped", "error")
 
 
 async def _user_chat(pool, user_id: int) -> int | None:
@@ -66,6 +67,14 @@ async def handle_payload(pool, bot, channel: str, payload: dict) -> None:
         else:
             msg = fmt_sl(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct, **setup)
         await bot.send_message(chat, msg, parse_mode="HTML")
+    elif channel == "trade_skipped":
+        chat = await _user_chat(pool, payload["user_id"])
+        if not chat: return
+        await bot.send_message(chat, fmt_trade_skipped(
+            symbol=payload.get("symbol", ""),
+            reason=payload.get("reason", "unknown"),
+            decision_id=payload.get("decision_id", ""),
+        ), parse_mode="HTML")
     elif channel == "error":
         chat = await _user_chat(pool, payload["user_id"])
         if not chat: return

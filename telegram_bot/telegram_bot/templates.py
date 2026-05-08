@@ -123,6 +123,31 @@ def fmt_error(*, symbol: str, reason: str) -> str:
     return f"⚠️ ERROR{sym_part} — {reason or 'unknown'}"
 
 
+_SKIP_REASON_TEXT = {
+    "daily_cap_hit": "daily cap kena",
+    "min_notional": "notional terlalu kecil / min Binance",
+    "low_balance": "balance kurang",
+    "max_concurrent": "max trades penuh",
+    "duplicate": "signal sudah pernah diproses",
+    "paused": "bot paused",
+    "user_disabled": "bot disabled",
+    "bad_levels": "entry/SL invalid",
+    "zero_sl_distance": "jarak SL nol",
+    "qty_zero": "qty terlalu kecil setelah rounding",
+}
+
+
+def fmt_trade_skipped(*, symbol: str = "", reason: str, decision_id: str = "") -> str:
+    label = _SKIP_REASON_TEXT.get(reason or "", reason or "unknown")
+    sym = f" <b>{symbol}</b>" if symbol else ""
+    extra = ""
+    if reason == "min_notional":
+        extra = " — naikkan Fixed Notional ≥ $10"
+    elif reason == "daily_cap_hit":
+        extra = " — /resume saja tidak cukup kalau PnL harian masih lewat cap"
+    return f"⚠️ SKIP{sym}: {label}{extra}"
+
+
 def fmt_daily(*, date: str, trades: int, wins: int, pnl_usdt: float, pnl_pct: float) -> str:
     return (
         f"📊 DAILY ({date})\n"

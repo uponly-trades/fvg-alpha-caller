@@ -101,6 +101,12 @@ async def handle_signal_for_user(
         if gate.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",
                                {"decision_id": decision_id, "reason": gate.skip_reason})
+            await notify(conn, "trade_skipped", {
+                "user_id": user_id,
+                "decision_id": decision_id,
+                "symbol": symbol,
+                "reason": gate.skip_reason,
+            })
             if gate.should_pause_forever:
                 await conn.execute(
                     "UPDATE users SET paused_until=$1, pause_reason='daily_cap', updated_at=$2 WHERE id=$3",
@@ -116,6 +122,12 @@ async def handle_signal_for_user(
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",
                                {"decision_id": decision_id, "reason": size.skip_reason})
+            await notify(conn, "trade_skipped", {
+                "user_id": user_id,
+                "decision_id": decision_id,
+                "symbol": symbol,
+                "reason": size.skip_reason,
+            })
             return OrchResult(placed=False, skip_reason=size.skip_reason)
 
         trade_id = f"{user_id}-{decision_id}"

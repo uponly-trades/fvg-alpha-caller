@@ -1,7 +1,7 @@
 from telegram_bot.templates import (
     fmt_opened, fmt_tp2, fmt_sl, fmt_breakeven, fmt_manual_close,
     fmt_error, fmt_daily, fmt_balance, fmt_stats, fmt_trade_list,
-    fmt_settings, fmt_key_saved, fmt_help,
+    fmt_settings, fmt_key_saved, fmt_help, fmt_trade_skipped,
 )
 
 
@@ -72,6 +72,15 @@ def test_fmt_error_known_stage_entry_includes_howto():
     assert "entry" in msg.lower() or "MARKET" in msg
     assert "ETHUSDT" in msg
     assert "USDT" in msg or "Trade" in msg
+
+
+def test_fmt_trade_skipped_min_notional_is_short_and_actionable():
+    msg = fmt_trade_skipped(symbol="GRTUSDT", reason="min_notional")
+    assert "SKIP" in msg
+    assert "GRTUSDT" in msg
+    assert "notional" in msg.lower()
+    assert "$10" in msg
+    assert len(msg) < 120
 
 
 def test_fmt_stats_includes_config_block():
