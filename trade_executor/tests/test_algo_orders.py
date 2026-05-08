@@ -17,21 +17,32 @@ def test_adjust_sl_long_safe_sl_unchanged():
     assert adjust_sl_for_mark(side="long", sl_price=95.0, mark=100.0) == 95.0
 
 
-def test_adjust_sl_long_too_close_nudged_down():
-    # SL above mark would trigger immediately. Force below mark - 0.15%.
+def test_adjust_sl_long_above_mark_nudged_down():
+    # SL above mark would trigger immediately. Nudge to mark - 0.05%.
     out = adjust_sl_for_mark(side="long", sl_price=100.5, mark=100.0)
     assert out < 100.0
-    assert out == pytest.approx(100.0 - 100.0 * 0.0015)
+    assert out == pytest.approx(100.0 - 100.0 * 0.0005)
+
+
+def test_adjust_sl_long_close_below_mark_unchanged():
+    # SL is just below mark — original is valid, do not nudge.
+    out = adjust_sl_for_mark(side="long", sl_price=99.95, mark=100.0)
+    assert out == 99.95
 
 
 def test_adjust_sl_short_safe_sl_unchanged():
     assert adjust_sl_for_mark(side="short", sl_price=105.0, mark=100.0) == 105.0
 
 
-def test_adjust_sl_short_too_close_nudged_up():
+def test_adjust_sl_short_below_mark_nudged_up():
     out = adjust_sl_for_mark(side="short", sl_price=99.5, mark=100.0)
     assert out > 100.0
-    assert out == pytest.approx(100.0 + 100.0 * 0.0015)
+    assert out == pytest.approx(100.0 + 100.0 * 0.0005)
+
+
+def test_adjust_sl_short_close_above_mark_unchanged():
+    out = adjust_sl_for_mark(side="short", sl_price=100.05, mark=100.0)
+    assert out == 100.05
 
 
 # ────────────────────────── adjust_tp_for_mark ──────────────────────────

@@ -5,7 +5,7 @@ import math
 
 log = logging.getLogger("algo_orders")
 
-_MIN_MARK_BUFFER_PCT = 0.0015  # 0.15% min distance from mark price
+_MIN_MARK_BUFFER_PCT = 0.0005  # 0.05% safety nudge if SL/TP would immediately trigger
 
 
 def _safe_price(p) -> float | None:
@@ -28,29 +28,33 @@ async def fetch_mark_price(ex, symbol: str) -> float | None:
 
 
 def adjust_sl_for_mark(*, side: str, sl_price: float, mark: float) -> float:
-    """If SL is on the wrong side of mark (would trigger immediately), nudge it
-    to mark ± _MIN_MARK_BUFFER_PCT. side = 'long' or 'short' (entry side).
+    """Only nudge SL if it would immediately trigger (wrong side of mark).
+
+    Original signal SL is preserved when valid. Buffer is a thin 0.05% safety
+    pad applied ONLY when nudging is required, so we don't override a properly
+    placed zone-based SL with an arbitrarily wide buffer.
     """
     buf = mark * _MIN_MARK_BUFFER_PCT
     if side == "long":
-        # SL must be BELOW mark
-        if sl_price >= mark - buf:
+        # SL must be BELOW mark — nudge only if at/above mark
+        if sl_price >= mark:
             return mark - buf
     else:
-        if sl_price <= mark + buf:
+        if sl_price <= mark:
             return mark + buf
     return sl_price
 
 
 def adjust_tp_for_mark(*, side: str, tp_price: float, mark: float) -> float:
-    """Mirror of adjust_sl_for_mark for take-profit."""
+    """Mirror of adjust_sl_for_mark — preserve original TP unless it would
+    trigger immediately (wrong side of mark)."""
     buf = mark * _MIN_MARK_BUFFER_PCT
     if side == "long":
-        # TP must be ABOVE mark
-        if tp_price <= mark + buf:
+        # TP must be ABOVE mark — nudge only if at/below mark
+        if tp_price <= mark:
             return mark + buf
     else:
-        if tp_price >= mark - buf:
+        if tp_price >= mark:
             return mark - buf
     return tp_price
 

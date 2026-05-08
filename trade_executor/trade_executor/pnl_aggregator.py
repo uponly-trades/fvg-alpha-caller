@@ -27,6 +27,25 @@ def _today_start_ms() -> int:
     return int(midnight.timestamp() * 1000)
 
 
+async def _fetch_positions(ex) -> dict[str, float]:
+    """Return {symbol: positionAmt} for every non-zero position.
+
+    Uses fapiPrivateV2GetPositionRisk (more reliable than fetchPositions for
+    one-way mode). Symbols missing from the result map have zero position.
+    """
+    try:
+        rows = await ex.fapiPrivateV2GetPositionRisk({})
+    except Exception as e:
+        log.warning("fetch positions failed: %s", e)
+        return {}
+    out: dict[str, float] = {}
+    for p in rows:
+        amt = float(p.get("positionAmt") or 0)
+        if amt != 0:
+            out[p["symbol"]] = amt
+    return out
+
+
 async def reconcile_user(pool, *, ex, user_id: int) -> None:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -41,50 +60,97 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
     if not rows:
         return
 
+    # Position-based truth: any DB-open trade for symbol with zero Binance
+    # position has been closed (by SL/TP algo, manual close, or liquidation).
+    # We must reconcile via positions because algo SL/TP fills carry CHILD
+    # market order IDs that don't match our stored algoId.
+    positions = await _fetch_positions(ex)
+
     by_symbol: dict[str, list[dict]] = {}
     for r in rows:
         by_symbol.setdefault(r["symbol"], []).append(dict(r))
 
     for symbol, trades in by_symbol.items():
+        pos_amt = positions.get(symbol, 0.0)
         try:
             fills = await ex.fetch_my_trades(symbol, since=_today_start_ms())
         except Exception as e:
             log.warning("fetch_my_trades %s failed: %s", symbol, e)
             continue
+
         for t in trades:
-            tp_fills = [f for f in fills if str(f.get("order")) == str(t["tp_order_id"])]
-            sl_fills = [f for f in fills if str(f.get("order")) == str(t["sl_order_id"])]
-            if not tp_fills and not sl_fills:
-                continue
-            close_fill = (tp_fills + sl_fills)[0]
-            close_px = float(close_fill["price"])
             qty = float(t["qty"])
             entry_px = float(t["entry"])
-            sign = 1 if t["direction"] == "long" else -1
-            gross = sign * (close_px - entry_px) * qty
-            fee_close = float(close_fill.get("fee", {}).get("cost", 0) or 0)
-            entry_fills = [f for f in fills if str(f.get("order")) == "e_skip"]
-            fee_open = float(entry_fills[0]["fee"]["cost"]) if entry_fills else 0.0
-            fees = fee_open + fee_close
-            pnl_usdt = gross - fees
-            pnl_pct = (pnl_usdt / (qty * entry_px)) * 100
+            sign_dir = 1 if t["direction"] == "long" else -1
 
-            new_status = classify_close(
-                direction=t["direction"],
-                filled_at_tp_id=str(close_fill.get("order")) if tp_fills else None,
-                filled_at_sl_id=str(close_fill.get("order")) if sl_fills else None,
-                status_before=t["status"],
-            )
+            # Find close fills: opposite-side fills after open ts. Algo trigger
+            # creates child market order with reduceOnly=True; close_side is
+            # SELL for long / BUY for short.
+            close_side = "sell" if t["direction"] == "long" else "buy"
+            after = int(t["opened_at"])
+            close_fills = [
+                f for f in fills
+                if (f.get("side") or "").lower() == close_side
+                and int(f.get("timestamp") or 0) >= after
+            ]
+
+            position_closed = (pos_amt == 0.0)
+            if not close_fills and not position_closed:
+                # Position still alive on Binance, no close fills — leave alone.
+                continue
+
+            if not close_fills:
+                # Position is zero but no matching close fills found in window —
+                # rare edge case (manual close before today, or fills outside
+                # since=today). Skip safely; log for visibility.
+                log.warning(
+                    "reconcile %s: position=0 but no close fills found in window — skipping",
+                    t["id"],
+                )
+                continue
+
+            # Sum close fills until they cover qty (handles partial fills).
+            cum_qty = 0.0
+            cum_notional = 0.0
+            cum_fee = 0.0
+            close_ts = 0
+            for f in close_fills:
+                fq = float(f.get("amount") or 0)
+                fp = float(f.get("price") or 0)
+                cum_notional += fq * fp
+                cum_qty += fq
+                fee_cost = float((f.get("fee") or {}).get("cost") or 0)
+                cum_fee += fee_cost
+                close_ts = int(f.get("timestamp") or close_ts)
+                if cum_qty >= qty - 1e-9:
+                    break
+            if cum_qty <= 0:
+                continue
+            close_px = cum_notional / cum_qty
+            gross = sign_dir * (close_px - entry_px) * qty
+            pnl_usdt = gross - cum_fee
+            pnl_pct = (pnl_usdt / (qty * entry_px)) * 100 if entry_px else 0.0
+
+            # Decide TP vs SL by direction: long closed below entry = SL,
+            # above = TP. Mirror for short. tp1_trailed → SL hit = breakeven.
+            if t["direction"] == "long":
+                hit_tp = close_px > entry_px
+            else:
+                hit_tp = close_px < entry_px
+            if hit_tp:
+                new_status = "closed_tp2"
+            else:
+                new_status = "closed_breakeven" if t["status"] == "tp1_trailed" else "closed_sl"
 
             async with pool.acquire() as conn:
                 await conn.execute(
                     """
                     UPDATE user_trades
                     SET status=$1, pnl_usdt=$2, pnl_pct=$3, fees_usdt=$4, closed_at=$5
-                    WHERE id=$6
+                    WHERE id=$6 AND status IN ('open','tp1_trailed')
                     """,
-                    new_status, pnl_usdt, pnl_pct, fees,
-                    int(close_fill.get("timestamp") or time.time() * 1000),
+                    new_status, pnl_usdt, pnl_pct, cum_fee,
+                    close_ts or int(time.time() * 1000),
                     t["id"],
                 )
                 await _upsert_daily(conn, user_id, pnl_usdt, won=(pnl_usdt > 0))
