@@ -81,6 +81,28 @@ def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
 _VISIBLE_TOP_N = 10
 
 
+def _visible_top_zones_all(
+    zones: Dict[str, FVGZone],
+    symbol: str,
+    tf: str,
+) -> List[FVGZone]:
+    """Top-N zones the chart displays — Pine indicator default maxZones=10.
+    Returns ALL visible zones (both directions), sorted by live quality_score.
+    Used for touch detection before direction filtering."""
+    import time
+    now_ms = int(time.time() * 1000)
+    candidates = [
+        z for z in zones.values()
+        if z.symbol == symbol
+        and z.tf == tf
+        and z.mitigation < 1.0
+    ]
+    if not candidates:
+        return []
+    candidates.sort(key=lambda z: _zone_live_quality(z, now_ms), reverse=True)
+    return candidates[:_VISIBLE_TOP_N]
+
+
 def _visible_top_zones(
     zones: Dict[str, FVGZone],
     symbol: str,
@@ -181,25 +203,29 @@ def evaluate_v2_signal(
     Returns V2Signal if:
       1. 15m FVG (any strength, any direction) is touched on latest bar.
       2. HTF confluence score ≥ V2_HTF_MIN_SCORE across {30m, 1h, 2h, 4h}.
+
+    CRITICAL: Signal direction MUST match zone.direction to avoid inverted signals.
     """
-    for direction in (1, -1):
-        for trigger_tf in V2_TRIGGER_TFS:
-            # Walk visible top-N zones (chart-displayed). Newest born first
-            # to favor recent setups, but only zones that actually appear on
-            # the user's Zeiierman chart (top-10 by quality).
-            visible = _visible_top_zones(zones, symbol, trigger_tf, direction)
-            if not visible:
+    for trigger_tf in V2_TRIGGER_TFS:
+        # Get ALL visible zones (both bullish and bearish), then filter by touch
+        visible = _visible_top_zones_all(zones, symbol, trigger_tf)
+        if not visible:
+            continue
+        visible.sort(key=lambda z: z.born_time, reverse=True)
+
+        bars = bars_by_tf.get(trigger_tf, [])
+        if not bars:
+            continue
+
+        for triggered in visible:
+            hit = _trigger_zone_touched(triggered, bars)
+            if hit is None:
                 continue
-            visible.sort(key=lambda z: z.born_time, reverse=True)
-            triggered = None
-            bars = bars_by_tf.get(trigger_tf, [])
-            for z in visible:
-                hit = _trigger_zone_touched(z, bars)
-                if hit is not None:
-                    triggered = hit
-                    break
-            if triggered is None:
-                continue
+
+            # CRITICAL FIX: Use zone.direction, NOT loop direction!
+            # This prevents inverted signals (bullish zone → SHORT signal)
+            direction = triggered.direction
+
             if triggered.quality_score < V2_MIN_QUALITY_SCORE:
                 logger.info(
                     "v2 skip %s %s %s | quality=%.1f < %.1f",
@@ -207,13 +233,13 @@ def evaluate_v2_signal(
                     triggered.quality_score, V2_MIN_QUALITY_SCORE,
                 )
                 continue
+
             score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
             if score < V2_HTF_MIN_SCORE:
                 continue
 
             atr_val = float(triggered.atr) if triggered.atr else 0.0
             if atr_val <= 0:
-                bars = bars_by_tf.get(trigger_tf, [])
                 if len(bars) >= 15:
                     highs = [b.high for b in bars]
                     lows = [b.low for b in bars]
@@ -224,8 +250,8 @@ def evaluate_v2_signal(
 
             sl = _compute_sl(triggered, atr_val)
             # Zeiierman parity: entry at FVG zone edge (not close price)
-            # LONG: enter at zone.top (above bullish FVG)
-            # SHORT: enter at zone.bottom (below bearish FVG)
+            # LONG (bullish FVG): enter at zone.top (above the gap)
+            # SHORT (bearish FVG): enter at zone.bottom (below the gap)
             entry = float(triggered.top) if direction == 1 else float(triggered.bottom)
             r = abs(entry - sl)
             tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
