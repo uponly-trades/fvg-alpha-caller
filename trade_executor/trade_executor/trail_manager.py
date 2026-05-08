@@ -61,7 +61,7 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
             pos_side = "LONG" if is_long else "SHORT"
         try:
             new_sl = await place_algo_stop(
-                ex, symbol=symbol, close_side=close_side,
+                ex, symbol=symbol, close_side=close_side, quantity=float(t["qty"]),
                 trigger_price=trail_price, order_type="STOP_MARKET",
                 position_side=pos_side,
             )

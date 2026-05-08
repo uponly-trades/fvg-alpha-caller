@@ -76,14 +76,15 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
         pos_side = None
         if getattr(ex, "_is_hedge_mode", False):
             pos_side = "LONG" if r["direction"] == "long" else "SHORT"
+        qty = float(r["qty"])
         try:
             sl = await place_algo_stop(
-                ex, symbol=r["symbol"], close_side=close_side,
+                ex, symbol=r["symbol"], close_side=close_side, quantity=qty,
                 trigger_price=sl_price, order_type="STOP_MARKET",
                 position_side=pos_side,
             )
             tp = await place_algo_stop(
-                ex, symbol=r["symbol"], close_side=close_side,
+                ex, symbol=r["symbol"], close_side=close_side, quantity=qty,
                 trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
                 position_side=pos_side,
             )

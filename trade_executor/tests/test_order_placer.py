@@ -28,6 +28,7 @@ class FakeOK:
     async def fapiPrivatePostAlgoOrder(self, params):
         self.calls.append(("algoOrder", params))
         assert params.get("algoType") == "CONDITIONAL", "algoType must be CONDITIONAL"
+        assert "quantity" in params or params.get("closePosition") == "true", "must have quantity or closePosition"
         if params["type"] == "STOP_MARKET":
             return {"algoId": "sl-1", "algoStatus": "NEW"}
         if params["type"] == "TAKE_PROFIT_MARKET":
@@ -36,6 +37,9 @@ class FakeOK:
 
     def price_to_precision(self, symbol, price):
         return f"{price:.4f}"
+
+    def amount_to_precision(self, symbol, amount):
+        return f"{amount:.4f}"
 
     async def fapiPublicGetPremiumIndex(self, params):
         self.calls.append(("premiumIndex", params))
@@ -70,6 +74,11 @@ async def test_full_sequence_returns_ids_and_avg():
     assert res.tp_price == pytest.approx(106.0)
     tp_call = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "TAKE_PROFIT_MARKET"][0]
     assert float(tp_call[1]["triggerPrice"]) == pytest.approx(106.0)
+    assert tp_call[1].get("quantity") == "0.0100"
+    assert tp_call[1].get("closePosition") != "true"
+    sl_call = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "STOP_MARKET"][0]
+    assert sl_call[1].get("quantity") == "0.0100"
+    assert sl_call[1].get("closePosition") != "true"
 
 
 @pytest.mark.asyncio

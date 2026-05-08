@@ -98,8 +98,9 @@ async def place_full_sequence(
 
     try:
         sl = await place_algo_stop(
-            ex, symbol=symbol, close_side=close_side, trigger_price=sl_price,
-            order_type="STOP_MARKET", position_side=pos_side_for_close,
+            ex, symbol=symbol, close_side=close_side, quantity=qty,
+            trigger_price=sl_price, order_type="STOP_MARKET",
+            position_side=pos_side_for_close,
         )
         sl_id = algo_id_of(sl)
     except Exception as e:
@@ -116,8 +117,9 @@ async def place_full_sequence(
     tp_id: str | None = None
     try:
         tp = await place_algo_stop(
-            ex, symbol=symbol, close_side=close_side, trigger_price=tp_price,
-            order_type="TAKE_PROFIT_MARKET", position_side=pos_side_for_close,
+            ex, symbol=symbol, close_side=close_side, quantity=qty,
+            trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
+            position_side=pos_side_for_close,
         )
         tp_id = algo_id_of(tp)
     except Exception as e:

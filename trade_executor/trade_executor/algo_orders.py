@@ -65,6 +65,7 @@ async def place_algo_stop(
     symbol: str,
     close_side: str,
     trigger_price: float,
+    quantity: float | None = None,
     order_type: str = "STOP_MARKET",
     position_side: str | None = None,
 ) -> dict:
@@ -84,9 +85,13 @@ async def place_algo_stop(
         "type": order_type,
         "algoType": "CONDITIONAL",
         "triggerPrice": ex.price_to_precision(symbol, p),
-        "closePosition": "true",
         "workingType": "MARK_PRICE",
     }
+    if quantity is not None and quantity > 0:
+        params["quantity"] = ex.amount_to_precision(symbol, quantity)
+        params["reduceOnly"] = "true"
+    else:
+        params["closePosition"] = "true"
     if position_side:
         params["positionSide"] = position_side
     return await ex.fapiPrivatePostAlgoOrder(params)
