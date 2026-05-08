@@ -64,18 +64,20 @@ def _htf_active_and_touched(
 _TF_SECONDS = {"15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400}
 
 
-def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
-    """Zeiierman-parity live quality score with mitigation + age decay.
+def _zeiierman_quality(z: FVGZone) -> float:
+    """Zeiierman-style quality: absolute FVG gap normalized by ATR."""
+    atr_val = float(getattr(z, "atr", 0.0) or 0.0)
+    if atr_val <= 0:
+        return 0.0
+    return abs(float(getattr(z, "size", 0.0) or 0.0)) / atr_val
 
-    qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mit*50 - age*0.1
-    age = bars elapsed since born_time (approximated via tf_seconds).
-    """
-    # Zeiierman: fvgSize = gap / atr * 100 (ATR-normalized)
-    fvg_size_pct = (z.size / z.atr * 100) if z.atr > 0 else 0.0
-    base = fvg_size_pct * 100 + z.volume_score * 10 + z.trend_score * 20
+
+
+def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
+    """Live visible-zone ranking: Zeiierman gap quality minus mitigation/age decay."""
     tf_sec = _TF_SECONDS.get(z.tf, 900)
     age_bars = max(0, (now_ms - z.born_time) // (tf_sec * 1000))
-    return base - z.mitigation * 50 - age_bars * 0.1
+    return _zeiierman_quality(z) - z.mitigation * 0.5 - age_bars * 0.001
 
 
 # Top-N zones the chart actually displays. Pine default maxZones=10.
@@ -312,7 +314,8 @@ def evaluate_v2_signal(
                     "rsi": getattr(triggered, "rsi", 50.0),
                     "volume_score": getattr(triggered, "volume_score", 0.0),
                     "trend_score": getattr(triggered, "trend_score", 0.0),
-                    "quality_score": getattr(triggered, "quality_score", 0.0),
+                    "quality_score": _zeiierman_quality(triggered),
+                    "quality_score_formula_live": "zeiierman_gap_atr",
                     "main_strength": getattr(triggered, "main_strength", 0),
                     "bull_strength": getattr(triggered, "bull_strength", 0),
                     "bear_strength": getattr(triggered, "bear_strength", 0),

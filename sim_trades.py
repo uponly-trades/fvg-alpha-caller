@@ -308,6 +308,7 @@ class SimTradeStore:
                     "volume_score": float(signal.indicators.get("volume_score", 0.0)),
                     "trend_score": float(signal.indicators.get("trend_score", 0.0)),
                     "quality_score": float(signal.indicators.get("quality_score", 0.0)),
+                    "quality_score_formula_live": signal.indicators.get("quality_score_formula_live", "zeiierman_gap_atr"),
                     "main_strength": int(signal.indicators.get("main_strength", 0)),
                     "bull_strength": int(signal.indicators.get("bull_strength", 0)),
                     "bear_strength": int(signal.indicators.get("bear_strength", 0)),

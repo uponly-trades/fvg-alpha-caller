@@ -315,7 +315,7 @@ class FVGZone:
     tp1: float = 0.0
     tp2: float = 0.0
     price: float = 0.0
-    quality_score: float = 0.0    # Zeiierman-parity ranking
+    quality_score: float = 0.0    # Zeiierman quality: absolute FVG gap / ATR
     volume_score: float = 0.0     # volume / volumeMA at born
     trend_score: float = 0.0      # 1.0 if dir aligns with trendEMA at born else 0.0
     fvg_buy_volume: float = 0.0   # taker buy base-asset volume across 3-bar FVG formation
@@ -522,11 +522,9 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     tp1 = fvg["top"] + atr_val * 1.5 if direction == 1 else fvg["bottom"] - atr_val * 1.5
     tp2 = fvg["top"] + atr_val * 2.5 if direction == 1 else fvg["bottom"] - atr_val * 2.5
 
-    # Zeiierman-parity quality score (mitigation=0 at born, age=0 at born).
-    # fvgSize = gap / atr * 100  (ATR-normalized, % of ATR)
-    # qualityScore = fvgSize*100 + volScore*10 + trendScore*20 - mitigation*50 - age*0.1
-    fvg_size_pct = (fvg["size"] / atr_val * 100) if atr_val > 0 else 0.0
-    quality_score = fvg_size_pct * 100 + vol_score * 10 + trend_score * 20
+    # Zeiierman-style quality: absolute FVG gap normalized by ATR.
+    # Live ranking uses this directly so large real gaps outrank noisy churn.
+    quality_score = (fvg["size"] / atr_val) if atr_val > 0 else 0.0
 
     return {
         "main_strength": main_strength,

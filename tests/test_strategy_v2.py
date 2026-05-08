@@ -229,7 +229,7 @@ def test_trigger_zone_fully_mitigated_returns_none():
     assert _trigger_zone_touched(zone=z, bars=bars) is None
 
 
-from strategy_v2 import _compute_sl, _volume_confirmation
+from strategy_v2 import _compute_sl, _volume_confirmation, _zeiierman_quality
 
 
 def test_sl_long_below_zone_bottom():
@@ -249,6 +249,19 @@ def test_sl_uses_zone_bottom_not_wick():
     sl = _compute_sl(zone=z, atr_val=2.0)
     assert sl < z.bottom
     assert sl > z.bottom - 5.0
+
+
+def test_zeiierman_quality_uses_abs_gap_over_atr_only():
+    z = make_zone(top=100.5, bottom=99.5, direction=1, atr_val=2.0)
+    z.volume_score = 9.0
+    z.trend_score = 1.0
+    z.quality_score = 9999.0
+    assert _zeiierman_quality(z) == pytest.approx(0.5)
+
+
+def test_zeiierman_quality_zero_when_atr_missing():
+    z = make_zone(top=100.5, bottom=99.5, direction=1, atr_val=0.0)
+    assert _zeiierman_quality(z) == 0.0
 
 
 def test_volume_confirmation_long_requires_spike_imbalance_and_buy_alignment():
@@ -368,6 +381,8 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     assert sig.confluence_score == 3
     assert sig.htf_touches["4h"] is True
     assert sig.htf_touches["1h"] is False
+    assert sig.indicators["quality_score"] == pytest.approx(z_15m.size / z_15m.atr)
+    assert sig.indicators["quality_score_formula_live"] == "zeiierman_gap_atr"
     # tp = entry + 2R for long
     r = abs(sig.entry - sig.sl)
     assert abs(sig.tp - (sig.entry + 2 * r)) < 1e-9
