@@ -20,11 +20,23 @@ def test_build_exchange_socks5_proxy_uses_socks_attr():
 
 
 def test_set_isolated_and_leverage_calls_chain(monkeypatch):
-    """Smoke: helper sequences leverage + marginType, swallows code 4046."""
+    """Smoke: helper bootstraps account mode then sequences leverage+marginType,
+    swallows code 4046 on no-op responses."""
     from trade_executor import exchange as exmod
+    exmod._ACCOUNT_MODE_INITIALIZED.clear()
     calls = []
 
     class FakeEx:
+        async def fapiPrivatePostMultiAssetsMargin(self, params):
+            calls.append(("multiAssets", params))
+            from ccxt.base.errors import ExchangeError
+            raise ExchangeError("-4046 No need to change")
+
+        async def fapiPrivatePostPositionSideDual(self, params):
+            calls.append(("posSide", params))
+            from ccxt.base.errors import ExchangeError
+            raise ExchangeError("-4059 No need to change position side")
+
         async def fapiPrivatePostLeverage(self, params):
             calls.append(("leverage", params))
             return {"leverage": params["leverage"]}
@@ -36,5 +48,27 @@ def test_set_isolated_and_leverage_calls_chain(monkeypatch):
 
     import asyncio
     asyncio.run(exmod.set_isolated_and_leverage(FakeEx(), "BTCUSDT", 5))
-    assert calls[0][0] == "leverage"
-    assert calls[1][0] == "marginType"
+    stages = [c[0] for c in calls]
+    assert stages == ["multiAssets", "posSide", "leverage", "marginType"]
+    assert calls[0][1] == {"multiAssetsMargin": "false"}
+    assert calls[1][1] == {"dualSidePosition": "false"}
+
+
+def test_ensure_account_mode_idempotent_per_exchange():
+    """Bootstrap runs once per exchange instance — second call is a no-op."""
+    from trade_executor import exchange as exmod
+    exmod._ACCOUNT_MODE_INITIALIZED.clear()
+    calls = []
+
+    class FakeEx:
+        async def fapiPrivatePostMultiAssetsMargin(self, params):
+            calls.append("multiAssets")
+
+        async def fapiPrivatePostPositionSideDual(self, params):
+            calls.append("posSide")
+
+    import asyncio
+    ex = FakeEx()
+    asyncio.run(exmod.ensure_account_mode(ex))
+    asyncio.run(exmod.ensure_account_mode(ex))
+    assert calls == ["multiAssets", "posSide"]

@@ -65,14 +65,48 @@ def build_exchange(api_key: str, api_secret: str, *, proxy_url: str | None) -> c
     return ex
 
 
+_ACCOUNT_MODE_INITIALIZED: set = set()
+
+
+def _is_no_change_error(msg: str) -> bool:
+    """Binance returns -4046 / -4059 / 'No need to change' when target state matches."""
+    return ("4046" in msg or "4059" in msg
+            or "No need to change" in msg or "no need to change" in msg.lower())
+
+
+async def ensure_account_mode(ex) -> None:
+    """Force account into One-Way + Single-Asset mode so per-symbol ISOLATED works.
+
+    Idempotent + cached per exchange instance. Binance docs:
+      - POST /fapi/v1/multiAssetsMargin (multiAssetsMargin=false) → Single-Asset
+      - POST /fapi/v1/positionSide/dual (dualSidePosition=false) → One-Way
+    Both return -4046 when already in target state — swallow that.
+    """
+    key = id(ex)
+    if key in _ACCOUNT_MODE_INITIALIZED:
+        return
+    try:
+        await ex.fapiPrivatePostMultiAssetsMargin({"multiAssetsMargin": "false"})
+    except Exception as e:
+        if not _is_no_change_error(str(e)):
+            log.warning("multiAssetsMargin off failed (continuing): %s", e)
+    try:
+        await ex.fapiPrivatePostPositionSideDual({"dualSidePosition": "false"})
+    except Exception as e:
+        if not _is_no_change_error(str(e)):
+            log.warning("positionSide/dual off failed (continuing): %s", e)
+    _ACCOUNT_MODE_INITIALIZED.add(key)
+
+
 async def set_isolated_and_leverage(ex, symbol: str, leverage: int) -> None:
     """Set leverage and ISOLATED margin. Swallow 'no change needed' (-4046)."""
+    await ensure_account_mode(ex)
     await ex.fapiPrivatePostLeverage({"symbol": symbol, "leverage": leverage})
     try:
         await ex.fapiPrivatePostMarginType({"symbol": symbol, "marginType": "ISOLATED"})
     except Exception as e:
         msg = str(e)
-        if "4046" in msg or "No need to change" in msg:
+        if _is_no_change_error(msg):
             log.debug("margin type already isolated for %s", symbol)
             return
         raise
