@@ -50,14 +50,22 @@ async def handle_payload(pool, bot, channel: str, payload: dict) -> None:
         if not chat: return
         pnl_usdt = float(t["pnl_usdt"] or 0)
         pnl_pct = float(t["pnl_pct"] or 0)
+        setup = dict(
+            tf=t["tf"], direction=t["direction"],
+            entry=float(t["entry"]), sl=float(t["sl"]),
+            tp1=float(t["tp1"]), tp2=float(t["tp2"]),
+            qty=float(t["qty"]), leverage=int(t["leverage"]),
+            notional=float(t["notional_usdt"]),
+        )
         if t["status"] == "closed_tp2":
-            await bot.send_message(chat, fmt_tp2(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
+            msg = fmt_tp2(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct, **setup)
         elif t["status"] == "closed_breakeven":
-            await bot.send_message(chat, fmt_breakeven(symbol=t["symbol"], pnl_usdt=pnl_usdt))
+            msg = fmt_breakeven(symbol=t["symbol"], pnl_usdt=pnl_usdt, **setup)
         elif t["status"] == "manual_close":
-            await bot.send_message(chat, fmt_manual_close(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
+            msg = fmt_manual_close(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct, **setup)
         else:
-            await bot.send_message(chat, fmt_sl(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct))
+            msg = fmt_sl(symbol=t["symbol"], pnl_usdt=pnl_usdt, pnl_pct=pnl_pct, **setup)
+        await bot.send_message(chat, msg, parse_mode="HTML")
     elif channel == "error":
         chat = await _user_chat(pool, payload["user_id"])
         if not chat: return

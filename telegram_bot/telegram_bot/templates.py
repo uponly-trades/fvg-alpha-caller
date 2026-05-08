@@ -23,20 +23,57 @@ def fmt_opened(*, symbol, tf, direction, entry, sl, tp1, tp2,
     )
 
 
-def fmt_tp2(*, symbol: str, pnl_usdt: float, pnl_pct: float) -> str:
-    return f"✅ TP2 HIT  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})"
+def _trade_setup_block(*, tf: str, direction: str, entry: float, sl: float,
+                       tp1: float, tp2: float, qty: float, leverage: int,
+                       notional: float) -> str:
+    """Show original signal setup so user can evaluate the strategy in context."""
+    sl_pct = (entry - sl) / entry * 100 if direction == "long" else (sl - entry) / entry * 100
+    tp2_pct = (tp2 - entry) / entry * 100 if direction == "long" else (entry - tp2) / entry * 100
+    rr = (tp2_pct / abs(sl_pct)) if sl_pct else 0
+    return (
+        f"   {tf} {direction.upper()}  entry {_px(entry)}\n"
+        f"   sl {_px(sl)} ({_pct(-abs(sl_pct))})  tp2 {_px(tp2)} ({_pct(tp2_pct)})  RR <b>{rr:.2f}</b>\n"
+        f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional)"
+    )
 
 
-def fmt_sl(*, symbol: str, pnl_usdt: float, pnl_pct: float) -> str:
-    return f"🛑 SL HIT  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})"
+def fmt_tp2(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
+            qty, leverage, notional) -> str:
+    setup = _trade_setup_block(
+        tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
+        qty=qty, leverage=leverage, notional=notional,
+    )
+    return f"✅ <b>TP2 HIT</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
-def fmt_breakeven(*, symbol: str, pnl_usdt: float) -> str:
-    return f"🔁 BREAKEVEN  {symbol}  TP1 trailed → SL hit at TP1 closed {_money(pnl_usdt)}"
+def fmt_sl(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
+           qty, leverage, notional) -> str:
+    setup = _trade_setup_block(
+        tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
+        qty=qty, leverage=leverage, notional=notional,
+    )
+    return f"🛑 <b>SL HIT</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
-def fmt_manual_close(*, symbol: str, pnl_usdt: float, pnl_pct: float) -> str:
-    return f"✋ MANUAL CLOSE  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})"
+def fmt_breakeven(*, symbol, pnl_usdt, tf, direction, entry, sl, tp1, tp2,
+                  qty, leverage, notional) -> str:
+    setup = _trade_setup_block(
+        tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
+        qty=qty, leverage=leverage, notional=notional,
+    )
+    return (
+        f"🔁 <b>BREAKEVEN</b>  {symbol}  TP1 trailed → SL hit at TP1 closed {_money(pnl_usdt)}\n"
+        f"{setup}"
+    )
+
+
+def fmt_manual_close(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
+                     qty, leverage, notional) -> str:
+    setup = _trade_setup_block(
+        tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
+        qty=qty, leverage=leverage, notional=notional,
+    )
+    return f"✋ <b>MANUAL CLOSE</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
 _ERROR_STAGE_INFO = {

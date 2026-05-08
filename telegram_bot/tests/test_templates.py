@@ -5,11 +5,25 @@ from telegram_bot.templates import (
 )
 
 
+_CLOSE_KW = dict(
+    tf="15m", direction="long", entry=100.0, sl=99.0, tp1=101.0, tp2=102.0,
+    qty=1.0, leverage=10, notional=100.0,
+)
+
+
 def test_fmt_manual_close_neutral_label():
-    msg = fmt_manual_close(symbol="DOGEUSDT", pnl_usdt=-0.09, pnl_pct=-0.04)
+    msg = fmt_manual_close(symbol="DOGEUSDT", pnl_usdt=-0.09, pnl_pct=-0.04, **_CLOSE_KW)
     assert "MANUAL CLOSE" in msg
     assert "DOGEUSDT" in msg
     assert "-$0.09" in msg or "-0.09" in msg
+
+
+def test_fmt_close_includes_setup_and_rr():
+    msg = fmt_sl(symbol="BTCUSDT", pnl_usdt=-2.71, pnl_pct=-1.0, **_CLOSE_KW)
+    assert "SL HIT" in msg
+    assert "entry" in msg.lower()
+    assert "RR" in msg
+    assert "10x" in msg
 
 
 def test_fmt_opened_long():
@@ -25,17 +39,17 @@ def test_fmt_opened_long():
 
 
 def test_fmt_tp2_uses_plus_sign_for_profit():
-    msg = fmt_tp2(symbol="BTCUSDT", pnl_usdt=5.41, pnl_pct=2.0)
+    msg = fmt_tp2(symbol="BTCUSDT", pnl_usdt=5.41, pnl_pct=2.0, **_CLOSE_KW)
     assert "+$5.41" in msg or "+5.41" in msg
 
 
 def test_fmt_sl_uses_minus_sign_for_loss():
-    msg = fmt_sl(symbol="BTCUSDT", pnl_usdt=-2.71, pnl_pct=-1.0)
+    msg = fmt_sl(symbol="BTCUSDT", pnl_usdt=-2.71, pnl_pct=-1.0, **_CLOSE_KW)
     assert "-$2.71" in msg or "-2.71" in msg
 
 
 def test_fmt_breakeven_message():
-    msg = fmt_breakeven(symbol="BTCUSDT", pnl_usdt=0.02)
+    msg = fmt_breakeven(symbol="BTCUSDT", pnl_usdt=0.02, **_CLOSE_KW)
     assert "BREAKEVEN" in msg.upper()
 
 
