@@ -79,7 +79,7 @@ def test_fmt_trade_skipped_min_notional_is_short_and_actionable():
     assert "SKIP" in msg
     assert "GRTUSDT" in msg
     assert "notional" in msg.lower()
-    assert "$10" in msg
+    assert "minimum Binance" in msg
     assert len(msg) < 120
 
 

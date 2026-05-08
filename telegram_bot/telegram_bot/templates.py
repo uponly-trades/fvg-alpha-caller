@@ -134,6 +134,7 @@ _SKIP_REASON_TEXT = {
     "bad_levels": "entry/SL invalid",
     "zero_sl_distance": "jarak SL nol",
     "qty_zero": "qty terlalu kecil setelah rounding",
+    "risk_cap": "SL terlalu lebar untuk Risk $ dan Max Notional",
 }
 
 
@@ -142,7 +143,9 @@ def fmt_trade_skipped(*, symbol: str = "", reason: str, decision_id: str = "") -
     sym = f" <b>{symbol}</b>" if symbol else ""
     extra = ""
     if reason == "min_notional":
-        extra = " — naikkan Fixed Notional ≥ $10"
+        extra = " — size di bawah minimum Binance"
+    elif reason == "risk_cap":
+        extra = " — naikkan Max Notional atau tunggu SL lebih sempit"
     elif reason == "daily_cap_hit":
         extra = " — /resume saja tidak cukup kalau PnL harian masih lewat cap"
     return f"⚠️ SKIP{sym}: {label}{extra}"

@@ -53,6 +53,15 @@ def compute_size(
         cap = max_notional_usdt if max_notional_usdt is not None and max_notional_usdt > 0 else raw_notional
         notional = min(raw_notional, cap)
         capped = notional < raw_notional
+        if capped:
+            expected_pnl_1r_usdt = notional * (sl_distance_pct / 100)
+            return SizeResult(
+                notional_usdt=notional,
+                target_risk_usdt=target_risk_usdt,
+                expected_pnl_1r_usdt=expected_pnl_1r_usdt,
+                capped=True,
+                skip_reason="risk_cap",
+            )
     elif fixed_notional_usdt is not None and fixed_notional_usdt > 0:
         notional = fixed_notional_usdt
         target_risk_usdt = notional * (sl_distance_pct / 100)

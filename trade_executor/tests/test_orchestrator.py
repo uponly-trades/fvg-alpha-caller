@@ -30,6 +30,9 @@ class FakeEx:
             {"filterType": "MIN_NOTIONAL", "notional": "5"},
         ]}]}
 
+    async def fapiPublicGetPremiumIndex(self, params):
+        return {"markPrice": "100.0"}
+
     async def fapiPrivatePostLeverage(self, params): return {}
     async def fapiPrivatePostMarginType(self, params): return {}
 

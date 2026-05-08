@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from trade_executor.audit import insert_audit
 from trade_executor.gate import check_user_gate
 from trade_executor.notify import notify
+from trade_executor.algo_orders import fetch_mark_price
 from trade_executor.order_placer import OrderError, place_full_sequence
 from trade_executor.sizing import SymbolMeta, compute_size
 
@@ -117,8 +118,9 @@ async def handle_signal_for_user(
             return OrchResult(placed=False, skip_reason=gate.skip_reason)
 
         meta = await _symbol_meta(ex, symbol)
+        live_entry = await fetch_mark_price(ex, symbol) or entry
         size = compute_size(
-            balance=float(balance), risk_pct=risk_pct, entry=entry, sl=sl,
+            balance=float(balance), risk_pct=risk_pct, entry=live_entry, sl=sl,
             leverage=leverage, meta=meta, fixed_notional_usdt=fixed_notional_usdt,
             fixed_risk_usdt=fixed_risk_usdt, max_notional_usdt=max_notional_usdt,
         )
