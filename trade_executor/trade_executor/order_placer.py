@@ -49,10 +49,26 @@ async def place_full_sequence(
     except Exception as e:
         raise OrderError("leverage", str(e))
 
+    pos_side: str | None = None
+    if getattr(ex, "_is_hedge_mode", False):
+        pos_side = "LONG" if side == "BUY" else "SHORT"
+
+    entry_params: dict = {"positionSide": pos_side} if pos_side else {}
     try:
-        entry = await ex.create_order(symbol, "MARKET", side, qty, None, {})
+        entry = await ex.create_order(symbol, "MARKET", side, qty, None, entry_params)
     except Exception as e:
-        raise OrderError("entry", str(e))
+        # -4061: hedge mode mismatch — retry with positionSide (mode detection raced)
+        if "4061" in str(e) and not pos_side:
+            pos_side = "LONG" if side == "BUY" else "SHORT"
+            try:
+                entry = await ex.create_order(
+                    symbol, "MARKET", side, qty, None, {"positionSide": pos_side},
+                )
+                ex._is_hedge_mode = True  # cache for SL/TP below
+            except Exception as ee:
+                raise OrderError("entry", str(ee))
+        else:
+            raise OrderError("entry", str(e))
     entry_id = str(entry.get("id"))
     avg = float(entry.get("average") or entry.get("avgPrice") or 0)
     if not avg:
@@ -68,18 +84,22 @@ async def place_full_sequence(
         sl_price = adjust_sl_for_mark(side=entry_side, sl_price=sl_price, mark=mark)
         tp_price = adjust_tp_for_mark(side=entry_side, tp_price=tp_price, mark=mark)
 
+    # In hedge mode, position_side on the original (not flipped) side closes it.
+    pos_side_for_close = pos_side
+
     try:
         sl = await place_algo_stop(
             ex, symbol=symbol, close_side=close_side, trigger_price=sl_price,
-            order_type="STOP_MARKET",
+            order_type="STOP_MARKET", position_side=pos_side_for_close,
         )
         sl_id = algo_id_of(sl)
     except Exception as e:
         log.error("SL placement failed for %s: %s — emergency close", symbol, e)
+        emerg_params: dict = {"reduceOnly": True}
+        if pos_side_for_close:
+            emerg_params = {"positionSide": pos_side_for_close}  # reduceOnly invalid in hedge
         try:
-            await ex.create_order(
-                symbol, "MARKET", close_side, qty, None, {"reduceOnly": True},
-            )
+            await ex.create_order(symbol, "MARKET", close_side, qty, None, emerg_params)
         except Exception as ee:
             log.critical("EMERGENCY CLOSE FAILED %s: %s", symbol, ee)
         raise OrderError("sl", str(e))
@@ -88,7 +108,7 @@ async def place_full_sequence(
     try:
         tp = await place_algo_stop(
             ex, symbol=symbol, close_side=close_side, trigger_price=tp_price,
-            order_type="TAKE_PROFIT_MARKET",
+            order_type="TAKE_PROFIT_MARKET", position_side=pos_side_for_close,
         )
         tp_id = algo_id_of(tp)
     except Exception as e:

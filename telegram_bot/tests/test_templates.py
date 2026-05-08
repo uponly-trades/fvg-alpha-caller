@@ -1,5 +1,5 @@
 from telegram_bot.templates import (
-    fmt_opened, fmt_tp1_trailed, fmt_tp2, fmt_sl, fmt_breakeven,
+    fmt_opened, fmt_tp2, fmt_sl, fmt_breakeven,
     fmt_error, fmt_daily, fmt_balance, fmt_stats, fmt_trade_list,
     fmt_settings, fmt_key_saved, fmt_help,
 )
@@ -15,12 +15,6 @@ def test_fmt_opened_long():
     assert "BTCUSDT" in msg
     assert "LONG" in msg
     assert "108,420" in msg or "108420" in msg
-
-
-def test_fmt_tp1_trailed_mentions_locked_1r():
-    msg = fmt_tp1_trailed(symbol="BTCUSDT", new_sl=109_640.0)
-    assert "TP1" in msg
-    assert "trailed" in msg.lower() or "trail" in msg.lower()
 
 
 def test_fmt_tp2_uses_plus_sign_for_profit():

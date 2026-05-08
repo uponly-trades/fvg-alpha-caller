@@ -62,16 +62,19 @@ async def place_algo_stop(
     close_side: str,
     trigger_price: float,
     order_type: str = "STOP_MARKET",
+    position_side: str | None = None,
 ) -> dict:
     """Place a CONDITIONAL algo order via fapi/v1/algo/futures/newOrderAlgo.
 
     Raises ValueError if trigger_price is not a positive finite number — caller
     must validate upstream because Binance returns -1102 for empty triggerPrice.
+
+    position_side: pass "LONG"/"SHORT" when account is in hedge mode (-4061).
     """
     p = _safe_price(trigger_price)
     if p is None:
         raise ValueError(f"invalid trigger_price={trigger_price!r}")
-    return await ex.fapiPrivatePostAlgoOrder({
+    params: dict = {
         "symbol": symbol,
         "side": close_side,
         "type": order_type,
@@ -79,7 +82,10 @@ async def place_algo_stop(
         "triggerPrice": ex.price_to_precision(symbol, p),
         "closePosition": "true",
         "workingType": "MARK_PRICE",
-    })
+    }
+    if position_side:
+        params["positionSide"] = position_side
+    return await ex.fapiPrivatePostAlgoOrder(params)
 
 
 def algo_id_of(resp: dict) -> str:

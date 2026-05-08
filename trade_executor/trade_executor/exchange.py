@@ -80,12 +80,11 @@ def _is_no_change_error(msg: str) -> bool:
 
 
 async def ensure_account_mode(ex) -> None:
-    """Force account into One-Way + Single-Asset mode so per-symbol ISOLATED works.
+    """Try to force One-Way + Single-Asset mode; detect actual mode after.
 
-    Idempotent + cached per exchange instance. Binance docs:
-      - POST /fapi/v1/multiAssetsMargin (multiAssetsMargin=false) → Single-Asset
-      - POST /fapi/v1/positionSide/dual (dualSidePosition=false) → One-Way
-    Both return -4046 when already in target state — swallow that.
+    Binance refuses to flip these when user has open positions, so attempts
+    can fail silently. After best-effort attempts, query actual mode and
+    stash `ex._is_hedge_mode` so callers can thread `positionSide` correctly.
     """
     key = id(ex)
     if key in _ACCOUNT_MODE_INITIALIZED:
@@ -100,11 +99,23 @@ async def ensure_account_mode(ex) -> None:
     except Exception as e:
         if not _is_no_change_error(str(e)):
             log.warning("positionSide/dual off failed (continuing): %s", e)
+    try:
+        side_resp = await ex.fapiPrivateGetPositionSideDual({})
+        ex._is_hedge_mode = bool(side_resp.get("dualSidePosition"))
+    except Exception:
+        ex._is_hedge_mode = False
+    if getattr(ex, "_is_hedge_mode", False):
+        log.warning("account in hedge mode — orders will include positionSide")
     _ACCOUNT_MODE_INITIALIZED.add(key)
 
 
 async def set_isolated_and_leverage(ex, symbol: str, leverage: int) -> None:
-    """Set leverage and ISOLATED margin. Swallow 'no change needed' (-4046)."""
+    """Set leverage and ISOLATED margin. Swallow 'no change needed' (-4046).
+
+    If account is in Multi-Assets mode (-4168), per-symbol ISOLATED is impossible —
+    fall back to whatever margin mode is current (cross by default). Order still
+    works, just shares margin across positions. Logged once per symbol.
+    """
     await ensure_account_mode(ex)
     await ex.fapiPrivatePostLeverage({"symbol": symbol, "leverage": leverage})
     try:
@@ -113,5 +124,8 @@ async def set_isolated_and_leverage(ex, symbol: str, leverage: int) -> None:
         msg = str(e)
         if _is_no_change_error(msg):
             log.debug("margin type already isolated for %s", symbol)
+            return
+        if "4168" in msg:
+            log.warning("account in Multi-Assets mode — using cross margin for %s", symbol)
             return
         raise

@@ -676,32 +676,6 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
             logger.error("send_v2_alert failed: %s", e)
 
 
-def send_v2_trail_update(
-    symbol: str, trigger_tf: str, previous_sl: float, new_sl: float,
-    direction: int, entry: float = 0.0, initial_sl: float = 0.0,
-) -> None:
-    arrow = "→"
-    pct = (new_sl - previous_sl) / previous_sl * 100 if previous_sl else 0.0
-    title = f"(TRAIL UPDATE | {symbol} | {trigger_tf})"
-    lines = [
-        f"<b>{title}</b>",
-        f"SL: <code>{previous_sl:g}</code> {arrow} <code>{new_sl:g}</code> ({pct:+.2f}%)",
-    ]
-    # R-multiple locked: (new_sl - entry) / initial_risk, signed by direction.
-    initial_risk = abs(entry - initial_sl)
-    if entry and initial_risk > 0:
-        r_locked = (new_sl - entry) / initial_risk
-        if direction == -1:
-            r_locked = -r_locked
-        lines.append(f"Locked: {r_locked:+.2f}R")
-    text = "\n".join(lines)
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    try:
-        requests.post(TELEGRAM_URL, json=payload, timeout=15)
-    except Exception as e:
-        logger.error("send_v2_trail_update failed: %s", e)
-
-
 def send_v2_stopped(symbol: str, trigger_tf: str, direction: int, entry: float, sl_at_stop: float, last_price: float) -> None:
     pnl_pct = (sl_at_stop - entry) / entry * 100 if entry else 0.0
     if direction == -1:

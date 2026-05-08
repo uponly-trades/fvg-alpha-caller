@@ -56,10 +56,14 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
         mark = await fetch_mark_price(ex, symbol)
         if mark:
             trail_price = adjust_sl_for_mark(side=side, sl_price=trail_price, mark=mark)
+        pos_side = None
+        if getattr(ex, "_is_hedge_mode", False):
+            pos_side = "LONG" if is_long else "SHORT"
         try:
             new_sl = await place_algo_stop(
                 ex, symbol=symbol, close_side=close_side,
                 trigger_price=trail_price, order_type="STOP_MARKET",
+                position_side=pos_side,
             )
         except Exception as e:
             log.error("trail SL placement failed for %s/%s: %s", symbol, t["id"], e)

@@ -40,7 +40,6 @@ from telegram import (
     send_trade_recap,
     send_snipe_alert,
     send_v2_alert,
-    send_v2_trail_update,
     send_v2_stopped,
 )
 from snipe import RetestTracker, build_long_snipe, build_retest_short, gate_retest_short, build_htf_fade_short
@@ -326,11 +325,6 @@ class AlphaCaller:
     def _v2_handle_trail(self, symbol: str, tf: str, bars) -> None:
         updates = self.v2_trail.on_bar_close(symbol, tf, bars)
         for u in updates:
-            send_v2_trail_update(
-                symbol=u.symbol, trigger_tf=u.trigger_tf,
-                previous_sl=u.previous_sl, new_sl=u.new_sl, direction=u.direction,
-                entry=u.entry, initial_sl=u.initial_sl,
-            )
             logger.info(
                 "v2 trail %s %s %s | %g -> %g",
                 u.symbol, u.trigger_tf, "long" if u.direction == 1 else "short",

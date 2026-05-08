@@ -73,14 +73,19 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
             sl_price = adjust_sl_for_mark(side=r["direction"], sl_price=sl_price, mark=mark)
             tp_price = adjust_tp_for_mark(side=r["direction"], tp_price=tp_price, mark=mark)
 
+        pos_side = None
+        if getattr(ex, "_is_hedge_mode", False):
+            pos_side = "LONG" if r["direction"] == "long" else "SHORT"
         try:
             sl = await place_algo_stop(
                 ex, symbol=r["symbol"], close_side=close_side,
                 trigger_price=sl_price, order_type="STOP_MARKET",
+                position_side=pos_side,
             )
             tp = await place_algo_stop(
                 ex, symbol=r["symbol"], close_side=close_side,
                 trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
+                position_side=pos_side,
             )
         except Exception as e:
             log.error("resume SL/TP placement failed for %s: %s", r["id"], e)

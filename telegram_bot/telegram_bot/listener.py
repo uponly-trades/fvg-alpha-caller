@@ -4,12 +4,12 @@ import json
 import logging
 
 from telegram_bot.templates import (
-    fmt_breakeven, fmt_error, fmt_opened, fmt_sl, fmt_tp1_trailed, fmt_tp2,
+    fmt_breakeven, fmt_error, fmt_opened, fmt_sl, fmt_tp2,
 )
 
 log = logging.getLogger("listener")
 
-CHANNELS = ("trade_opened", "trade_tp1_trailed", "trade_closed", "error")
+CHANNELS = ("trade_opened", "trade_closed", "error")
 
 
 async def _user_chat(pool, user_id: int) -> int | None:
@@ -43,12 +43,6 @@ async def handle_payload(pool, bot, channel: str, payload: dict) -> None:
             qty=float(t["qty"]), leverage=int(t["leverage"]),
             notional=float(t["notional_usdt"]), margin=float(t["margin_usdt"]),
         ))
-    elif channel == "trade_tp1_trailed":
-        t = await _trade_row(pool, payload["trade_id"])
-        if not t: return
-        chat = await _user_chat(pool, t["user_id"])
-        if not chat: return
-        await bot.send_message(chat, fmt_tp1_trailed(symbol=t["symbol"], new_sl=float(t["sl_current"])))
     elif channel == "trade_closed":
         t = await _trade_row(pool, payload["trade_id"])
         if not t: return

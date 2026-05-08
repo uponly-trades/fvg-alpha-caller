@@ -23,10 +23,6 @@ def fmt_opened(*, symbol, tf, direction, entry, sl, tp1, tp2,
     )
 
 
-def fmt_tp1_trailed(*, symbol: str, new_sl: float) -> str:
-    return f"🎯 TP1 HIT  {symbol}  → SL trailed to {_px(new_sl)} (locked +1R)"
-
-
 def fmt_tp2(*, symbol: str, pnl_usdt: float, pnl_pct: float) -> str:
     return f"✅ TP2 HIT  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})"
 
