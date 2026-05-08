@@ -67,9 +67,9 @@ def build_exchange(api_key: str, api_secret: str, *, proxy_url: str | None) -> c
 
 async def set_isolated_and_leverage(ex, symbol: str, leverage: int) -> None:
     """Set leverage and ISOLATED margin. Swallow 'no change needed' (-4046)."""
-    await ex.fapiPrivate_post_leverage({"symbol": symbol, "leverage": leverage})
+    await ex.fapiPrivatePostLeverage({"symbol": symbol, "leverage": leverage})
     try:
-        await ex.fapiPrivate_post_margintype({"symbol": symbol, "marginType": "ISOLATED"})
+        await ex.fapiPrivatePostMarginType({"symbol": symbol, "marginType": "ISOLATED"})
     except Exception as e:
         msg = str(e)
         if "4046" in msg or "No need to change" in msg:

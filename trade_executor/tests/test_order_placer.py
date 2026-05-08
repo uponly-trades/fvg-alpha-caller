@@ -9,11 +9,11 @@ class FakeOK:
     def __init__(self):
         self.calls = []
 
-    async def fapiPrivate_post_leverage(self, params):
+    async def fapiPrivatePostLeverage(self, params):
         self.calls.append(("leverage", params))
         return {"leverage": params["leverage"]}
 
-    async def fapiPrivate_post_margintype(self, params):
+    async def fapiPrivatePostMarginType(self, params):
         self.calls.append(("marginType", params))
         return {}
 

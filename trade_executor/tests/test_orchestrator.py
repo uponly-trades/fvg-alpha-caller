@@ -30,8 +30,8 @@ class FakeEx:
             {"filterType": "MIN_NOTIONAL", "notional": "5"},
         ]}]}
 
-    async def fapiPrivate_post_leverage(self, params): return {}
-    async def fapiPrivate_post_margintype(self, params): return {}
+    async def fapiPrivatePostLeverage(self, params): return {}
+    async def fapiPrivatePostMarginType(self, params): return {}
 
     async def create_order(self, symbol, type_, side, amount, price=None, params=None):
         if type_ == "MARKET":

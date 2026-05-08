@@ -25,11 +25,11 @@ def test_set_isolated_and_leverage_calls_chain(monkeypatch):
     calls = []
 
     class FakeEx:
-        async def fapiPrivate_post_leverage(self, params):
+        async def fapiPrivatePostLeverage(self, params):
             calls.append(("leverage", params))
             return {"leverage": params["leverage"]}
 
-        async def fapiPrivate_post_margintype(self, params):
+        async def fapiPrivatePostMarginType(self, params):
             calls.append(("marginType", params))
             from ccxt.base.errors import ExchangeError
             raise ExchangeError("-4046 No need to change margin type")
