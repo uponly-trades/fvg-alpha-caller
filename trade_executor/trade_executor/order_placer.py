@@ -49,15 +49,16 @@ async def place_full_sequence(
     close_side = "SELL" if side == "BUY" else "BUY"
 
     try:
-        sl = await ex.fapiPrivatePostOrder({
+        sl = await ex.fapiPrivatePostAlgoOrder({
             "symbol": symbol,
             "side": close_side,
             "type": "STOP_MARKET",
+            "algoType": "CONDITIONAL",
             "stopPrice": ex.price_to_precision(symbol, sl_price),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         })
-        sl_id = str(sl.get("orderId") or sl.get("id"))
+        sl_id = str(sl.get("algoId") or sl.get("orderId") or sl.get("id"))
     except Exception as e:
         log.error("SL placement failed for %s: %s — emergency close", symbol, e)
         try:
@@ -70,15 +71,16 @@ async def place_full_sequence(
 
     tp_id: str | None = None
     try:
-        tp = await ex.fapiPrivatePostOrder({
+        tp = await ex.fapiPrivatePostAlgoOrder({
             "symbol": symbol,
             "side": close_side,
             "type": "TAKE_PROFIT_MARKET",
+            "algoType": "CONDITIONAL",
             "stopPrice": ex.price_to_precision(symbol, tp_price),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
         })
-        tp_id = str(tp.get("orderId") or tp.get("id"))
+        tp_id = str(tp.get("algoId") or tp.get("orderId") or tp.get("id"))
     except Exception as e:
         log.error("TP placement failed for %s: %s — SL still active", symbol, e)
 

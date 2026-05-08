@@ -25,12 +25,13 @@ class FakeOK:
         self.calls.append(("marginType", params))
         return {}
 
-    async def fapiPrivatePostOrder(self, params):
-        self.calls.append(("fapiOrder", params))
+    async def fapiPrivatePostAlgoOrder(self, params):
+        self.calls.append(("algoOrder", params))
+        assert params.get("algoType") == "CONDITIONAL", "algoType must be CONDITIONAL"
         if params["type"] == "STOP_MARKET":
-            return {"orderId": "sl-1", "status": "NEW"}
+            return {"algoId": "sl-1", "algoStatus": "NEW"}
         if params["type"] == "TAKE_PROFIT_MARKET":
-            return {"orderId": "tp-1", "status": "NEW"}
+            return {"algoId": "tp-1", "algoStatus": "NEW"}
         raise AssertionError(f"unexpected type {params['type']}")
 
     def price_to_precision(self, symbol, price):
@@ -44,10 +45,10 @@ class FakeOK:
 
 
 class FakeSLFails(FakeOK):
-    async def fapiPrivatePostOrder(self, params):
+    async def fapiPrivatePostAlgoOrder(self, params):
         if params["type"] == "STOP_MARKET":
             raise Exception("SL placement failed")
-        return await super().fapiPrivatePostOrder(params)
+        return await super().fapiPrivatePostAlgoOrder(params)
 
 
 @pytest.mark.asyncio
