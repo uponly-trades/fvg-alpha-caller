@@ -490,6 +490,11 @@ class SimTradeStore:
     def daily_recap(self, date: Optional[str] = None) -> Dict:
         if date is None:
             date = datetime.now(timezone.utc).date().isoformat()
+
+        live = self._live_daily_recap(date)
+        if live is not None:
+            return live
+
         try:
             with _cursor() as cur:
                 cur.execute("SELECT * FROM sim_trades WHERE date = %s", (date,))
@@ -540,12 +545,113 @@ class SimTradeStore:
         recent = sorted(records, key=lambda r: r.get("created_at", 0), reverse=True)[:5]
         return {
             "date": date,
+            "source": "sim",
             "open": open_count,
             "tp1": tp1_count,
             "win": win_count,
             "loss": loss_count,
             "closed_winrate": winrate,
             "by_trigger": by_trigger,
+            "by_symbol": by_symbol,
+            "recent": recent,
+        }
+
+    def _live_daily_recap(self, date: str) -> Optional[Dict]:
+        """Build production recap from live execution tables.
+
+        v2 live trading no longer writes sim_trades, so the old recap was empty.
+        Prefer user_trades/user_daily_pnl when those tables exist; return None only
+        for legacy/test databases that have not run multi-user migrations.
+        """
+        try:
+            with _cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = 'user_trades'
+                    ) AS has_live
+                    """
+                )
+                row = cur.fetchone()
+                if not row or not row.get("has_live"):
+                    return None
+
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM user_trades
+                    WHERE opened_at >= (EXTRACT(EPOCH FROM %s::date) * 1000)::bigint
+                      AND opened_at <  (EXTRACT(EPOCH FROM (%s::date + INTERVAL '1 day')) * 1000)::bigint
+                    ORDER BY opened_at DESC
+                    """,
+                    (date, date),
+                )
+                records = [dict(r) for r in cur.fetchall()]
+
+                cur.execute(
+                    """
+                    SELECT
+                      COALESCE(SUM(realized_pnl_usdt), 0) AS pnl_usdt,
+                      COALESCE(SUM(trades_count), 0) AS trades_count,
+                      COALESCE(SUM(wins_count), 0) AS wins_count,
+                      CASE
+                        WHEN SUM(trades_count) > 0
+                        THEN SUM(wins_count)::float / SUM(trades_count)::float * 100
+                        ELSE 0
+                      END AS closed_winrate
+                    FROM user_daily_pnl
+                    WHERE day = %s::date
+                    """,
+                    (date,),
+                )
+                day = dict(cur.fetchone() or {})
+        except Exception as e:
+            logger.error("live_daily_recap failed: %s", e)
+            return None
+
+        open_statuses = {"opening", "open", "tp1_trailed"}
+        win_statuses = {"closed_tp2", "closed_breakeven"}
+        loss_statuses = {"closed_sl"}
+        open_count = sum(1 for r in records if r.get("status") in open_statuses)
+        tp1_count = sum(1 for r in records if r.get("status") == "tp1_trailed")
+        win_count = int(day.get("wins_count") or sum(1 for r in records if r.get("status") in win_statuses))
+        closed_count = int(day.get("trades_count") or sum(1 for r in records if r.get("status") in win_statuses | loss_statuses | {"manual_close"}))
+        loss_count = max(0, closed_count - win_count)
+        error_count = sum(1 for r in records if str(r.get("status", "")).startswith("error_"))
+        winrate = round(float(day.get("closed_winrate") or 0), 1) if closed_count else 0.0
+
+        by_symbol: Dict[str, Dict] = {}
+        for r in records:
+            sym = r.get("symbol", "?")
+            if sym not in by_symbol:
+                by_symbol[sym] = {"win": 0, "loss": 0, "tp1": 0, "open": 0, "error": 0, "pnl_usdt": 0.0}
+            status = r.get("status")
+            pnl = float(r.get("pnl_usdt") or 0.0)
+            by_symbol[sym]["pnl_usdt"] += pnl
+            if status in win_statuses:
+                by_symbol[sym]["win"] += 1
+            elif status in loss_statuses or status == "manual_close":
+                by_symbol[sym]["loss"] += 1
+            elif status == "tp1_trailed":
+                by_symbol[sym]["tp1"] += 1
+            elif status in open_statuses:
+                by_symbol[sym]["open"] += 1
+            elif str(status).startswith("error_"):
+                by_symbol[sym]["error"] += 1
+
+        recent = records[:5]
+        return {
+            "date": date,
+            "source": "live",
+            "open": open_count,
+            "tp1": tp1_count,
+            "win": win_count,
+            "loss": loss_count,
+            "error": error_count,
+            "closed_winrate": winrate,
+            "pnl_usdt": float(day.get("pnl_usdt") or 0.0),
+            "by_trigger": {},
             "by_symbol": by_symbol,
             "recent": recent,
         }

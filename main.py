@@ -59,7 +59,10 @@ class AlphaCaller:
         for name, (start_hour, end_hour) in sessions.items():
             if start_hour <= now.hour < end_hour:
                 key = f"{now.date().isoformat()}-{name}"
-                if self.sim_store.mark_recap_sent(key):
+                marker = getattr(self.sim_store, "mark_recap_sent", None)
+                should_send = marker(key) if marker else (getattr(self, "_last_recap_key", None) != key)
+                if should_send:
+                    self._last_recap_key = key
                     send_trade_recap(name, self.sim_store.daily_recap(now.date().isoformat()))
                 return
 

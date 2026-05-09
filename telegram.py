@@ -449,16 +449,27 @@ def send_trade_recap(session_name: str, recap: dict) -> bool:
     closed = win_c + loss_c
 
     wr_emoji = "🔥" if wr >= 70 else "✅" if wr >= 50 else "⚠️" if wr >= 30 else "❌"
-    total_r = win_c * 2.0 + tp1_c * 1.0 - loss_c * 1.0
-    r_sign = "+" if total_r >= 0 else ""
-    r_emoji = "🟢" if total_r > 0 else "🔴" if total_r < 0 else "⚪"
-
-    lines = [
-        f"📊 <b>Trade Recap — {session_name}  |  {date_str}</b>",
-        "",
-        f"⏳ {open_c} open   🎯 {tp1_c} tp1   ✅ {win_c} win   ❌ {loss_c} loss",
-        f"WR {wr_emoji} <b>{wr}%</b>  ({closed} closed)   {r_emoji} <b>{r_sign}{total_r:.1f}R</b>",
-    ]
+    if recap.get("source") == "live":
+        pnl = float(recap.get("pnl_usdt") or 0.0)
+        pnl_sign = "+" if pnl >= 0 else ""
+        pnl_emoji = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+        err_c = int(recap.get("error") or 0)
+        lines = [
+            f"📊 <b>Live Trade Recap — {session_name}  |  {date_str}</b>",
+            "",
+            f"⏳ {open_c} open   🎯 {tp1_c} trailed   ✅ {win_c} win   ❌ {loss_c} loss   ⚠️ {err_c} error",
+            f"WR {wr_emoji} <b>{wr}%</b>  ({closed} closed)   {pnl_emoji} <b>{pnl_sign}${pnl:.2f}</b>",
+        ]
+    else:
+        total_r = win_c * 2.0 + tp1_c * 1.0 - loss_c * 1.0
+        r_sign = "+" if total_r >= 0 else ""
+        r_emoji = "🟢" if total_r > 0 else "🔴" if total_r < 0 else "⚪"
+        lines = [
+            f"📊 <b>Trade Recap — {session_name}  |  {date_str}</b>",
+            "",
+            f"⏳ {open_c} open   🎯 {tp1_c} tp1   ✅ {win_c} win   ❌ {loss_c} loss",
+            f"WR {wr_emoji} <b>{wr}%</b>  ({closed} closed)   {r_emoji} <b>{r_sign}{total_r:.1f}R</b>",
+        ]
 
     # Per-trigger breakdown
     by_trigger = recap.get("by_trigger", {})
@@ -490,17 +501,29 @@ def send_trade_recap(session_name: str, recap: dict) -> bool:
             t = stats.get("tp1", 0)
             n = w + l
             wr_s = round(w / n * 100) if n else 0
-            r_s = w * 2.0 + t * 1.0 - l * 1.0
-            r_s_str = f"{'+' if r_s >= 0 else ''}{r_s:.1f}R"
             icon = "🔥" if wr_s >= 70 else "✅" if wr_s >= 50 else "⚠️" if n > 0 else "─"
             short_sym = sym.replace("USDT", "")
-            lines.append(f"{icon} <b>{short_sym:<8}</b> {w}W {l}L {wr_s}%  {r_s_str}")
+            if recap.get("source") == "live":
+                pnl_s = float(stats.get("pnl_usdt") or 0.0)
+                pnl_s_str = f"{'+' if pnl_s >= 0 else ''}${pnl_s:.2f}"
+                err_s = int(stats.get("error") or 0)
+                err_part = f" {err_s}E" if err_s else ""
+                lines.append(f"{icon} <b>{short_sym:<8}</b> {w}W {l}L {wr_s}%  {pnl_s_str}{err_part}")
+            else:
+                r_s = w * 2.0 + t * 1.0 - l * 1.0
+                r_s_str = f"{'+' if r_s >= 0 else ''}{r_s:.1f}R"
+                lines.append(f"{icon} <b>{short_sym:<8}</b> {w}W {l}L {wr_s}%  {r_s_str}")
 
     # Recent trades (last 5)
     recent = recap.get("recent", [])
     if recent:
         lines.extend(["", "── Recent ───────────────────────"])
-        status_icon = {"win": "✅", "loss": "❌", "tp1_hit": "🎯", "open": "⏳"}
+        status_icon = {
+            "win": "✅", "loss": "❌", "tp1_hit": "🎯", "open": "⏳",
+            "opening": "⏳", "tp1_trailed": "🎯", "closed_tp2": "✅",
+            "closed_breakeven": "✅", "closed_sl": "❌", "manual_close": "✋",
+            "error_open": "⚠️", "error_no_sl": "⚠️", "error_restart": "⚠️",
+        }
         dir_icon = {"long": "🟢", "short": "🔴"}
         for r in recent:
             d_icon = dir_icon.get(r.get("direction", ""), "❓")
