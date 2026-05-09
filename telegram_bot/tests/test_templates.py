@@ -93,8 +93,7 @@ def test_fmt_stats_includes_config_block():
     })
     assert "Config" in msg
     assert "10x" in msg
-    assert "Risk target" in msg
-    assert "$5.00" in msg
+    assert "Risk 1.50% equity" in msg
 
 
 def test_fmt_daily_summary():
@@ -138,18 +137,15 @@ def test_fmt_settings_row_mapping():
     row = {
         "enabled": True,
         "risk_pct": 2.0,
-        "leverage": 5,
+        "leverage": 10,
         "max_concurrent": 3,
         "daily_loss_cap_pct": 6.0,
-        "fixed_risk_usdt": 5.0,
-        "max_notional_usdt": 250.0,
         "api_key_tail": "TAIL",
     }
     msg = fmt_settings(row)
     assert "enabled" in msg
-    assert "5x" in msg
-    assert "Risk target" in msg
-    assert "$250.00" in msg
+    assert "10x" in msg
+    assert "Risk: 2.00% equity" in msg
     assert "TAIL" in msg
 
 

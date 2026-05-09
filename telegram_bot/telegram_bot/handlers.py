@@ -119,7 +119,7 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="▶️ Resume", callback_data="resume"),
         ],
         [
-            InlineKeyboardButton(text="📉 Risk $/Trade", callback_data="setrisk"),
+            InlineKeyboardButton(text="📉 Risk % Equity", callback_data="setrisk"),
             InlineKeyboardButton(text="⚡ Set Leverage", callback_data="setlev"),
         ],
         [
@@ -128,7 +128,6 @@ def main_menu() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🎯 Set RR", callback_data="setrr"),
-            InlineKeyboardButton(text="🧢 Max Notional Cap", callback_data="setnotional"),
         ],
     ])
 
@@ -361,17 +360,17 @@ def register_handlers(dp: Dispatcher, pool) -> None:
 
     _NUMERIC_CONFIG = {
         "setrisk":  dict(
-            field="fixed_risk_usdt", min_v=0.5, max_v=1000, integer=False,
-            label="Risk target", hint="0.5–1000 USDT", suffix=" USDT",
+            field="risk_pct", min_v=0.1, max_v=20, integer=False,
+            label="Risk % equity", hint="0.1–20%", suffix="%",
             howto=(
-                "📉 <b>Risk target</b> — target win/loss per trade pada RR 1:1.\n"
-                "Bot auto-adjust notional dari jarak Entry → SL.\n"
-                "Contoh: isi 5 berarti TP/SL 1R sekitar ±$5, kecuali kena max notional cap."
+                "📉 <b>Risk % Equity</b> — target win/loss per trade dari total equity Binance.\n"
+                "Contoh: equity $100 dan risk 3% berarti SL ≈ -$3, TP 1:1 ≈ +$3.\n"
+                "Bot otomatis hitung qty dari jarak Entry → SL; notional/margin tidak perlu dikira-kira."
             ),
         ),
         "setlev":   dict(
-            field="leverage", min_v=5, max_v=20, integer=True,
-            label="Leverage", hint="5–20", suffix="x",
+            field="leverage", min_v=10, max_v=15, integer=True,
+            label="Leverage", hint="10–15", suffix="x",
             howto=(
                 "⚡ <b>Leverage</b> — multiplier margin di Binance Futures.\n"
                 "Bot auto-set <b>ISOLATED</b> mode di symbol-nya.\n"
@@ -404,15 +403,6 @@ def register_handlers(dp: Dispatcher, pool) -> None:
                 "🎯 <b>RR ratio</b> — target TP berdasarkan jarak Entry → SL.\n"
                 "1 = TP 1:1, 1.5 = TP 1.5:1, 2 = TP 2:1.\n"
                 "Minimal 1 supaya reward tidak lebih kecil dari risk."
-            ),
-        ),
-        "setnotional": dict(
-            field="max_notional_usdt", min_v=5, max_v=100000, integer=False,
-            label="Max notional cap", hint="≥5 USDT", suffix=" USDT",
-            howto=(
-                "🧢 <b>Max notional cap</b> — batas maksimal size posisi.\n"
-                "Bot tetap target Risk $, tapi kalau SL terlalu dekat dan butuh size besar, "
-                "notional dipotong sampai cap ini supaya tidak over-size."
             ),
         ),
     }
@@ -464,9 +454,10 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     async def on_setrr_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setrr")
 
     @dp.message(Command("setnotional"))
-    async def on_setnotional_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setnotional")
+    async def on_setnotional_cmd(m: Message, state: FSMContext):
+        await m.answer("Notional cap sudah dihapus. Pakai /setrisk untuk Risk % Equity.")
 
-    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr", "setnotional"}))
+    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr"}))
     async def cb_numeric(cb: CallbackQuery, state: FSMContext):
         await _ask_numeric(cb, state, cb.data)
 
@@ -482,12 +473,7 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             raw = float((m.text or "").strip())
             if raw < cfg["min_v"] or raw > cfg["max_v"]:
                 raise ValueError(f"must be {cfg['hint']}")
-            if key == "setnotional":
-                value = None if raw == 0 else raw
-                if value is not None and value < 5:
-                    raise ValueError("must be 0=off or ≥5 USDT")
-            else:
-                value = int(raw) if cfg["integer"] else raw
+            value = int(raw) if cfg["integer"] else raw
         except (ValueError, TypeError) as e:
             await _edit_or_reply(
                 m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,

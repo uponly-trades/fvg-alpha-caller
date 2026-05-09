@@ -63,12 +63,6 @@ async def signal_loop(pool):
                             max_concurrent=int(u["max_concurrent"]),
                             daily_loss_cap_pct=float(u["daily_loss_cap_pct"]),
                             rr_ratio=float(u.get("rr_ratio") or 1.0),
-                            fixed_notional_usdt=(
-                                float(u["fixed_notional_usdt"])
-                                if u.get("fixed_notional_usdt") is not None else None
-                            ),
-                            fixed_risk_usdt=float(u.get("fixed_risk_usdt") or 5.0),
-                            max_notional_usdt=float(u.get("max_notional_usdt") or 250.0),
                         )
                         await ex.close()
                     except binance_limit.BinanceBannedError as e:

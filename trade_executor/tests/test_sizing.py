@@ -36,70 +36,65 @@ def test_qty_rounded_to_step():
     assert math.isclose(res.qty, 0.40, abs_tol=1e-9)
 
 
-def test_compute_size_fixed_notional_ignores_risk_percent():
+def test_compute_size_legacy_fixed_notional_does_not_override_risk_percent():
     meta = SymbolMeta(step_size=0.001, min_notional=5.0)
     res = compute_size(
         balance=100, risk_pct=10, entry=100, sl=95, leverage=5,
         meta=meta, fixed_notional_usdt=25,
     )
-    assert res.notional_usdt == pytest.approx(25.0)
-    assert res.qty == pytest.approx(0.25)
-    assert res.margin_usdt == pytest.approx(5.0)
+    assert res.notional_usdt == pytest.approx(200.0)
+    assert res.qty == pytest.approx(2.0)
+    assert res.margin_usdt == pytest.approx(40.0)
 
 
-def test_compute_size_fixed_notional_below_exchange_min_skips():
+def test_compute_size_legacy_fixed_notional_below_min_is_ignored():
     meta = SymbolMeta(step_size=0.001, min_notional=5.0)
     res = compute_size(
         balance=100, risk_pct=2, entry=100, sl=95, leverage=5,
         meta=meta, fixed_notional_usdt=4.99,
     )
-    assert res.skip_reason == "min_notional"
-    assert res.notional_usdt == pytest.approx(4.99)
+    assert res.skip_reason is None
+    assert res.notional_usdt == pytest.approx(40.0)
 
 
-def test_compute_size_fixed_risk_targets_dollar_pnl():
+def test_compute_size_percent_risk_targets_equity_pnl_at_one_percent_sl():
     meta = SymbolMeta(step_size=0.001, min_notional=5.0)
     res = compute_size(
-        balance=100, risk_pct=1, entry=100, sl=99, leverage=10,
-        meta=meta, fixed_risk_usdt=5, max_notional_usdt=1000,
+        balance=100, risk_pct=3, entry=100, sl=99, leverage=10, meta=meta,
     )
-    assert res.notional_usdt == pytest.approx(500.0)
-    assert res.margin_usdt == pytest.approx(50.0)
-    assert res.target_risk_usdt == pytest.approx(5.0)
-    assert res.expected_pnl_1r_usdt == pytest.approx(5.0)
+    assert res.notional_usdt == pytest.approx(300.0)
+    assert res.margin_usdt == pytest.approx(30.0)
+    assert res.target_risk_usdt == pytest.approx(3.0)
+    assert res.expected_pnl_1r_usdt == pytest.approx(3.0)
     assert res.capped is False
 
 
-def test_compute_size_fixed_risk_cap_skips_instead_of_reducing_pnl():
+def test_compute_size_percent_risk_keeps_dollar_risk_for_wider_sl():
     meta = SymbolMeta(step_size=0.001, min_notional=5.0)
     res = compute_size(
-        balance=100, risk_pct=1, entry=100, sl=99.5, leverage=10,
-        meta=meta, fixed_risk_usdt=5, max_notional_usdt=250,
+        balance=100, risk_pct=3, entry=100, sl=97, leverage=10, meta=meta,
     )
-    assert res.skip_reason == "risk_cap"
-    assert res.notional_usdt == pytest.approx(250.0)
-    assert res.margin_usdt == pytest.approx(0.0)
-    assert res.target_risk_usdt == pytest.approx(5.0)
-    assert res.expected_pnl_1r_usdt == pytest.approx(1.25)
-    assert res.capped is True
+    assert res.notional_usdt == pytest.approx(100.0)
+    assert res.margin_usdt == pytest.approx(10.0)
+    assert res.target_risk_usdt == pytest.approx(3.0)
+    assert res.expected_pnl_1r_usdt == pytest.approx(3.0)
 
 
-def test_compute_size_fixed_risk_takes_priority_over_fixed_notional():
+def test_compute_size_ignores_legacy_fixed_risk_and_notional_params():
     meta = SymbolMeta(step_size=0.001, min_notional=5.0)
     res = compute_size(
-        balance=100, risk_pct=1, entry=100, sl=99, leverage=10,
-        meta=meta, fixed_notional_usdt=25, fixed_risk_usdt=5, max_notional_usdt=1000,
+        balance=100, risk_pct=3, entry=100, sl=99, leverage=10,
+        meta=meta, fixed_notional_usdt=25, fixed_risk_usdt=5, max_notional_usdt=50,
     )
-    assert res.notional_usdt == pytest.approx(500.0)
-    assert res.expected_pnl_1r_usdt == pytest.approx(5.0)
+    assert res.notional_usdt == pytest.approx(300.0)
+    assert res.expected_pnl_1r_usdt == pytest.approx(3.0)
 
 
-def test_compute_size_fixed_risk_below_exchange_min_skips():
+def test_compute_size_percent_risk_below_exchange_min_skips():
     meta = SymbolMeta(step_size=0.001, min_notional=300.0)
     res = compute_size(
-        balance=100, risk_pct=1, entry=100, sl=95, leverage=10,
-        meta=meta, fixed_risk_usdt=5, max_notional_usdt=1000,
+        balance=100, risk_pct=3, entry=100, sl=95, leverage=10, meta=meta,
     )
     assert res.skip_reason == "min_notional"
-    assert res.notional_usdt == pytest.approx(100.0)
+    assert res.notional_usdt == pytest.approx(60.0)
     assert res.capped is False

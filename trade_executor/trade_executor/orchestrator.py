@@ -121,8 +121,7 @@ async def handle_signal_for_user(
         live_entry = await fetch_mark_price(ex, symbol) or entry
         size = compute_size(
             balance=float(balance), risk_pct=risk_pct, entry=live_entry, sl=sl,
-            leverage=leverage, meta=meta, fixed_notional_usdt=fixed_notional_usdt,
-            fixed_risk_usdt=fixed_risk_usdt, max_notional_usdt=max_notional_usdt,
+            leverage=leverage, meta=meta,
         )
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",

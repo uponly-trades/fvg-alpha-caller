@@ -45,29 +45,9 @@ def compute_size(
     if sl_distance_pct <= 0:
         return SizeResult(skip_reason="zero_sl_distance")
 
-    target_risk_usdt = 0.0
+    target_risk_usdt = balance * risk_pct / 100
     capped = False
-    if fixed_risk_usdt is not None and fixed_risk_usdt > 0:
-        target_risk_usdt = fixed_risk_usdt
-        raw_notional = fixed_risk_usdt / (sl_distance_pct / 100)
-        cap = max_notional_usdt if max_notional_usdt is not None and max_notional_usdt > 0 else raw_notional
-        notional = min(raw_notional, cap)
-        capped = notional < raw_notional
-        if capped:
-            expected_pnl_1r_usdt = notional * (sl_distance_pct / 100)
-            return SizeResult(
-                notional_usdt=notional,
-                target_risk_usdt=target_risk_usdt,
-                expected_pnl_1r_usdt=expected_pnl_1r_usdt,
-                capped=True,
-                skip_reason="risk_cap",
-            )
-    elif fixed_notional_usdt is not None and fixed_notional_usdt > 0:
-        notional = fixed_notional_usdt
-        target_risk_usdt = notional * (sl_distance_pct / 100)
-    else:
-        target_risk_usdt = balance * risk_pct / 100
-        notional = target_risk_usdt / (sl_distance_pct / 100)
+    notional = target_risk_usdt / (sl_distance_pct / 100)
 
     expected_pnl_1r_usdt = notional * (sl_distance_pct / 100)
     if notional < meta.min_notional:

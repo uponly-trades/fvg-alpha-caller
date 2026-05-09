@@ -91,7 +91,7 @@ async def test_orchestrator_writes_open_trade(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_applies_user_rr_and_fixed_risk_cap(monkeypatch):
+async def test_orchestrator_applies_user_rr_and_percent_risk(monkeypatch):
     pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
     try:
         async with pool.acquire() as conn:
@@ -105,8 +105,7 @@ async def test_orchestrator_applies_user_rr_and_fixed_risk_cap(monkeypatch):
         result = await handle_signal_for_user(
             pool, user_id=uid, signal=signal, ex=FakeExShort(),
             risk_pct=2.0, leverage=5, max_concurrent=3, daily_loss_cap_pct=6.0,
-            rr_ratio=1.5, fixed_notional_usdt=25.0,
-            fixed_risk_usdt=5.0, max_notional_usdt=30.0,
+            rr_ratio=1.5,
         )
         assert result.placed is True
 
@@ -114,8 +113,8 @@ async def test_orchestrator_applies_user_rr_and_fixed_risk_cap(monkeypatch):
             row = await conn.fetchrow("SELECT * FROM user_trades WHERE id=$1", f"{uid}-dec-rr-fixed")
         assert row["tp1"] == pytest.approx(85.0)
         assert row["tp2"] == pytest.approx(85.0)
-        # Fixed-risk mode takes priority, but max_notional caps tight-SL sizing.
-        assert row["notional_usdt"] == pytest.approx(30.0)
-        assert row["margin_usdt"] == pytest.approx(6.0)
+        # Percent-equity risk: $2 target risk / 10% SL = $20 notional.
+        assert row["notional_usdt"] == pytest.approx(20.0)
+        assert row["margin_usdt"] == pytest.approx(4.0)
     finally:
         await pool.close()

@@ -134,7 +134,6 @@ _SKIP_REASON_TEXT = {
     "bad_levels": "entry/SL invalid",
     "zero_sl_distance": "jarak SL nol",
     "qty_zero": "qty terlalu kecil setelah rounding",
-    "risk_cap": "SL terlalu lebar untuk Risk $ dan Max Notional",
 }
 
 
@@ -144,8 +143,6 @@ def fmt_trade_skipped(*, symbol: str = "", reason: str, decision_id: str = "") -
     extra = ""
     if reason == "min_notional":
         extra = " — size di bawah minimum Binance"
-    elif reason == "risk_cap":
-        extra = " — naikkan Max Notional atau tunggu SL lebih sempit"
     elif reason == "daily_cap_hit":
         extra = " — /resume saja tidak cukup kalau PnL harian masih lewat cap"
     return f"⚠️ SKIP{sym}: {label}{extra}"
@@ -207,11 +204,10 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
     maxc    = int(summary.get("max_concurrent", 3))
     dloss   = float(summary.get("daily_loss_cap_pct", 5))
     rr      = float(summary.get("rr_ratio", 1.0) or 1.0)
-    fixed_risk = float(summary.get("fixed_risk_usdt", 5.0) or 5.0)
-    max_notional = float(summary.get("max_notional_usdt", 250.0) or 250.0)
+    risk_pct = float(summary.get("risk_pct", 3.0) or 3.0)
     key_tail = summary.get("api_key_tail") or "—"
     settings_line = (
-        f"⚙️ Risk target <b>${fixed_risk:.2f}</b> / trade  |  Max notional <b>${max_notional:.2f}</b>\n"
+        f"⚙️ Risk <b>{risk_pct:.2f}% equity</b> / trade\n"
         f"🎯 RR <b>{rr:.2f}:1</b>  |  Lev <b>{lev}x</b>  |  Max <b>{maxc}</b> trades  |  Daily cap <b>{dloss:.1f}%</b>"
     )
 
@@ -243,13 +239,11 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
     bal_total = float(bal.get("total", 0) or 0)
     est_lines = ""
     if bal_total > 0:
-        margin_cap = max_notional / max(1, lev)
-        max_concurrent_margin = margin_cap * maxc
+        est = _estimate_trade_size(bal_total, risk_pct, lev, sl_distance_pct=1.0)
         est_lines = (
             f"\n📐 <b>Auto Size</b>\n"
-            f"  Target win/loss @1R: <b>±${fixed_risk:.2f}</b>\n"
-            f"  Cap: notional <b>${max_notional:.2f}</b> / margin <b>${margin_cap:.2f}</b>\n"
-            f"  Max exposure (×{maxc}): margin <b>${max_concurrent_margin:.2f}</b>"
+            f"  Expected @1R: <b>±${est['risk']:.2f}</b> ({risk_pct:.2f}% equity)\n"
+            f"  Example SL 1%: notional <b>${est['notional']:.2f}</b> / margin <b>${est['margin']:.2f}</b>"
         )
 
     return (
@@ -287,12 +281,10 @@ def fmt_settings(row) -> str:
     if not row:
         return "Send /start first."
     state = "enabled" if row["enabled"] else "paused"
-    fixed_risk = float(row.get("fixed_risk_usdt") or 5.0)
-    max_notional = float(row.get("max_notional_usdt") or 250.0)
+    risk_pct = float(row.get("risk_pct") or 3.0)
     return (
         f"⚙️ <b>Settings</b> ({state})\n"
-        f"Risk target: ${fixed_risk:.2f} per trade\n"
-        f"Max notional: ${max_notional:.2f}\n"
+        f"Risk: {risk_pct:.2f}% equity per trade\n"
         f"RR ratio: {float(row.get('rr_ratio') or 1.0):.2f}:1\n"
         f"Leverage: {int(row['leverage'])}x\n"
         f"Max trades: {int(row['max_concurrent'])}\n"
@@ -327,9 +319,7 @@ def fmt_stats(s: dict) -> str:
     maxc    = int(s.get("max_concurrent", 0) or 0)
     dloss   = float(s.get("daily_loss_cap_pct", 0) or 0)
     rr      = float(s.get("rr_ratio", 1.0) or 1.0)
-    fixed_risk = float(s.get("fixed_risk_usdt", 5.0) or 5.0)
-    max_notional = float(s.get("max_notional_usdt", 250.0) or 250.0)
-    sizing = f"Risk target ${fixed_risk:.2f} / cap ${max_notional:.2f}"
+    sizing = f"Risk {risk:.2f}% equity"
     state   = "✅ Active" if enabled else "⏸ Paused"
     cfg_block = (
         "⚙️ <b>Config</b>\n"
