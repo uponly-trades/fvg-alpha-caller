@@ -109,23 +109,24 @@ async def ensure_account_mode(ex) -> None:
     _ACCOUNT_MODE_INITIALIZED.add(key)
 
 
-async def set_isolated_and_leverage(ex, symbol: str, leverage: int) -> None:
-    """Set leverage and ISOLATED margin. Swallow 'no change needed' (-4046).
+async def set_isolated_and_leverage(ex, symbol: str, leverage: int, margin_mode: str = "ISOLATED") -> None:
+    """Set leverage and selected margin mode. Swallow 'no change needed' (-4046)."""
+    margin_mode = (margin_mode or "ISOLATED").upper()
+    if margin_mode == "CROSS":
+        margin_mode = "CROSSED"
+    if margin_mode not in {"ISOLATED", "CROSSED"}:
+        raise ValueError(f"invalid margin_mode={margin_mode}")
 
-    If account is in Multi-Assets mode (-4168), per-symbol ISOLATED is impossible —
-    fall back to whatever margin mode is current (cross by default). Order still
-    works, just shares margin across positions. Logged once per symbol.
-    """
     await ensure_account_mode(ex)
     await ex.fapiPrivatePostLeverage({"symbol": symbol, "leverage": leverage})
     try:
-        await ex.fapiPrivatePostMarginType({"symbol": symbol, "marginType": "ISOLATED"})
+        await ex.fapiPrivatePostMarginType({"symbol": symbol, "marginType": margin_mode})
     except Exception as e:
         msg = str(e)
         if _is_no_change_error(msg):
-            log.debug("margin type already isolated for %s", symbol)
+            log.debug("margin type already %s for %s", margin_mode, symbol)
             return
         if "4168" in msg:
-            log.warning("account in Multi-Assets mode — using cross margin for %s", symbol)
+            log.warning("account in Multi-Assets mode — using current margin mode for %s", symbol)
             return
         raise

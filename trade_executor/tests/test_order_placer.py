@@ -79,6 +79,19 @@ async def test_full_sequence_returns_ids_and_avg():
     sl_call = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "STOP_MARKET"][0]
     assert sl_call[1].get("quantity") == "0.0100"
     assert sl_call[1].get("closePosition") != "true"
+    margin_call = [c for c in ex.calls if c[0] == "marginType"][0]
+    assert margin_call[1]["marginType"] == "ISOLATED"
+
+
+@pytest.mark.asyncio
+async def test_full_sequence_passes_crossed_margin_mode():
+    ex = FakeOK()
+    await place_full_sequence(
+        ex, symbol="BTCUSDT", side="BUY", qty=0.01,
+        sl_price=95.0, tp_price=110.0, leverage=5, margin_mode="CROSSED",
+    )
+    margin_call = [c for c in ex.calls if c[0] == "marginType"][0]
+    assert margin_call[1]["marginType"] == "CROSSED"
 
 
 @pytest.mark.asyncio

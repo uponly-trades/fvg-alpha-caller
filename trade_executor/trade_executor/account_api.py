@@ -98,7 +98,7 @@ async def account_summary(pool: asyncpg.Pool, *, telegram_id: int) -> dict[str, 
             """
             SELECT id, enabled, api_key_tail, binance_api_key_enc,
                    binance_api_secret_enc, risk_pct, leverage, max_concurrent,
-                   daily_loss_cap_pct, rr_ratio, fixed_notional_usdt,
+                   daily_loss_cap_pct, rr_ratio, margin_mode, fixed_notional_usdt,
                    paused_until, pause_reason
             FROM users WHERE telegram_id=$1
             """,
@@ -117,6 +117,7 @@ async def account_summary(pool: asyncpg.Pool, *, telegram_id: int) -> dict[str, 
         "max_concurrent": int(row["max_concurrent"]),
         "daily_loss_cap_pct": float(row["daily_loss_cap_pct"]),
         "rr_ratio": float(row["rr_ratio"] or 1.0),
+        "margin_mode": row["margin_mode"] or "ISOLATED",
         "fixed_notional_usdt": (
             float(row["fixed_notional_usdt"])
             if row["fixed_notional_usdt"] is not None else None

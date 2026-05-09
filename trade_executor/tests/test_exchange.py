@@ -52,6 +52,32 @@ def test_set_isolated_and_leverage_calls_chain(monkeypatch):
     assert stages == ["multiAssets", "posSide", "leverage", "marginType"]
     assert calls[0][1] == {"multiAssetsMargin": "false"}
     assert calls[1][1] == {"dualSidePosition": "false"}
+    assert calls[3][1] == {"symbol": "BTCUSDT", "marginType": "ISOLATED"}
+
+
+def test_set_crossed_and_leverage_calls_crossed_margin_type(monkeypatch):
+    from trade_executor import exchange as exmod
+    exmod._ACCOUNT_MODE_INITIALIZED.clear()
+    calls = []
+
+    class FakeEx:
+        async def fapiPrivatePostMultiAssetsMargin(self, params):
+            calls.append(("multiAssets", params))
+
+        async def fapiPrivatePostPositionSideDual(self, params):
+            calls.append(("posSide", params))
+
+        async def fapiPrivatePostLeverage(self, params):
+            calls.append(("leverage", params))
+            return {"leverage": params["leverage"]}
+
+        async def fapiPrivatePostMarginType(self, params):
+            calls.append(("marginType", params))
+            return {}
+
+    import asyncio
+    asyncio.run(exmod.set_isolated_and_leverage(FakeEx(), "BTCUSDT", 10, "CROSSED"))
+    assert calls[-1] == ("marginType", {"symbol": "BTCUSDT", "marginType": "CROSSED"})
 
 
 def test_ensure_account_mode_idempotent_per_exchange():

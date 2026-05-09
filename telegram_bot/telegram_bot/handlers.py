@@ -128,6 +128,7 @@ def main_menu() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="🎯 Set RR", callback_data="setrr"),
+            InlineKeyboardButton(text="🧱 Margin Mode", callback_data="setmargin"),
         ],
     ])
 
@@ -373,7 +374,7 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             label="Leverage", hint="10–15", suffix="x",
             howto=(
                 "⚡ <b>Leverage</b> — multiplier margin di Binance Futures.\n"
-                "Bot auto-set <b>ISOLATED</b> mode di symbol-nya.\n"
+                "Bot pakai margin mode yang kamu pilih: <b>ISOLATED</b> atau <b>CROSS</b>.\n"
                 "Tidak mengubah risk per trade (risk % yang nentuin loss). "
                 "Lev tinggi = margin lebih kecil, liquidation lebih dekat."
             ),
@@ -456,6 +457,50 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     @dp.message(Command("setnotional"))
     async def on_setnotional_cmd(m: Message, state: FSMContext):
         await m.answer("Notional cap sudah dihapus. Pakai /setrisk untuk Risk % Equity.")
+
+    async def _margin_mode_text(telegram_id: int) -> str:
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=telegram_id)
+        cur = (row["margin_mode"] if row else "ISOLATED") or "ISOLATED"
+        return (
+            "🧱 <b>Margin Mode</b>\n\n"
+            f"Current: <b>{cur}</b>\n\n"
+            "<b>ISOLATED</b>: margin per symbol terpisah, liquidation per posisi lebih mudah dikontrol.\n"
+            "<b>CROSS</b>: posisi pakai shared futures wallet margin, bisa tahan floating lebih jauh tapi risk wallet lebih nyambung."
+        )
+
+    def margin_mode_keyboard() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="ISOLATED", callback_data="margin:ISOLATED"),
+                InlineKeyboardButton(text="CROSS", callback_data="margin:CROSSED"),
+            ],
+            [InlineKeyboardButton(text="« Back", callback_data="menu")],
+        ])
+
+    @dp.message(Command("setmargin"))
+    async def on_setmargin_cmd(m: Message):
+        await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
+        await m.answer(await _margin_mode_text(m.from_user.id), reply_markup=margin_mode_keyboard(), parse_mode="HTML")
+
+    @dp.callback_query(F.data == "setmargin")
+    async def cb_setmargin(cb: CallbackQuery):
+        await cb.answer()
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        await cb.message.edit_text(await _margin_mode_text(cb.from_user.id), reply_markup=margin_mode_keyboard(), parse_mode="HTML")
+
+    @dp.callback_query(F.data.startswith("margin:"))
+    async def cb_margin_mode(cb: CallbackQuery):
+        margin_mode = cb.data.split(":", 1)[1]
+        if margin_mode not in {"ISOLATED", "CROSSED"}:
+            await cb.answer("Invalid margin mode", show_alert=True)
+            return
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        async with pool.acquire() as conn:
+            await update_setting(conn, telegram_id=cb.from_user.id, field="margin_mode", value=margin_mode)
+        await cb.answer(f"Margin mode set to {'CROSS' if margin_mode == 'CROSSED' else margin_mode}")
+        dashboard = await _dashboard_text(pool, cb.from_user.id)
+        await cb.message.edit_text(f"✅ Margin mode set to <b>{'CROSS' if margin_mode == 'CROSSED' else margin_mode}</b>\n\n{dashboard}", reply_markup=main_menu(), parse_mode="HTML")
 
     @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr"}))
     async def cb_numeric(cb: CallbackQuery, state: FSMContext):

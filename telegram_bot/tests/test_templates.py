@@ -87,12 +87,13 @@ def test_fmt_stats_includes_config_block():
     msg = fmt_stats({
         "registered": True,
         "enabled": True,
-        "risk_pct": 1.5, "leverage": 10, "max_concurrent": 3, "daily_loss_cap_pct": 5.0,
+        "risk_pct": 1.5, "leverage": 10, "margin_mode": "CROSSED", "max_concurrent": 3, "daily_loss_cap_pct": 5.0,
         "today_trades": 0, "today_wins": 0, "today_pnl_usdt": 0.0, "today_pnl_pct": 0.0,
         "closed_trades": 0, "wins": 0, "winrate": 0.0, "pnl_usdt": 0.0,
     })
     assert "Config" in msg
     assert "10x" in msg
+    assert "CROSS" in msg
     assert "Risk 1.50% equity" in msg
 
 
@@ -138,6 +139,7 @@ def test_fmt_settings_row_mapping():
         "enabled": True,
         "risk_pct": 2.0,
         "leverage": 10,
+        "margin_mode": "CROSSED",
         "max_concurrent": 3,
         "daily_loss_cap_pct": 6.0,
         "api_key_tail": "TAIL",
@@ -145,6 +147,7 @@ def test_fmt_settings_row_mapping():
     msg = fmt_settings(row)
     assert "enabled" in msg
     assert "10x" in msg
+    assert "Margin mode: CROSS" in msg
     assert "Risk: 2.00% equity" in msg
     assert "TAIL" in msg
 
@@ -175,3 +178,11 @@ def test_fmt_stats_winrate():
     })
     assert "75.0%" in msg
     assert "+$9.00" in msg
+
+
+def test_fmt_trade_skipped_margin_required_is_actionable():
+    msg = fmt_trade_skipped(symbol="BTCUSDT", reason="margin_required")
+    assert "SKIP" in msg
+    assert "BTCUSDT" in msg
+    assert "margin" in msg.lower()
+    assert "SL" in msg

@@ -60,6 +60,7 @@ async def signal_loop(pool):
                             pool, user_id=u["id"], signal=sig, ex=ex,
                             risk_pct=float(u["risk_pct"]),
                             leverage=int(u["leverage"]),
+                            margin_mode=str(u.get("margin_mode") or "ISOLATED"),
                             max_concurrent=int(u["max_concurrent"]),
                             daily_loss_cap_pct=float(u["daily_loss_cap_pct"]),
                             rr_ratio=float(u.get("rr_ratio") or 1.0),

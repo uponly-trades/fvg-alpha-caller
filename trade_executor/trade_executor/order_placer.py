@@ -40,6 +40,7 @@ async def place_full_sequence(
     sl_price: float,
     tp_price: float,
     leverage: int,
+    margin_mode: str = "ISOLATED",
     rr_ratio: float = 1.0,
 ) -> PlacedOrders:
     if not (sl_price and sl_price > 0):
@@ -48,7 +49,7 @@ async def place_full_sequence(
         raise OrderError("tp", f"invalid tp_price={tp_price}")
 
     try:
-        await set_isolated_and_leverage(ex, symbol, leverage)
+        await set_isolated_and_leverage(ex, symbol, leverage, margin_mode)
     except Exception as e:
         raise OrderError("leverage", str(e))
 

@@ -134,6 +134,7 @@ _SKIP_REASON_TEXT = {
     "bad_levels": "entry/SL invalid",
     "zero_sl_distance": "jarak SL nol",
     "qty_zero": "qty terlalu kecil setelah rounding",
+    "margin_required": "SL terlalu dekat / margin tidak cukup",
 }
 
 
@@ -204,11 +205,13 @@ def fmt_dashboard(summary: dict, stats: dict) -> str:
     maxc    = int(summary.get("max_concurrent", 3))
     dloss   = float(summary.get("daily_loss_cap_pct", 5))
     rr      = float(summary.get("rr_ratio", 1.0) or 1.0)
+    margin_mode = summary.get("margin_mode") or "ISOLATED"
+    margin_label = "CROSS" if margin_mode == "CROSSED" else margin_mode
     risk_pct = float(summary.get("risk_pct", 3.0) or 3.0)
     key_tail = summary.get("api_key_tail") or "—"
     settings_line = (
         f"⚙️ Risk <b>{risk_pct:.2f}% equity</b> / trade\n"
-        f"🎯 RR <b>{rr:.2f}:1</b>  |  Lev <b>{lev}x</b>  |  Max <b>{maxc}</b> trades  |  Daily cap <b>{dloss:.1f}%</b>"
+        f"🎯 RR <b>{rr:.2f}:1</b>  |  Lev <b>{lev}x</b>  |  Mode <b>{margin_label}</b>  |  Max <b>{maxc}</b> trades  |  Daily cap <b>{dloss:.1f}%</b>"
     )
 
     # ── today stats ──────────────────────────────────────────────
@@ -282,11 +285,14 @@ def fmt_settings(row) -> str:
         return "Send /start first."
     state = "enabled" if row["enabled"] else "paused"
     risk_pct = float(row.get("risk_pct") or 3.0)
+    margin_mode = row.get("margin_mode") or "ISOLATED"
+    margin_label = "CROSS" if margin_mode == "CROSSED" else margin_mode
     return (
         f"⚙️ <b>Settings</b> ({state})\n"
         f"Risk: {risk_pct:.2f}% equity per trade\n"
         f"RR ratio: {float(row.get('rr_ratio') or 1.0):.2f}:1\n"
         f"Leverage: {int(row['leverage'])}x\n"
+        f"Margin mode: {margin_label}\n"
         f"Max trades: {int(row['max_concurrent'])}\n"
         f"Daily loss cap: {float(row['daily_loss_cap_pct']):.2f}%\n"
         f"API key: ...{row['api_key_tail'] or 'not set'}"
@@ -319,12 +325,14 @@ def fmt_stats(s: dict) -> str:
     maxc    = int(s.get("max_concurrent", 0) or 0)
     dloss   = float(s.get("daily_loss_cap_pct", 0) or 0)
     rr      = float(s.get("rr_ratio", 1.0) or 1.0)
+    margin_mode = s.get("margin_mode") or "ISOLATED"
+    margin_label = "CROSS" if margin_mode == "CROSSED" else margin_mode
     sizing = f"Risk {risk:.2f}% equity"
     state   = "✅ Active" if enabled else "⏸ Paused"
     cfg_block = (
         "⚙️ <b>Config</b>\n"
         f"  Status: <b>{state}</b>\n"
-        f"  Size: <b>{sizing}</b>  |  RR: <b>{rr:.2f}:1</b>  |  Lev: <b>{lev}x</b>  |  Max: <b>{maxc}</b>  |  Cap: <b>{dloss:.1f}%</b>\n\n"
+        f"  Size: <b>{sizing}</b>  |  RR: <b>{rr:.2f}:1</b>  |  Lev: <b>{lev}x</b>  |  Mode: <b>{margin_label}</b>  |  Max: <b>{maxc}</b>  |  Cap: <b>{dloss:.1f}%</b>\n\n"
     )
 
     # ── today ─────────────────────────────────────────────────────

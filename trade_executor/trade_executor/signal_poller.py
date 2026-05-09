@@ -40,7 +40,7 @@ async def list_enabled_users(conn) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         """
         SELECT id, telegram_id, binance_api_key_enc, binance_api_secret_enc,
-               risk_pct, leverage, max_concurrent, daily_loss_cap_pct, paused_until,
+               risk_pct, leverage, margin_mode, max_concurrent, daily_loss_cap_pct, paused_until,
                rr_ratio
         FROM users
         WHERE enabled = true

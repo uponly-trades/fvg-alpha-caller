@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 
@@ -65,6 +66,7 @@ async def handle_signal_for_user(
     ex,
     risk_pct: float,
     leverage: int,
+    margin_mode: str = "ISOLATED",
     max_concurrent: int,
     daily_loss_cap_pct: float,
     rr_ratio: float = 1.0,
@@ -89,6 +91,8 @@ async def handle_signal_for_user(
     async with pool.acquire() as conn:
         usdt_balance = (await ex.fetch_balance()).get("USDT", {})
         balance = usdt_balance.get("total") or usdt_balance.get("free") or 0
+        free_balance = float(usdt_balance.get("free") or 0.0)
+        margin_usage_cap = float(os.environ.get("TRADE_MARGIN_USAGE_CAP", "0.70"))
         gate = check_user_gate(
             user={
                 "id": user_id, "enabled": True, "paused_until": None,
@@ -122,6 +126,7 @@ async def handle_signal_for_user(
         size = compute_size(
             balance=float(balance), risk_pct=risk_pct, entry=live_entry, sl=sl,
             leverage=leverage, meta=meta,
+            free_balance=free_balance, margin_usage_cap=margin_usage_cap,
         )
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",
@@ -156,7 +161,8 @@ async def handle_signal_for_user(
     try:
         placed = await place_full_sequence(
             ex, symbol=symbol, side=side, qty=size.qty,
-            sl_price=sl, tp_price=tp2, leverage=leverage, rr_ratio=rr_ratio,
+            sl_price=sl, tp_price=tp2, leverage=leverage,
+            margin_mode=margin_mode, rr_ratio=rr_ratio,
         )
     except OrderError as e:
         async with pool.acquire() as conn:
