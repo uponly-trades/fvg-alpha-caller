@@ -6,9 +6,9 @@
 #   DATABASE_URL="postgresql://user:pass@fvg-postgres:5432/fvg" \
 #       bash deploy/apply_migrations.sh
 #
-# Or inside the Coolify fvg-alpha-caller container shell:
-#   bash deploy/apply_migrations.sh
-# (DATABASE_URL is already set by Coolify env.)
+# Or inside the trade_executor container shell:
+#   docker exec -it fvg-trade_executor-1 bash /app/deploy/apply_migrations.sh
+# (DATABASE_URL is already set by docker-compose env.)
 #
 # Idempotent: every migration uses ADD COLUMN IF NOT EXISTS / conditional
 # constraints / filtered UPDATE, so re-running is safe and a no-op after

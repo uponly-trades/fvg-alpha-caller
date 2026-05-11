@@ -38,10 +38,8 @@ from rest_client import Bar
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("recompute_features")
 
-DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://fvg:fvgdb_coolify_2026@zz1q4m2u2363ucx0ebosb41u:5432/fvg",
-)
+# DATABASE_URL must be supplied via env — no hardcoded fallback.
+DB_URL = os.environ["DATABASE_URL"]
 BINANCE_BASE = os.environ.get("BINANCE_BASE", "https://fapi.binance.com")
 ALL_TFS = ("15m", "30m", "1h", "2h", "4h")
 

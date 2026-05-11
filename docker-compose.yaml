@@ -1,25 +1,129 @@
+# Plain Docker Compose deployment used on Linode Tokyo host (172.104.77.28).
+#
+# Live copy lives at /opt/fvg/docker-compose.yaml on the server. This file is
+# the source-of-truth template kept in version control. After editing, copy
+# the file to the server with `scp` or `git pull` from /opt/fvg/repo and then
+# `cp /opt/fvg/repo/docker-compose.yaml /opt/fvg/docker-compose.yaml`.
+#
+# Required env vars (in /opt/fvg/.env on the server):
+#   DB_PW, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+#   MASTER_ENCRYPTION_KEY, INTERNAL_TOKEN
+#
+# Deploy cycle:
+#   ssh fvg-tokyo
+#   cd /opt/fvg/repo && git pull origin fvg-v2
+#   cd /opt/fvg && docker compose up -d --build
+#   bash repo/deploy/apply_migrations.sh        # if migrations changed
 services:
-  fvg-alpha-caller:
-    build: .
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      - DATABASE_URL=${DATABASE_URL}
-      - MODEL_URL=${MODEL_URL}
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: fvg
+      POSTGRES_PASSWORD: ${DB_PW}
+      POSTGRES_DB: fvg
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    networks: [fvg-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fvg -d fvg"]
+      interval: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  fvg-alpha-caller:
+    build:
+      context: ./repo
+      dockerfile: Dockerfile
+    image: fvg-alpha-caller:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      DATABASE_URL: postgresql://fvg:${DB_PW}@postgres:5432/fvg
+      MODEL_ENABLED: "false"
+      STRATEGY_VERSION: v2
+      V2_COOLDOWN_SEC: "1800"
+      V2_HTF_MIN_SCORE: "1"
+      V2_HTF_TOUCH_LOOKBACK: "1"
+      ATR_BUFFER_V2: "0.3"
+      V2_TRAIL_ATR_BUFFER: "0.3"
+      WARMUP_CONCURRENCY: "2"
+      FETCH_RETRIES: "5"
+      FETCH_BACKOFF_BASE_SEC: "5.0"
+      FETCH_BACKOFF_MAX_SEC: "60.0"
+      BUFFER_CACHE_PATH: "/app/data/buffer_cache.json"
     volumes:
       - ./data:/app/data
-    networks:
-      - default
-      - coolify
+    networks: [fvg-net]
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 700M
+
+  trade_executor:
+    build:
+      context: ./repo
+      dockerfile: trade_executor/Dockerfile
+    image: fvg-trade-executor:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://fvg:${DB_PW}@postgres:5432/fvg
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    expose: ["8014"]
+    networks: [fvg-net]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 250M
+
+  telegram_bot:
+    build:
+      context: ./repo
+      dockerfile: telegram_bot/Dockerfile
+    image: fvg-telegram-bot:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      trade_executor:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://fvg:${DB_PW}@postgres:5432/fvg
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      EXECUTOR_URL: http://trade_executor:8014
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+    networks: [fvg-net]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 200M
 
 networks:
-  default:
-  coolify:
-    external: true
-    name: n1hxl7f2x39ecqjths0u6446
+  fvg-net:

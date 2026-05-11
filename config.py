@@ -118,7 +118,7 @@ KLINES_LIMIT = 100
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 
-# Postgres — fallback ke fvg-postgres container (same Coolify network)
+# Postgres — fallback to the local `postgres` service in docker-compose.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://fvg:f18bbdd5a18785da8d18d8d92965defc@fvg-postgres:5432/fvg",
