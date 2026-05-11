@@ -21,6 +21,21 @@ class OrchResult:
     skip_reason: str | None = None
 
 
+def validate_sl_off_margin_combo(*, sl_enabled: bool, margin_mode: str) -> str | None:
+    """Return None if combo is valid, else a skip-reason string.
+
+    Hard rule: SL OFF must run on ISOLATED margin so the per-symbol margin
+    acts as the liquidation cap. CROSSED + SL OFF would put the entire
+    futures wallet at risk on a single bad signal, so we refuse the signal
+    until the user fixes their settings.
+    """
+    if sl_enabled:
+        return None
+    if str(margin_mode).upper() == "ISOLATED":
+        return None
+    return "SL OFF requires ISOLATED margin mode (current: CROSSED)"
+
+
 async def _today_pnl_pct(conn, user_id: int) -> float:
     row = await conn.fetchrow(
         "SELECT realized_pnl_pct FROM user_daily_pnl WHERE user_id=$1 AND day=CURRENT_DATE",
@@ -83,14 +98,27 @@ async def handle_signal_for_user(
     entry = float(signal["entry"])
     sl_signal = float(signal["sl"])
 
-    # SL off requires ISOLATED margin so per-symbol margin acts as the
-    # liquidation cap; CROSSED would put the whole wallet on the line.
-    if not sl_enabled and str(margin_mode).upper() != "ISOLATED":
+    # Hard reject when user combo violates SL OFF rule. We do NOT silently
+    # auto-switch margin: the user must consciously fix it via the bot so they
+    # know which guard they tripped.
+    combo_skip = validate_sl_off_margin_combo(sl_enabled=sl_enabled, margin_mode=margin_mode)
+    if combo_skip:
+        async with pool.acquire() as conn:
+            await insert_audit(
+                conn, user_id, "trade_skipped",
+                {"decision_id": decision_id, "reason": "sl_off_requires_isolated"},
+            )
+            await notify(conn, "trade_skipped", {
+                "user_id": user_id,
+                "decision_id": decision_id,
+                "symbol": symbol,
+                "reason": "sl_off_requires_isolated",
+            })
         log.warning(
-            "user=%s sl_enabled=False but margin_mode=%s — forcing ISOLATED",
-            user_id, margin_mode,
+            "user=%s signal=%s rejected: %s",
+            user_id, decision_id, combo_skip,
         )
-        margin_mode = "ISOLATED"
+        return OrchResult(placed=False, skip_reason="sl_off_requires_isolated")
 
     # Widen SL by user mult against entry. Multiplier <1 would tighten; we
     # clamp at 0.5 floor in the migration, no upper widening beyond 5x.

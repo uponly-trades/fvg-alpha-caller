@@ -20,9 +20,34 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ## Migration
 
+Migrations are applied manually via `psql` in numeric order. Each file is safe
+to re-run (idempotent: `ADD COLUMN IF NOT EXISTS`, conditional constraints,
+filtered `UPDATE`). Run them in sequence on a fresh deploy, and run any new
+ones on existing deploys.
+
+```bash
+# From the repo root with $DATABASE_URL pointing at fvg-postgres:
+for f in migrations/*.sql; do
+  echo "Applying $f"
+  psql "$DATABASE_URL" -f "$f" || exit 1
+done
 ```
-psql "$DATABASE_URL" -f ../migrations/0001_multi_user_live.sql
-```
+
+Current migrations:
+
+- `0001_multi_user_live.sql` — base multi-user schema (users, user_trades, etc.)
+- `0002_user_rr_and_notional.sql` — adds `rr_ratio`, notional config columns.
+- `0003_fixed_risk_sizing.sql` — adds `fixed_risk_usdt`, `max_notional_usdt`.
+- `0004_user_margin_mode.sql` — adds `margin_mode` (ISOLATED/CROSSED).
+- `0005_user_risk_mode_and_sl_controls.sql` — adds `risk_mode`, `sl_enabled`,
+  `sl_mult` so users can pick percent-of-equity vs fixed-$ risk and toggle SL
+  on/off per their preference.
+- `0006_default_rr_2_for_existing_users.sql` — one-time bump: any user still
+  on the legacy `rr_ratio=1.0` is upgraded to `2.0` so live trades match the
+  public channel banner. Users with custom RR are untouched.
+
+If `0006` is skipped, live trades for legacy users keep returning `RR 1:1`
+(seen as "+$0.72 on KSMUSDT" while channel says "RR 1:2"). Apply once.
 
 ## Telegram
 

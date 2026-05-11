@@ -656,12 +656,17 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             cur = bool(row["sl_enabled"]) if row and row["sl_enabled"] is not None else True
             new_val = not cur
             margin_mode = (row["margin_mode"] if row else "ISOLATED") or "ISOLATED"
-            # Going SL OFF requires ISOLATED. Auto-switch and inform user.
+            # Going SL OFF requires ISOLATED. We do NOT auto-switch — that would
+            # silently change user's margin setting. Instead we refuse the toggle
+            # so the user has to fix margin mode first, mirroring executor reject.
             if not new_val and margin_mode != "ISOLATED":
-                await update_setting(conn, telegram_id=cb.from_user.id, field="margin_mode", value="ISOLATED")
-                await cb.answer("SL OFF → margin mode auto-switched to ISOLATED")
-            else:
-                await cb.answer(f"SL → {'OFF' if not new_val else 'ON'}")
+                await cb.answer(
+                    "SL OFF butuh ISOLATED. Ubah margin mode dulu via 🧱 Margin Mode.",
+                    show_alert=True,
+                )
+                await _send_sl_menu(cb)
+                return
+            await cb.answer(f"SL → {'OFF' if not new_val else 'ON'}")
             await update_setting(conn, telegram_id=cb.from_user.id, field="sl_enabled", value=new_val)
         await _send_sl_menu(cb)
 
