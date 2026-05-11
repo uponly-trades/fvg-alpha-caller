@@ -40,6 +40,7 @@ def compute_size(
     max_notional_usdt: float | None = None,
     free_balance: float | None = None,
     margin_usage_cap: float | None = None,
+    risk_mode: str = "percent",
 ) -> SizeResult:
     if entry <= 0 or sl <= 0:
         return SizeResult(skip_reason="bad_levels")
@@ -47,7 +48,10 @@ def compute_size(
     if sl_distance_pct <= 0:
         return SizeResult(skip_reason="zero_sl_distance")
 
-    target_risk_usdt = balance * risk_pct / 100
+    if str(risk_mode).lower() == "fixed" and fixed_risk_usdt and fixed_risk_usdt > 0:
+        target_risk_usdt = float(fixed_risk_usdt)
+    else:
+        target_risk_usdt = balance * risk_pct / 100
     capped = False
     notional = target_risk_usdt / (sl_distance_pct / 100)
 

@@ -117,3 +117,27 @@ async def test_sl_failure_triggers_emergency_close_and_raises():
     assert exc.value.stage == "sl"
     market_close = [c for c in ex.calls if c[0] == "create" and c[1] == "MARKET" and c[4] and c[4].get("reduceOnly")]
     assert len(market_close) == 1
+
+
+@pytest.mark.asyncio
+async def test_sl_off_skips_sl_placement_and_keeps_tp():
+    ex = FakeOK()
+    res = await place_full_sequence(
+        ex, symbol="BTCUSDT", side="BUY", qty=0.01,
+        sl_price=None, tp_price=110.0, leverage=5,
+    )
+    assert res.sl_order_id is None
+    assert res.tp_order_id == "tp-1"
+    sl_calls = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "STOP_MARKET"]
+    assert sl_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sl_off_requires_isolated_margin_mode():
+    ex = FakeOK()
+    with pytest.raises(OrderError) as exc:
+        await place_full_sequence(
+            ex, symbol="BTCUSDT", side="BUY", qty=0.01,
+            sl_price=None, tp_price=110.0, leverage=5, margin_mode="CROSSED",
+        )
+    assert exc.value.stage == "sl_off_guard"

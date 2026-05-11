@@ -64,6 +64,10 @@ async def signal_loop(pool):
                             max_concurrent=int(u["max_concurrent"]),
                             daily_loss_cap_pct=float(u["daily_loss_cap_pct"]),
                             rr_ratio=float(u.get("rr_ratio") or 1.0),
+                            risk_mode=str(u.get("risk_mode") or "percent"),
+                            fixed_risk_usdt=float(u.get("fixed_risk_usdt") or 0.0) or None,
+                            sl_enabled=bool(u.get("sl_enabled") if u.get("sl_enabled") is not None else True),
+                            sl_mult=float(u.get("sl_mult") or 1.0),
                         )
                         await ex.close()
                     except binance_limit.BinanceBannedError as e:

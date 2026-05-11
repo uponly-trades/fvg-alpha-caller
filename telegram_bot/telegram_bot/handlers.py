@@ -100,7 +100,9 @@ async def _safe_delete(bot, *, chat_id: int, message_id: int) -> None:
 
 # ── keyboards ────────────────────────────────────────────────────────────────
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(enabled: bool = True) -> InlineKeyboardMarkup:
+    toggle_label = "⏸ Pause Bot" if enabled else "▶️ Resume Bot"
+    toggle_data = "pause" if enabled else "resume"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💰 Balance", callback_data="balance"),
@@ -115,8 +117,7 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔑 Set API Keys", callback_data="setkeys"),
         ],
         [
-            InlineKeyboardButton(text="⏸ Pause", callback_data="pause"),
-            InlineKeyboardButton(text="▶️ Resume", callback_data="resume"),
+            InlineKeyboardButton(text=toggle_label, callback_data=toggle_data),
         ],
         [
             InlineKeyboardButton(text="📉 Risk % Equity", callback_data="setrisk"),
@@ -130,6 +131,10 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎯 Set RR", callback_data="setrr"),
             InlineKeyboardButton(text="🧱 Margin Mode", callback_data="setmargin"),
         ],
+        [
+            InlineKeyboardButton(text="💵 Risk Mode", callback_data="setriskmode"),
+            InlineKeyboardButton(text="🛡 SL Settings", callback_data="setslmenu"),
+        ],
     ])
 
 
@@ -137,6 +142,16 @@ def back_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="« Back", callback_data="menu")]
     ])
+
+async def _menu_for(pool, telegram_id: int) -> InlineKeyboardMarkup:
+    """Return a main_menu reflecting the user's current enabled state."""
+    try:
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=telegram_id)
+        enabled = bool(row["enabled"]) if row else True
+    except Exception:
+        enabled = True
+    return main_menu(enabled=enabled)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -160,14 +175,14 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     async def on_start(m: Message):
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
         text = await _dashboard_text(pool, m.from_user.id)
-        await m.answer(text, reply_markup=main_menu(), parse_mode="HTML")
+        await m.answer(text, reply_markup=await _menu_for(pool, m.from_user.id), parse_mode="HTML")
 
     @dp.callback_query(F.data == "menu")
     async def cb_menu(cb: CallbackQuery):
         await cb.answer("Refreshing…")
         await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         text = await _dashboard_text(pool, cb.from_user.id)
-        await cb.message.edit_text(text, reply_markup=main_menu(), parse_mode="HTML")
+        await cb.message.edit_text(text, reply_markup=await _menu_for(pool, cb.from_user.id), parse_mode="HTML")
 
     # ── balance ───────────────────────────────────────────────────────────────
 
@@ -268,7 +283,7 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
         async with pool.acquire() as conn:
             await set_enabled(conn, telegram_id=m.from_user.id, enabled=False)
-        await m.answer("⏸ Paused. No new live trades.")
+        await m.answer("⏸ Paused. No new live trades.", reply_markup=await _menu_for(pool, m.from_user.id))
 
     @dp.callback_query(F.data == "pause")
     async def cb_pause(cb: CallbackQuery):
@@ -276,14 +291,17 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         async with pool.acquire() as conn:
             await set_enabled(conn, telegram_id=cb.from_user.id, enabled=False)
-        await cb.message.edit_text("⏸ Paused. No new live trades.", reply_markup=back_button())
+        await cb.message.edit_text(
+            "⏸ Paused. No new live trades.",
+            reply_markup=await _menu_for(pool, cb.from_user.id),
+        )
 
     @dp.message(Command("resume"))
     async def on_resume_cmd(m: Message):
         await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
         async with pool.acquire() as conn:
             await set_enabled(conn, telegram_id=m.from_user.id, enabled=True)
-        await m.answer("✅ Live trading enabled.")
+        await m.answer("✅ Live trading enabled.", reply_markup=await _menu_for(pool, m.from_user.id))
 
     @dp.callback_query(F.data == "resume")
     async def cb_resume(cb: CallbackQuery):
@@ -291,7 +309,10 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
         async with pool.acquire() as conn:
             await set_enabled(conn, telegram_id=cb.from_user.id, enabled=True)
-        await cb.message.edit_text("✅ Live trading enabled.", reply_markup=back_button())
+        await cb.message.edit_text(
+            "✅ Live trading enabled.",
+            reply_markup=await _menu_for(pool, cb.from_user.id),
+        )
 
     # ── set API keys ──────────────────────────────────────────────────────────
 
@@ -354,7 +375,7 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _edit_or_reply(
             m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
             text=f"{fmt_key_saved(tail)}\n\n{text}",
-            reply_markup=main_menu(), parse_mode="HTML",
+            reply_markup=await _menu_for(pool, m.from_user.id), parse_mode="HTML",
         )
 
     # ── numeric settings (FSM) ────────────────────────────────────────────────
@@ -406,6 +427,16 @@ def register_handlers(dp: Dispatcher, pool) -> None:
                 "Minimal 1 supaya reward tidak lebih kecil dari risk."
             ),
         ),
+        "setslmult": dict(
+            field="sl_mult", min_v=0.5, max_v=5.0, integer=False,
+            label="SL multiplier", hint="0.5–5.0", suffix="x",
+            howto=(
+                "🛡 <b>SL multiplier</b> — pelebar jarak Stop Loss dari Entry.\n"
+                "1.0 = pakai SL dari signal (default).\n"
+                "1.5 = SL 50% lebih jauh (lebih aman dari wick, TP juga jadi lebih jauh).\n"
+                "2.0 = SL 2x lebih jauh (swing-mini)."
+            ),
+        ),
     }
 
     async def _current_value(telegram_id: int, field: str) -> str:
@@ -454,6 +485,9 @@ def register_handlers(dp: Dispatcher, pool) -> None:
     @dp.message(Command("setrr"))
     async def on_setrr_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setrr")
 
+    @dp.message(Command("setslmult"))
+    async def on_setslmult_cmd(m: Message, state: FSMContext): await _ask_numeric(m, state, "setslmult")
+
     @dp.message(Command("setnotional"))
     async def on_setnotional_cmd(m: Message, state: FSMContext):
         await m.answer("Notional cap sudah dihapus. Pakai /setrisk untuk Risk % Equity.")
@@ -500,9 +534,138 @@ def register_handlers(dp: Dispatcher, pool) -> None:
             await update_setting(conn, telegram_id=cb.from_user.id, field="margin_mode", value=margin_mode)
         await cb.answer(f"Margin mode set to {'CROSS' if margin_mode == 'CROSSED' else margin_mode}")
         dashboard = await _dashboard_text(pool, cb.from_user.id)
-        await cb.message.edit_text(f"✅ Margin mode set to <b>{'CROSS' if margin_mode == 'CROSSED' else margin_mode}</b>\n\n{dashboard}", reply_markup=main_menu(), parse_mode="HTML")
+        await cb.message.edit_text(
+            f"✅ Margin mode set to <b>{'CROSS' if margin_mode == 'CROSSED' else margin_mode}</b>\n\n{dashboard}",
+            reply_markup=await _menu_for(pool, cb.from_user.id),
+            parse_mode="HTML",
+        )
 
-    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr"}))
+    # ── risk mode (percent vs fixed $) ───────────────────────────────────────
+
+    async def _risk_mode_text(telegram_id: int) -> str:
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=telegram_id)
+        cur = (row["risk_mode"] if row else "percent") or "percent"
+        risk_pct = float(row["risk_pct"] or 2.0) if row else 2.0
+        fixed_risk = float(row["fixed_risk_usdt"] or 3.0) if row else 3.0
+        return (
+            "💵 <b>Risk Mode</b>\n\n"
+            f"Current: <b>{cur}</b>\n"
+            f"• percent: {risk_pct:.2f}% of equity per trade (atur via /setrisk)\n"
+            f"• fixed: ${fixed_risk:.2f} per trade (atur via /setfixedrisk)\n\n"
+            "Pakai <b>percent</b> kalau mau risk skala dengan equity (saran).\n"
+            "Pakai <b>fixed</b> kalau target risk USD tetap apapun balance-nya."
+        )
+
+    def risk_mode_keyboard() -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="% equity", callback_data="riskmode:percent"),
+                InlineKeyboardButton(text="$ fixed", callback_data="riskmode:fixed"),
+            ],
+            [InlineKeyboardButton(text="« Back", callback_data="menu")],
+        ])
+
+    @dp.message(Command("setriskmode"))
+    async def on_setriskmode_cmd(m: Message):
+        await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
+        await m.answer(await _risk_mode_text(m.from_user.id), reply_markup=risk_mode_keyboard(), parse_mode="HTML")
+
+    @dp.callback_query(F.data == "setriskmode")
+    async def cb_setriskmode(cb: CallbackQuery):
+        await cb.answer()
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        await cb.message.edit_text(await _risk_mode_text(cb.from_user.id), reply_markup=risk_mode_keyboard(), parse_mode="HTML")
+
+    @dp.callback_query(F.data.startswith("riskmode:"))
+    async def cb_risk_mode_pick(cb: CallbackQuery):
+        choice = cb.data.split(":", 1)[1]
+        if choice not in {"percent", "fixed"}:
+            await cb.answer("Invalid risk mode", show_alert=True)
+            return
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        async with pool.acquire() as conn:
+            await update_setting(conn, telegram_id=cb.from_user.id, field="risk_mode", value=choice)
+        await cb.answer(f"Risk mode → {choice}")
+        dashboard = await _dashboard_text(pool, cb.from_user.id)
+        await cb.message.edit_text(
+            f"✅ Risk mode set to <b>{choice}</b>\n\n{dashboard}",
+            reply_markup=await _menu_for(pool, cb.from_user.id),
+            parse_mode="HTML",
+        )
+
+    # ── SL menu (toggle on/off + multiplier) ─────────────────────────────────
+
+    async def _sl_menu_text(telegram_id: int) -> str:
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=telegram_id)
+        sl_enabled = bool(row["sl_enabled"]) if row and row["sl_enabled"] is not None else True
+        sl_mult = float(row["sl_mult"] or 1.0) if row else 1.0
+        margin_mode = (row["margin_mode"] if row else "ISOLATED") or "ISOLATED"
+        state = "ON" if sl_enabled else "OFF"
+        guard_line = (
+            "" if sl_enabled else
+            f"\n⚠️ SL OFF aktif. Margin mode wajib ISOLATED (sekarang: <b>{margin_mode}</b>)."
+        )
+        return (
+            "🛡 <b>SL Settings</b>\n\n"
+            f"Status: <b>{state}</b>\n"
+            f"Multiplier: <b>{sl_mult:.2f}x</b> (lebar SL relatif ke signal)\n"
+            f"{guard_line}\n\n"
+            "<b>SL ON</b>: stop loss dipasang di Binance + trail TP1→BE setelah TP1.\n"
+            "<b>SL OFF</b>: tidak pasang stop di exchange. Posisi hanya ditutup oleh TP, BE trail setelah TP1, atau likuidasi ISOLATED.\n"
+            "Multiplier <b>1.0</b> = pakai SL dari signal. <b>1.5</b>+ = lebih aman dari wick."
+        )
+
+    def sl_menu_keyboard(sl_enabled: bool) -> InlineKeyboardMarkup:
+        toggle_label = "❌ Turn SL OFF" if sl_enabled else "✅ Turn SL ON"
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_label, callback_data="sltoggle")],
+            [InlineKeyboardButton(text="📏 Set Multiplier", callback_data="setslmult")],
+            [InlineKeyboardButton(text="« Back", callback_data="menu")],
+        ])
+
+    async def _send_sl_menu(target):
+        tid = target.from_user.id
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=tid)
+        sl_enabled = bool(row["sl_enabled"]) if row and row["sl_enabled"] is not None else True
+        text = await _sl_menu_text(tid)
+        kb = sl_menu_keyboard(sl_enabled)
+        if isinstance(target, CallbackQuery):
+            await target.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await target.answer(text, reply_markup=kb, parse_mode="HTML")
+
+    @dp.message(Command("setsl"))
+    async def on_setsl_cmd(m: Message):
+        await _ensure_user(pool, m.from_user.id, m.from_user.username, m.from_user.first_name)
+        await _send_sl_menu(m)
+
+    @dp.callback_query(F.data == "setslmenu")
+    async def cb_setslmenu(cb: CallbackQuery):
+        await cb.answer()
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        await _send_sl_menu(cb)
+
+    @dp.callback_query(F.data == "sltoggle")
+    async def cb_sl_toggle(cb: CallbackQuery):
+        await _ensure_user(pool, cb.from_user.id, cb.from_user.username, cb.from_user.first_name)
+        async with pool.acquire() as conn:
+            row = await user_row(conn, telegram_id=cb.from_user.id)
+            cur = bool(row["sl_enabled"]) if row and row["sl_enabled"] is not None else True
+            new_val = not cur
+            margin_mode = (row["margin_mode"] if row else "ISOLATED") or "ISOLATED"
+            # Going SL OFF requires ISOLATED. Auto-switch and inform user.
+            if not new_val and margin_mode != "ISOLATED":
+                await update_setting(conn, telegram_id=cb.from_user.id, field="margin_mode", value="ISOLATED")
+                await cb.answer("SL OFF → margin mode auto-switched to ISOLATED")
+            else:
+                await cb.answer(f"SL → {'OFF' if not new_val else 'ON'}")
+            await update_setting(conn, telegram_id=cb.from_user.id, field="sl_enabled", value=new_val)
+        await _send_sl_menu(cb)
+
+    @dp.callback_query(F.data.in_({"setrisk", "setlev", "setmax", "setloss", "setrr", "setslmult"}))
     async def cb_numeric(cb: CallbackQuery, state: FSMContext):
         await _ask_numeric(cb, state, cb.data)
 
@@ -536,5 +699,5 @@ def register_handlers(dp: Dispatcher, pool) -> None:
         await _edit_or_reply(
             m.bot, chat_id=m.chat.id, prompt_msg_id=prompt_msg_id,
             text=f"✅ {cfg['label']} set to {shown_value}\n\n{dashboard}",
-            reply_markup=main_menu(), parse_mode="HTML",
+            reply_markup=await _menu_for(pool, m.from_user.id), parse_mode="HTML",
         )

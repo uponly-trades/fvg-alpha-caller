@@ -41,7 +41,7 @@ async def list_enabled_users(conn) -> list[dict[str, Any]]:
         """
         SELECT id, telegram_id, binance_api_key_enc, binance_api_secret_enc,
                risk_pct, leverage, margin_mode, max_concurrent, daily_loss_cap_pct, paused_until,
-               rr_ratio
+               rr_ratio, risk_mode, fixed_risk_usdt, sl_enabled, sl_mult
         FROM users
         WHERE enabled = true
           AND binance_api_key_enc IS NOT NULL

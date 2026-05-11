@@ -73,14 +73,36 @@ async def handle_signal_for_user(
     fixed_notional_usdt: float | None = None,
     fixed_risk_usdt: float | None = None,
     max_notional_usdt: float | None = None,
+    risk_mode: str = "percent",
+    sl_enabled: bool = True,
+    sl_mult: float = 1.0,
 ) -> OrchResult:
     decision_id = signal["id"]
     symbol = signal["symbol"]
     direction = signal["direction"]
     entry = float(signal["entry"])
-    sl = float(signal["sl"])
+    sl_signal = float(signal["sl"])
+
+    # SL off requires ISOLATED margin so per-symbol margin acts as the
+    # liquidation cap; CROSSED would put the whole wallet on the line.
+    if not sl_enabled and str(margin_mode).upper() != "ISOLATED":
+        log.warning(
+            "user=%s sl_enabled=False but margin_mode=%s — forcing ISOLATED",
+            user_id, margin_mode,
+        )
+        margin_mode = "ISOLATED"
+
+    # Widen SL by user mult against entry. Multiplier <1 would tighten; we
+    # clamp at 0.5 floor in the migration, no upper widening beyond 5x.
+    sl_mult = max(0.5, float(sl_mult or 1.0))
+    base_distance = abs(entry - sl_signal)
+    widened_distance = base_distance * sl_mult
+    if direction == "long":
+        sl = entry - widened_distance
+    else:
+        sl = entry + widened_distance
     rr_ratio = max(1.0, float(rr_ratio or 1.0))
-    risk_distance = abs(entry - sl)
+    risk_distance = widened_distance
     if direction == "long":
         tp1 = entry + risk_distance
         tp2 = entry + risk_distance * rr_ratio
@@ -130,6 +152,7 @@ async def handle_signal_for_user(
             fixed_risk_usdt=fixed_risk_usdt,
             max_notional_usdt=max_notional_usdt,
             free_balance=free_balance, margin_usage_cap=margin_usage_cap,
+            risk_mode=risk_mode,
         )
         if size.skip_reason:
             await insert_audit(conn, user_id, "trade_skipped",
@@ -161,10 +184,11 @@ async def handle_signal_for_user(
             return OrchResult(placed=False, skip_reason="duplicate")
 
     side = "BUY" if direction == "long" else "SELL"
+    sl_for_placement = sl if sl_enabled else None
     try:
         placed = await place_full_sequence(
             ex, symbol=symbol, side=side, qty=size.qty,
-            sl_price=sl, tp_price=tp2, leverage=leverage,
+            sl_price=sl_for_placement, tp_price=tp2, leverage=leverage,
             margin_mode=margin_mode, rr_ratio=rr_ratio,
         )
     except OrderError as e:

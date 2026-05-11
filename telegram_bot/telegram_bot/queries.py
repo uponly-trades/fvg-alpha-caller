@@ -33,7 +33,8 @@ async def user_row(conn, *, telegram_id: int):
         """
         SELECT id, enabled, paused_until, pause_reason, api_key_tail, risk_pct,
                leverage, max_concurrent, daily_loss_cap_pct, rr_ratio, margin_mode,
-               fixed_notional_usdt, fixed_risk_usdt, max_notional_usdt
+               fixed_notional_usdt, fixed_risk_usdt, max_notional_usdt,
+               risk_mode, sl_enabled, sl_mult
         FROM users WHERE telegram_id=$1
         """,
         telegram_id,
@@ -56,6 +57,7 @@ async def update_setting(conn, *, telegram_id: int, field: str, value: float | i
     allowed = {
         "risk_pct", "leverage", "max_concurrent", "daily_loss_cap_pct",
         "rr_ratio", "margin_mode", "fixed_notional_usdt", "fixed_risk_usdt", "max_notional_usdt",
+        "risk_mode", "sl_enabled", "sl_mult",
     }
     if field not in allowed:
         raise ValueError("invalid setting")

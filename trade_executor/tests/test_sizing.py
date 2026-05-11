@@ -119,3 +119,25 @@ def test_compute_size_allows_when_required_margin_within_free_balance_cap():
     assert res.skip_reason is None
     assert res.notional_usdt == pytest.approx(300.0)
     assert res.margin_usdt == pytest.approx(30.0)
+
+
+# Risk-mode controls
+
+def test_compute_size_risk_mode_fixed_overrides_percent():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=100, risk_pct=2, entry=100, sl=99, leverage=10, meta=meta,
+        risk_mode="fixed", fixed_risk_usdt=3.0,
+    )
+    assert res.target_risk_usdt == pytest.approx(3.0)
+    assert res.notional_usdt == pytest.approx(300.0)
+    assert res.expected_pnl_1r_usdt == pytest.approx(3.0)
+
+def test_compute_size_risk_mode_percent_ignores_fixed_risk():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=200, risk_pct=2, entry=100, sl=99, leverage=10, meta=meta,
+        risk_mode="percent", fixed_risk_usdt=999.0,
+    )
+    assert res.target_risk_usdt == pytest.approx(4.0)
+    assert res.notional_usdt == pytest.approx(400.0)
