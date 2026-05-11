@@ -110,9 +110,9 @@ def test_bullish_fvg_with_aligned_combo_builds_long_risk_plan(monkeypatch):
     assert result.mode == "scalping"
     assert result.trade.direction == "long"
     assert result.trade.entry == 100.0
-    assert result.trade.sl == pytest.approx(98.9)
-    assert result.trade.tp1 == pytest.approx(101.1)
-    assert result.trade.tp2 == pytest.approx(102.2)
+    assert result.trade.sl == pytest.approx(98.2)
+    assert result.trade.tp1 == pytest.approx(101.8)
+    assert result.trade.tp2 == pytest.approx(103.6)
     assert result.trade.rr == 2.0
 
 
@@ -136,9 +136,9 @@ def test_bearish_fvg_with_aligned_combo_builds_short_risk_plan(monkeypatch):
     assert result.mode == "intraday"
     assert result.trade.direction == "short"
     assert result.trade.entry == 100.0
-    assert result.trade.sl == pytest.approx(101.1)
-    assert result.trade.tp1 == pytest.approx(98.9)
-    assert result.trade.tp2 == pytest.approx(97.8)
+    assert result.trade.sl == pytest.approx(101.8)
+    assert result.trade.tp1 == pytest.approx(98.2)
+    assert result.trade.tp2 == pytest.approx(96.4)
 
 
 def test_mixed_combo_skips_trade(monkeypatch):
@@ -181,7 +181,7 @@ def test_weak_fvg_skips_before_combo_validation():
 def test_model_long_re_anchors_sl_below_zone_bottom():
     # Regression: ZECUSDT-style. Model predicted SL is tighter (closer to entry)
     # than zone-anchored SL because predictor has no zone awareness. SL must widen
-    # to (zone.bottom - 0.1*atr); TPs preserved verbatim → RR stretches.
+    # to the canonical zone buffer; TPs are recomputed from actual risk.
     model = {
         "direction": "LONG", "timeframe": "SCALPING",
         "entry": 580.06, "sl": 572.053, "tp1": 584.06, "tp2": 588.06,
@@ -192,13 +192,11 @@ def test_model_long_re_anchors_sl_below_zone_bottom():
 
     assert result.status == "LONG VALID"
     assert result.valid is True
-    # zone_sl = 565.0 - 0.1*2.0 = 564.8; model_sl 572.053 sits inside zone → widen.
-    assert result.trade.sl == pytest.approx(564.8)
-    assert result.trade.tp1 == pytest.approx(584.06)
-    assert result.trade.tp2 == pytest.approx(588.06)
-    # RR no longer 2.0 — model TP preserved on widened risk.
-    expected_rr = (588.06 - 580.06) / (580.06 - 564.8)
-    assert result.trade.rr == pytest.approx(expected_rr)
+    # zone_sl = 565.0 - 0.8*2.0 = 563.4; model_sl 572.053 sits inside zone → widen.
+    assert result.trade.sl == pytest.approx(563.4)
+    assert result.trade.tp1 == pytest.approx(596.72)
+    assert result.trade.tp2 == pytest.approx(613.38)
+    assert result.trade.rr == pytest.approx(2.0)
 
 
 def test_model_long_keeps_tighter_model_sl_when_already_below_zone():
@@ -215,8 +213,8 @@ def test_model_long_keeps_tighter_model_sl_when_already_below_zone():
     assert result.trade.rr == pytest.approx(2.0)
 
 
-def test_model_short_routes_to_combo_path():
-    # SHORT model signal must defer to combo (bars-aware filter), regardless of SL.
+def test_model_short_is_disabled():
+    # SHORT model signal is disabled due to negative EV in backtests.
     model = {
         "direction": "SHORT", "timeframe": "SCALPING",
         "entry": 100.0, "sl": 101.0, "tp1": 99.0, "tp2": 98.0,
@@ -224,7 +222,7 @@ def test_model_short_routes_to_combo_path():
     }
     z = zone(direction=-1, top=101.0, bottom=99.0, atr=1.0)
     result = trade_combo.build_trade_from_model(model, z)
-    assert result.status == "SKIP: SHORT VIA COMBO"
+    assert result.status == "SKIP: SHORT DISABLED"
     assert result.valid is False
 
 

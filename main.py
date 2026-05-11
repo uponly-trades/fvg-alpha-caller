@@ -90,7 +90,13 @@ class AlphaCaller:
                 continue
             fvg["symbol"] = symbol
             try:
-                s = calc_strength(window, fvg, symbol=symbol, existing_zones=self.tracker.zones)
+                s = calc_strength(
+                    window,
+                    fvg,
+                    symbol=symbol,
+                    existing_zones=self.tracker.zones,
+                    use_live_context=False,
+                )
             except Exception as e:
                 logger.warning("backfill calc_strength fail %s %s: %s", symbol, tf, e)
                 continue
@@ -297,6 +303,8 @@ class AlphaCaller:
         """Periodically backfill zones from WS warm-up buffers until coverage
         stabilises. Idempotent (zone_id dedup) so safe to re-fire.
         """
+        if STRATEGY_VERSION != "v2":
+            return
         from config import SYMBOLS
         target = len(SYMBOLS) * len(TIMEFRAMES)
         full_threshold = max(1, int(target * 0.95))

@@ -68,6 +68,23 @@ def test_backfill_finds_fvg_in_buffer_history(caller):
     assert len(bull_zones) >= 1, "backfill missed embedded bull FVG"
 
 
+def test_backfill_uses_offline_strength_context(caller, monkeypatch):
+    """Backfill must stay deterministic and never block on live HTTP context."""
+    import fvg_engine
+
+    def fail_network(*_args, **_kwargs):
+        raise AssertionError("backfill attempted live context fetch")
+
+    monkeypatch.setattr(fvg_engine, "_fetch_closes", fail_network)
+    monkeypatch.setattr(fvg_engine, "get_24h_price_change_pct", fail_network)
+
+    bars = _flat_bars(1_700_000_000_000, 20)
+    bars[10:13] = _bull_fvg_window(bars[10].open_time)
+
+    caller._v2_backfill_zones("TESTUSDT", "1h", bars)
+
+    assert any(z.symbol == "TESTUSDT" and z.tf == "1h" for z in caller.tracker.zones.values())
+
 def test_backfill_idempotent(caller):
     """Calling backfill twice must not create duplicate zones."""
     symbol = "TESTUSDT"

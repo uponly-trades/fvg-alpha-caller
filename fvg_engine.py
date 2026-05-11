@@ -134,7 +134,7 @@ def get_24h_price_change_pct(symbol: str) -> float:
         return 0.0
 
 
-def compute_confirm_metrics(symbol: str, direction: int, bars: List, candle_body_pct: float, zone_top: float, zone_bottom: float, existing_zones: Dict[str, 'FVGZone']) -> Dict:
+def compute_confirm_metrics(symbol: str, direction: int, bars: List, candle_body_pct: float, zone_top: float, zone_bottom: float, existing_zones: Dict[str, 'FVGZone'], use_live_context: bool = True) -> Dict:
     volumes = [b.volume for b in bars]
     vol_ma = sma(volumes, 20) or max(volumes[-1], 1.0)
     vol_spike_ratio = volumes[-1] / max(vol_ma, 1e-9)
@@ -255,13 +255,13 @@ def compute_invalid_reason(zone: 'FVGZone', bars: List) -> Optional[str]:
     return None
 
 
-def compute_confirm_metrics(symbol: str, direction: int, bars: List, candle_body_pct: float, zone_top: float, zone_bottom: float, existing_zones: Dict[str, 'FVGZone']) -> Dict:
+def compute_confirm_metrics(symbol: str, direction: int, bars: List, candle_body_pct: float, zone_top: float, zone_bottom: float, existing_zones: Dict[str, 'FVGZone'], use_live_context: bool = True) -> Dict:
     volumes = [b.volume for b in bars]
     vol_ma = sma(volumes, VOL_MA_LEN) or max(volumes[-1], 1.0)
     volume_spike_ratio = volumes[-1] / max(vol_ma, 1e-9)
     displacement_ok = candle_body_pct >= DISPLACEMENT_BODY_PCT
 
-    btc_closes = _fetch_closes("BTCUSDT", "15m", 10)
+    btc_closes = _fetch_closes("BTCUSDT", "15m", 10) if use_live_context else []
     btc_alignment_ok = False
     if len(btc_closes) >= 4:
         if direction == 1:
@@ -414,7 +414,13 @@ def detect_fvg(bars: List, symbol: str = "") -> Optional[Dict]:
     }
 
 
-def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optional[Dict[str, 'FVGZone']] = None) -> Dict:
+def calc_strength(
+    bars: List,
+    fvg: Dict,
+    symbol: str = "",
+    existing_zones: Optional[Dict[str, 'FVGZone']] = None,
+    use_live_context: bool = True,
+) -> Dict:
     """Calculate strength with regime and confirmation context."""
     closes = [b.close for b in bars]
     highs = [b.high for b in bars]
@@ -452,8 +458,8 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
     candle_body_pct = abs(curr.close - curr.open) / candle_range * 100 if candle_range > 0 else 0.0
 
     symbol = fvg.get("symbol", symbol)
-    dom_bias = get_dominance_bias()
-    btc_tr = get_btc_trend()
+    dom_bias = get_dominance_bias() if use_live_context else 0.0
+    btc_tr = get_btc_trend() if use_live_context else 0.0
     dom_state = get_dominance_state(dom_bias)
     btc_state = get_btc_state(btc_tr)
     is_btc = symbol == "BTCUSDT"
@@ -514,9 +520,10 @@ def calc_strength(bars: List, fvg: Dict, symbol: str = "", existing_zones: Optio
         zone_top=fvg["top"],
         zone_bottom=fvg["bottom"],
         existing_zones=existing_zones or {},
+        use_live_context=use_live_context,
     )
 
-    price_change_24h_pct = get_24h_price_change_pct(symbol) if symbol else 0.0
+    price_change_24h_pct = get_24h_price_change_pct(symbol) if symbol and use_live_context else 0.0
     atr_val = atr_val if atr_val else fvg["size"]
     sl = fvg["bottom"] - atr_val * 0.8 if direction == 1 else fvg["top"] + atr_val * 0.8
     tp1 = fvg["top"] + atr_val * 1.5 if direction == 1 else fvg["bottom"] - atr_val * 1.5
