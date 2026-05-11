@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-os.environ.setdefault("INTERNAL_TOKEN", "test-token")
+os.environ.setdefault("INTERNAL_TOKEN", "test-internal-token")
 os.environ.setdefault("MASTER_ENCRYPTION_KEY", "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=")
 os.environ.setdefault("DATABASE_URL", "postgresql://x")
 
@@ -30,7 +30,7 @@ async def test_invalid_binance_keys_returns_400_json():
             r = await c.post(
                 "/users/123/keys",
                 json={"api_key": "k", "api_secret": "s"},
-                headers={"X-Internal-Token": "test-token"},
+                headers={"X-Internal-Token": "test-internal-token"},
             )
 
     assert r.status_code == 400, f"got {r.status_code}: {r.text}"
@@ -54,7 +54,7 @@ async def test_network_error_returns_502_json():
             r = await c.post(
                 "/users/123/keys",
                 json={"api_key": "k", "api_secret": "s"},
-                headers={"X-Internal-Token": "test-token"},
+                headers={"X-Internal-Token": "test-internal-token"},
             )
 
     assert r.status_code == 502, f"got {r.status_code}: {r.text}"

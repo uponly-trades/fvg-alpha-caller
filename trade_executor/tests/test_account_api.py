@@ -53,6 +53,14 @@ class SummaryConn:
             "leverage": 5,
             "max_concurrent": 3,
             "daily_loss_cap_pct": 6.0,
+            "rr_ratio": 2.0,
+            "margin_mode": "ISOLATED",
+            "fixed_notional_usdt": None,
+            "fixed_risk_usdt": 3.0,
+            "max_notional_usdt": None,
+            "risk_mode": "percent",
+            "sl_enabled": True,
+            "sl_mult": 1.0,
             "paused_until": None,
             "pause_reason": None,
         }
@@ -65,6 +73,12 @@ class DummyExchange:
 
     async def fetch_balance(self):
         return self.balance
+
+    async def fapiPrivateV2GetBalance(self):
+        # Futures-only endpoint — feeds save_user_keys validation AND
+        # account_summary balance fetch. availableBalance must be present
+        # so free vs used split is computed correctly.
+        return [{"asset": "USDT", "balance": "12", "availableBalance": "10"}]
 
     async def close(self):
         self.closed = True
@@ -108,6 +122,8 @@ async def test_account_summary_fetches_balance_and_closes(monkeypatch):
     conn = SummaryConn()
     conn.key_blob = account_api.encrypt("APIKEY1234567890", raw_key)
     conn.secret_blob = account_api.encrypt("SECRET1234567890", raw_key)
+    # account_summary now fetches futures balance via fapiPrivateV2GetBalance,
+    # not ccxt fetch_balance(). DummyExchange returns 100 total / 100 free.
     ex = DummyExchange({"USDT": {"free": 10, "used": 2, "total": 12}})
     async def build(api_key, api_secret):
         return ex

@@ -25,11 +25,20 @@ to re-run (idempotent: `ADD COLUMN IF NOT EXISTS`, conditional constraints,
 filtered `UPDATE`). Run them in sequence on a fresh deploy, and run any new
 ones on existing deploys.
 
+Easiest path — run the wrapper script:
+
+```bash
+# Inside fvg-alpha-caller container (DATABASE_URL set by Coolify):
+bash deploy/apply_migrations.sh
+```
+
+Or manually, file-by-file:
+
 ```bash
 # From the repo root with $DATABASE_URL pointing at fvg-postgres:
 for f in migrations/*.sql; do
   echo "Applying $f"
-  psql "$DATABASE_URL" -f "$f" || exit 1
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || exit 1
 done
 ```
 
