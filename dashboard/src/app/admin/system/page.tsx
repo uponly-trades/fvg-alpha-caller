@@ -13,7 +13,7 @@ async function execHealth(): Promise<{ ok: boolean; status: number }> {
 export default async function AdminSystemPage() {
   const health = await execHealth();
   const [last] = await sql<any[]>`
-    SELECT MAX(created_at) AS last FROM kronos_decisions WHERE valid = true
+    SELECT MAX(created_at) AS last FROM signal_decisions WHERE valid = true
   `;
   const lastAgeMs = last?.last ? Date.now() - Number(last.last) : null;
   const [errs] = await sql<any[]>`

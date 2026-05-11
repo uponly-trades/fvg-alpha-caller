@@ -1,7 +1,7 @@
 """
 Fill signal_features.outcome + pnl_pct from sim_trades.
 
-Join logic: kronos_decisions.trade_id -> sim_trades.id (status, direction, entry, sl, tp2)
+Join logic: signal_decisions.trade_id -> sim_trades.id (status, direction, entry, sl, tp2)
             -> signal_features.decision_id
 
 Outcome tiers:

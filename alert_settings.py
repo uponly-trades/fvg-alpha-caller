@@ -12,7 +12,7 @@ Available triggers:
   snipe_short    — retest short snipe alert
   snipe_htf_fade — HTF overbought fade short (4h RSI7 hard gate triggered)
 
-Kronos v2 gate is always active regardless of these settings.
+model v2 gate is always active regardless of these settings.
 """
 from __future__ import annotations
 

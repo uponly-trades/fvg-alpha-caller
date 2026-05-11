@@ -1,8 +1,8 @@
 """
-Shadow simulate SKIP: KRONOS CONFLICT decisions.
+Shadow simulate SKIP: MODEL CONFLICT decisions.
 
-For each conflict decision, we already have Kronos's predicted entry/sl/tp1/tp2/direction
-in kronos_raw. We replay historical Binance klines forward from decision time and
+For each conflict decision, we already have Model's predicted entry/sl/tp1/tp2/direction
+in model_raw. We replay historical Binance klines forward from decision time and
 determine what *would* have happened if the trade was taken.
 
 Outcome rules (same as fill_outcomes.py):
@@ -110,20 +110,20 @@ def main():
             cur.execute("""
               SELECT
                 sf.decision_id, sf.symbol, sf.tf, sf.created_at,
-                k.kronos_raw
+                k.model_raw
               FROM signal_features sf
-              JOIN kronos_decisions k ON k.id = sf.decision_id
-              WHERE k.status = 'SKIP: KRONOS CONFLICT'
+              JOIN signal_decisions k ON k.id = sf.decision_id
+              WHERE k.status = 'SKIP: MODEL CONFLICT'
                 AND sf.outcome IS NULL
-                AND k.kronos_raw IS NOT NULL
+                AND k.model_raw IS NOT NULL
               ORDER BY sf.created_at ASC
             """)
             rows = cur.fetchall()
-        log.info("Shadow-simulating %d KRONOS CONFLICT decisions", len(rows))
+        log.info("Shadow-simulating %d MODEL CONFLICT decisions", len(rows))
 
         stats = {"win": 0, "tp1": 0, "loss": 0, "open": 0, "skip": 0}
         for i, r in enumerate(rows, 1):
-            kr = r["kronos_raw"]
+            kr = r["model_raw"]
             if isinstance(kr, str):
                 kr = json.loads(kr)
             direction = (kr.get("direction") or "").lower()

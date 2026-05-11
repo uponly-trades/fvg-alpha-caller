@@ -132,7 +132,7 @@ BASE_URL = "https://fapi.binance.com"
 # v2 Strategy (Multi-TF FVG Touch Confluence)
 # =====================================================
 STRATEGY_VERSION = os.environ.get("STRATEGY_VERSION", "v1")  # "v1" or "v2"
-KRONOS_ENABLED = os.environ.get("KRONOS_ENABLED", "true").lower() == "true"
+MODEL_ENABLED = os.environ.get("MODEL_ENABLED", "true").lower() == "true"
 
 # v2 detection params
 V2_TRIGGER_TFS = ["15m"]                                    # bullish/bearish FVG touch on these
@@ -188,7 +188,7 @@ TRADE_MARGIN_USAGE_CAP = float(os.environ.get("TRADE_MARGIN_USAGE_CAP", "0.70"))
 # v2 trail
 V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
 
-# v2 throttle (mitigate higher alert volume from no-Kronos)
+# v2 throttle (mitigate higher alert volume without the optional model gate)
 V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "1800"))  # 30 minutes
 
 # v2 freshness — drop signals whose triggering bar is older than this many seconds.

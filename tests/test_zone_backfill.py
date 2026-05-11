@@ -19,7 +19,7 @@ import pytest
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
 os.environ.setdefault("STRATEGY_VERSION", "v2")
-os.environ.setdefault("KRONOS_ENABLED", "0")
+os.environ.setdefault("MODEL_ENABLED", "0")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))

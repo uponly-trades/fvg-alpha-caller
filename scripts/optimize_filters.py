@@ -64,7 +64,7 @@ def load_rows(conn, *, date: str | None, direction: str | None) -> list[dict]:
               k.event_type,
               s.status AS trade_status,
               sf.features
-            FROM kronos_decisions k
+            FROM signal_decisions k
             JOIN signal_features sf ON sf.decision_id = k.id
             JOIN sim_trades s ON s.fvg_id = k.fvg_id AND s.direction = k.direction
             WHERE (%s IS NULL OR k.date = %s::date)

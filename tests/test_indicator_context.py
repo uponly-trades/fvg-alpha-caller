@@ -496,9 +496,9 @@ def test_alpha_caller_sends_each_session_recap_once(monkeypatch):
     assert sent == ["Siang"]
 
 
-def test_kronos_client_fallback_on_timeout(monkeypatch):
-    """When Kronos service unreachable, client returns None without raising."""
-    import kronos_client
+def test_model_client_fallback_on_timeout(monkeypatch):
+    """When Model service unreachable, client returns None without raising."""
+    import model_client
     import httpx
 
     async def fake_post(*a, **kw):
@@ -508,7 +508,7 @@ def test_kronos_client_fallback_on_timeout(monkeypatch):
 
     import asyncio
     result = asyncio.get_event_loop().run_until_complete(
-        kronos_client.predict(
+        model_client.predict(
             bars=[{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}] * 20,
             current_price=100.0,
             atr=1.0,
@@ -520,9 +520,9 @@ def test_kronos_client_fallback_on_timeout(monkeypatch):
     assert result is None
 
 
-def test_kronos_client_returns_decision_on_success(monkeypatch):
+def test_model_client_returns_decision_on_success(monkeypatch):
     """When service returns valid JSON, client returns dict with all fields."""
-    import kronos_client
+    import model_client
     import httpx
     from unittest.mock import MagicMock
 
@@ -540,7 +540,7 @@ def test_kronos_client_returns_decision_on_success(monkeypatch):
 
     import asyncio
     result = asyncio.get_event_loop().run_until_complete(
-        kronos_client.predict(
+        model_client.predict(
             bars=[{"open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000}] * 20,
             current_price=100.0, atr=1.0, zone_direction=1, symbol="BTCUSDT", tf="15m",
         )
@@ -550,14 +550,14 @@ def test_kronos_client_returns_decision_on_success(monkeypatch):
     assert result["confidence"] == 72
 
 
-def test_build_trade_from_kronos_long():
+def test_build_trade_from_model_long():
     from types import SimpleNamespace
-    from trade_combo import build_trade_from_kronos
-    kronos = {"direction": "LONG", "timeframe": "INTRADAY", "entry": 100.0,
+    from trade_combo import build_trade_from_model
+    model = {"direction": "LONG", "timeframe": "INTRADAY", "entry": 100.0,
               "sl": 99.0, "tp1": 101.0, "tp2": 102.0, "confidence": 75}
-    # Zone bottom 99.5 → zone_sl = 99.5 - 0.1 = 99.4. kronos_sl=99.0 already wider, so SL stays 99.0.
+    # Zone bottom 99.5 → zone_sl = 99.5 - 0.1 = 99.4. model_sl=99.0 already wider, so SL stays 99.0.
     zone = SimpleNamespace(direction=1, top=100.5, bottom=99.5, atr=1.0)
-    result = build_trade_from_kronos(kronos, zone)
+    result = build_trade_from_model(model, zone)
     assert result.status == "LONG VALID"
     assert result.valid is True
     assert result.mode == "intraday"
@@ -568,13 +568,13 @@ def test_build_trade_from_kronos_long():
     assert result.trade.rr == 2.0
 
 
-def test_build_trade_from_kronos_ranging():
+def test_build_trade_from_model_ranging():
     from types import SimpleNamespace
-    from trade_combo import build_trade_from_kronos
-    kronos = {"direction": "RANGING", "timeframe": "SCALPING", "entry": 100.0,
+    from trade_combo import build_trade_from_model
+    model = {"direction": "RANGING", "timeframe": "SCALPING", "entry": 100.0,
               "sl": 99.5, "tp1": 100.5, "tp2": 101.0, "confidence": 30}
     zone = SimpleNamespace(direction=1, top=100.5, bottom=99.5, atr=1.0)
-    result = build_trade_from_kronos(kronos, zone)
+    result = build_trade_from_model(model, zone)
     assert result.status == "SKIP: RANGING"
     assert result.valid is False
     assert result.trade is None
@@ -621,7 +621,7 @@ def test_alert_contains_rev_top_bottom(monkeypatch):
     from types import SimpleNamespace
     trade_setup = SimpleNamespace(
         status="LONG VALID", valid=True, mode="intraday",
-        reason="Kronos long signal",
+        reason="Model long signal",
         trade=SimpleNamespace(direction="long", entry=100.0, sl=98.0, tp1=102.0, tp2=104.0, rr=2.0),
         combo_states={}, sparklines={},
     )
@@ -633,24 +633,24 @@ def test_alert_contains_rev_top_bottom(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_bar_close_calls_kronos_and_uses_result(monkeypatch):
-    """_on_bar_close calls kronos_client.predict when a new FVG fires."""
+async def test_on_bar_close_calls_model_and_uses_result(monkeypatch):
+    """_on_bar_close calls model_client.predict when a new FVG fires."""
     import main as main_module
-    import kronos_client
+    import model_client
 
     bars = make_bars(list(range(100, 160)))
-    kronos_response = {
+    model_response = {
         "direction": "LONG", "timeframe": "INTRADAY",
         "entry": 159.0, "sl": 157.0, "tp1": 161.0, "tp2": 163.0, "confidence": 78,
     }
 
-    kronos_calls = {}
+    model_calls = {}
 
     async def fake_predict(*a, **kw):
-        kronos_calls["called"] = True
-        return kronos_response
+        model_calls["called"] = True
+        return model_response
 
-    monkeypatch.setattr(kronos_client, "predict", fake_predict)
+    monkeypatch.setattr(model_client, "predict", fake_predict)
 
     zone = SimpleNamespace(
         symbol="BTCUSDT", tf="1h", direction=1,
@@ -683,4 +683,4 @@ async def test_on_bar_close_calls_kronos_and_uses_result(monkeypatch):
     await caller._on_bar_close("BTCUSDT", "1h", bars)
 
     assert zone.alerted is True
-    assert kronos_calls.get("called") is True
+    assert model_calls.get("called") is True

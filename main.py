@@ -258,7 +258,7 @@ class AlphaCaller:
         except Exception as e:
             logger.warning("v2 chart render failed %s %s: %s", symbol, sig.trigger_tf, e)
         send_v2_alert(sig, timeframe_bars=bars_by_tf, chart_png=chart_png)
-        # Persist as kronos_decisions row → trade_executor.signal_poller picks it
+        # Persist as signal_decisions row → trade_executor.signal_poller picks it
         # up and places the order on each user with API keys + enabled.
         try:
             self.sim_store.add_v2_decision(sig, signal_id)

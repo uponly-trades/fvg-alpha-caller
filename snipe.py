@@ -234,7 +234,7 @@ def gate_retest_short(bars_by_tf: Dict[str, List]) -> Tuple[bool, str]:
 def build_htf_fade_short(zone, current_price: float, htf_rsi7: float) -> Optional[TradeSetupResult]:
     """
     Fade short when a bullish FVG forms while 4h is overbought.
-    Kronos hard-gated this LONG → RANGING. We exploit the same signal as SHORT.
+    model hard-gated this LONG → RANGING. We exploit the same signal as SHORT.
 
     Entry = current_price (market, at zone touch/approach).
     SL = zone.top + buffer (above the FVG that just formed — if price pushes above

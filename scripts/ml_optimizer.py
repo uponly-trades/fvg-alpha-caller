@@ -1,5 +1,5 @@
 """
-Random search filter optimizer for FVG/Kronos trade outcomes.
+Random search filter optimizer for FVG/Model trade outcomes.
 
 Each "config" = one combination of filter values. Score by WR x sample-size.
 Toggleable filters via FILTER_CONFIG dict — set 'enabled': False to skip.
@@ -30,7 +30,7 @@ DB_URL = os.environ.get(
 # ---- TOGGLEABLE FILTER UNIVERSE ----
 # Edit 'enabled' to skip a filter from random search. Add new filters as needed.
 DEFAULT_FILTER_CONFIG = {
-    "kronos_conf_min":   {"enabled": True,  "values": [None, 40, 50, 60, 70]},
+    "model_conf_min":   {"enabled": True,  "values": [None, 40, 50, 60, 70]},
     "rsi14_long_max":    {"enabled": True,  "values": [None, 65, 70, 75, 80]},
     "rsi14_short_min":   {"enabled": True,  "values": [None, 20, 25, 30, 35]},
     "ema_stack_align":   {"enabled": True,  "values": [True, False]},
@@ -57,9 +57,9 @@ def load_data(min_trades: int = 1) -> List[Dict]:
               SELECT
                 sf.decision_id, sf.symbol, sf.tf, sf.features, sf.btc_context,
                 sf.outcome, sf.pnl_pct,
-                k.mode, k.direction, k.kronos_raw, k.zone_dir
+                k.mode, k.direction, k.model_raw, k.zone_dir
               FROM signal_features sf
-              JOIN kronos_decisions k ON k.id = sf.decision_id
+              JOIN signal_decisions k ON k.id = sf.decision_id
               WHERE sf.outcome IS NOT NULL
               ORDER BY sf.created_at ASC
             """)
@@ -73,7 +73,7 @@ def passes(trade: Dict, cfg: Dict) -> bool:
     feats = trade["features"] or {}
     tf = trade["tf"]
     direction = trade["direction"]
-    kr = trade["kronos_raw"] or {}
+    kr = trade["model_raw"] or {}
     if isinstance(kr, str):
         kr = json.loads(kr)
     btc = trade["btc_context"] or {}
@@ -82,10 +82,10 @@ def passes(trade: Dict, cfg: Dict) -> bool:
     f_tf = feats.get(tf, {}) if isinstance(feats, dict) else {}
     f_1h = feats.get("1h", {}) if isinstance(feats, dict) else {}
 
-    # Kronos confidence
-    if cfg.get("kronos_conf_min") is not None:
+    # Model confidence
+    if cfg.get("model_conf_min") is not None:
         c = kr.get("confidence")
-        if c is None or c < cfg["kronos_conf_min"]:
+        if c is None or c < cfg["model_conf_min"]:
             return False
 
     # RSI14 extreme block

@@ -1,5 +1,5 @@
 """
-Backfill signal_features for existing kronos_decisions rows.
+Backfill signal_features for existing signal_decisions rows.
 
 Per row: fetch historical klines around decision_at, compute multi-TF features,
 write to signal_features table. Idempotent — skips already-backfilled rows.
@@ -90,7 +90,7 @@ def main():
         with conn.cursor() as cur:
             cur.execute("""
               SELECT k.id, k.fvg_id, k.created_at, k.symbol, k.tf, k.zone_dir
-              FROM kronos_decisions k
+              FROM signal_decisions k
               LEFT JOIN signal_features sf ON sf.decision_id = k.id
               WHERE sf.decision_id IS NULL
               ORDER BY k.created_at ASC

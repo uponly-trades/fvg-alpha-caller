@@ -27,7 +27,7 @@ async def poll_once(conn, *, last_seen_ms: int) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         """
         SELECT id, symbol, tf, direction, entry, sl, tp1, tp2, event_type, created_at
-        FROM kronos_decisions
+        FROM signal_decisions
         WHERE valid = true AND created_at > $1
         ORDER BY created_at ASC
         """,

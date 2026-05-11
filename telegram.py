@@ -136,7 +136,7 @@ def _format_trade_alert(zone, current_price: float, trade_setup, prefix: str = N
     if trade_setup is not None and trade_setup.trade is not None:
         trade = trade_setup.trade
         src = getattr(trade_setup, "source", "combo")
-        src_label = "🤖 Kronos" if src == "kronos" else "📊 Combo"
+        src_label = "🤖 Model" if src == "model" else "📊 Combo"
         ep = float(trade.entry)
         def _pct_t(price: float) -> str:
             return f" ({(price - ep) / ep * 100:+.2f}%)" if ep > 0 else ""

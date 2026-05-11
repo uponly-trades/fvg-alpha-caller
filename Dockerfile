@@ -11,7 +11,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py .
-COPY kronos_service/ ./kronos_service/
 COPY scripts/ ./scripts/
 
 ENV PYTHONUNBUFFERED=1

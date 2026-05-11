@@ -1,7 +1,7 @@
 """
 Dual-side shadow simulator.
 
-For EVERY kronos_decision (any status, any event_type), compute theoretical
+For EVERY signal_decision (any status, any event_type), compute theoretical
 LONG and SHORT levels using FVG zone geometry, then replay forward Binance
 klines to determine what would have happened on each side.
 
@@ -190,7 +190,7 @@ def main():
                 k.current_price, z.zone_top, z.zone_bottom, z.atr,
                 sf.long_outcome, sf.short_outcome
               FROM signal_features sf
-              JOIN kronos_decisions k ON k.id = sf.decision_id
+              JOIN signal_decisions k ON k.id = sf.decision_id
               JOIN fvg_zones z ON z.id = k.fvg_id
               WHERE z.atr IS NOT NULL
                 AND ({missing_cond})

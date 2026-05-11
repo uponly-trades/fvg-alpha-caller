@@ -1,7 +1,7 @@
 """
 Recompute signal_features JSON from Binance closed candles.
 
-Use after feature logic changes. For each kronos_decisions row, fetch historical
+Use after feature logic changes. For each signal_decisions row, fetch historical
 klines ending strictly before decision.created_at, recompute all TF features,
 and upsert signal_features. Existing outcome columns stay untouched.
 
@@ -118,7 +118,7 @@ def load_rows(conn, *, date: str | None, limit: int | None, force: bool) -> list
         cur.execute(
             f"""
             SELECT k.id, k.fvg_id, k.created_at, k.date, k.symbol, k.tf
-            FROM kronos_decisions k
+            FROM signal_decisions k
             LEFT JOIN signal_features sf ON sf.decision_id = k.id
             WHERE 1=1
               {date_filter}

@@ -1,7 +1,7 @@
 """
 Mitigated FVG shadow simulator.
 
-For every kronos_decision row with event_type IN ('mitigated_breakout',
+For every signal_decision row with event_type IN ('mitigated_breakout',
 'mitigated_reversal'), replay forward Binance klines using the row's STORED
 entry/sl/tp1/tp2 (NOT recomputed from zone geometry — breakout/reversal SL
 anchors differ from entry-style trades) to fill signal_features outcomes.
@@ -15,7 +15,7 @@ Outcome (per row, per direction):
 Storage convention (no schema change):
   direction='long'  -> writes long_outcome  / long_pnl_pct  / long_bars
   direction='short' -> writes short_outcome / short_pnl_pct / short_bars
-Filter by event_type in the kronos_decisions join when querying WR.
+Filter by event_type in the signal_decisions join when querying WR.
 
 Run: python scripts/mitigated_shadow_simulator.py [--max-bars 200] [--limit N]
 """
@@ -146,10 +146,10 @@ def main():
                 k.entry, k.sl, k.tp1, k.tp2,
                 sf.decision_id AS sf_decision_id,
                 sf.long_outcome, sf.short_outcome
-              FROM kronos_decisions k
+              FROM signal_decisions k
               JOIN signal_features sf ON sf.fvg_id = k.fvg_id
                                       AND sf.decision_id IN (
-                                        SELECT id FROM kronos_decisions
+                                        SELECT id FROM signal_decisions
                                         WHERE fvg_id = k.fvg_id
                                           AND event_type = 'mitigated_breakout'
                                       )
@@ -175,10 +175,10 @@ def main():
 
         for i, r in enumerate(rows, 1):
             cache_key = (r["symbol"], r["tf"], int(r["created_at"]) if r.get("created_at") else 0)
-            # created_at not in SELECT — fetch from kronos_decisions
+            # created_at not in SELECT — fetch from signal_decisions
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT created_at FROM kronos_decisions WHERE id = %s",
+                    "SELECT created_at FROM signal_decisions WHERE id = %s",
                     (r["decision_id"],),
                 )
                 created_row = cur.fetchone()
@@ -248,10 +248,10 @@ def main():
                      COUNT(*) AS n,
                      ROUND(AVG(CASE WHEN k.direction='long' THEN sf.long_pnl_pct
                                     ELSE sf.short_pnl_pct END)::numeric, 3) AS avg_pnl
-              FROM kronos_decisions k
+              FROM signal_decisions k
               JOIN signal_features sf ON sf.fvg_id = k.fvg_id
                                       AND sf.decision_id IN (
-                                        SELECT id FROM kronos_decisions
+                                        SELECT id FROM signal_decisions
                                         WHERE fvg_id = k.fvg_id
                                           AND event_type = 'mitigated_breakout'
                                       )

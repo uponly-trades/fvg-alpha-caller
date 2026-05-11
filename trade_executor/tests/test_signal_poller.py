@@ -17,16 +17,16 @@ async def test_poll_only_returns_valid_decisions_after_last_seen():
     try:
         async with pool.acquire() as conn:
             await conn.execute("""
-              CREATE TABLE IF NOT EXISTS kronos_decisions (
+              CREATE TABLE IF NOT EXISTS signal_decisions (
                 id TEXT PRIMARY KEY, symbol TEXT, tf TEXT, direction TEXT,
                 entry DOUBLE PRECISION, sl DOUBLE PRECISION,
                 tp1 DOUBLE PRECISION, tp2 DOUBLE PRECISION,
                 valid BOOLEAN, event_type TEXT, created_at BIGINT
               )
             """)
-            await conn.execute("DELETE FROM kronos_decisions WHERE id LIKE 'sp-%'")
+            await conn.execute("DELETE FROM signal_decisions WHERE id LIKE 'sp-%'")
             await conn.execute("""
-              INSERT INTO kronos_decisions (id, symbol, tf, direction, entry, sl, tp1, tp2, valid, event_type, created_at) VALUES
+              INSERT INTO signal_decisions (id, symbol, tf, direction, entry, sl, tp1, tp2, valid, event_type, created_at) VALUES
                 ('sp-1', 'BTCUSDT', '1h', 'long', 100, 95, 105, 110, true, 'touch', 1000),
                 ('sp-2', 'BTCUSDT', '1h', 'long', 100, 95, 105, 110, false, 'touch', 2000),
                 ('sp-3', 'ETHUSDT', '1h', 'short', 200, 210, 190, 180, true, 'touch', 3000)

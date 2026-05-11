@@ -1,8 +1,8 @@
 """
-Async HTTP client for Kronos prediction service.
+Async HTTP client for the optional prediction service.
 Returns None on any network/service error — caller uses fallback.
 
-Concurrency: Kronos service is single-GPU (MPS) so it can only run one
+Concurrency: the model service is single-GPU (MPS) so it can only run one
 prediction at a time. Bot bursts on bar-close, so we cap concurrent calls
 with a semaphore and retry once with backoff before giving up.
 """
@@ -16,7 +16,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-KRONOS_URL = os.environ.get("KRONOS_URL", "http://192.168.70.192:8012")
+MODEL_URL = os.environ.get("MODEL_URL", "http://192.168.70.192:8012")
 
 # Generous timeouts: GPU prediction ~1s sequential but queues under burst.
 # connect 15s tolerates TCP+TLS during saturation, total 45s tolerates queue depth.
@@ -24,7 +24,7 @@ _TIMEOUT = httpx.Timeout(45.0, connect=15.0)
 
 # Cap concurrent /predict calls — service serializes on GPU anyway,
 # so >2 in-flight just queue at the server and waste timeout budget.
-_MAX_CONCURRENT = int(os.environ.get("KRONOS_MAX_CONCURRENT", "2"))
+_MAX_CONCURRENT = int(os.environ.get("MODEL_MAX_CONCURRENT", "2"))
 _SEMAPHORE: Optional[asyncio.Semaphore] = None
 
 _RETRIES = 1  # one retry on transient timeout/5xx
@@ -40,7 +40,7 @@ def _get_sem() -> asyncio.Semaphore:
 
 async def _post_once(payload: dict) -> Optional[Dict]:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.post(f"{KRONOS_URL}/predict", json=payload)
+        resp = await client.post(f"{MODEL_URL}/predict", json=payload)
         resp.raise_for_status()
         return resp.json()
 
@@ -55,9 +55,9 @@ async def predict(
     htf_bars: Optional[List[Dict]] = None,
 ) -> Optional[Dict]:
     """
-    Call Kronos service. Returns decision dict or None if unreachable/error.
+    Call prediction service. Returns decision dict or None if unreachable/error.
     Decision dict keys: direction, timeframe, entry, sl, tp1, tp2, confidence.
-    htf_bars: optional 4h OHLCV bars for HTF RSI7 gate inside Kronos.
+    htf_bars: optional 4h OHLCV bars for HTF RSI7 gate inside the model.
     """
     payload = {
         "bars": bars[-512:],
@@ -95,7 +95,7 @@ async def predict(
     err_name = type(last_err).__name__ if last_err else "Unknown"
     err_msg = str(last_err) if last_err else ""
     logger.warning(
-        "Kronos service unavailable (%s %s): %s: %s — using fallback",
+        "model service unavailable (%s %s): %s: %s — using fallback",
         symbol, tf, err_name, err_msg,
     )
     return None

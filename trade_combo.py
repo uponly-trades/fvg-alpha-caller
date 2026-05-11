@@ -172,9 +172,9 @@ class TradeSetupResult:
     trade: Optional[TradeLevels]
     combo_states: Dict[str, str]
     sparklines: Dict[str, str] = None
-    source: str = "combo"          # "kronos" | "combo"
-    kronos_raw: Optional[dict] = None  # raw Kronos response for ML logging
-    predicted_bars: Optional[list] = None  # Kronos forecast candles for chart
+    source: str = "combo"          # "model" | "combo"
+    model_raw: Optional[dict] = None  # raw model response for ML logging
+    predicted_bars: Optional[list] = None  # model forecast candles for chart
     v2_decision: Optional[dict] = None  # shadow v2 filter result for compare logging
 
 
@@ -269,25 +269,25 @@ def _build_trade_levels(zone, current_price: float) -> Optional[TradeLevels]:
 _TIMEFRAME_MAP = {"SCALPING": "scalping", "INTRADAY": "intraday", "SWING": "swing"}
 
 
-def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
+def build_trade_from_model(model: dict, zone) -> TradeSetupResult:
     """
-    Convert Kronos prediction response into TradeSetupResult.
+    Convert model prediction response into TradeSetupResult.
     RANGING → SKIP. Direction must align with zone.direction, else SKIP.
     SL anchored to FVG zone geometry. TP1/TP2 always recomputed from actual
-    risk (1R and 2R) so RR is always exactly 1:2 regardless of Kronos's
+    risk (1R and 2R) so RR is always exactly 1:2 regardless of model's
     raw TP values (which can be arbitrarily small vs a wide zone SL).
     """
     zone_direction = int(zone.direction)
-    direction = kronos.get("direction", "RANGING")
-    timeframe = kronos.get("timeframe", "INTRADAY")
-    confidence = kronos.get("confidence", 0)
+    direction = model.get("direction", "RANGING")
+    timeframe = model.get("timeframe", "INTRADAY")
+    confidence = model.get("confidence", 0)
     mode = _TIMEFRAME_MAP.get(timeframe, "intraday")
 
     if direction == "RANGING":
         return TradeSetupResult(
             "SKIP: RANGING", False, mode,
-            f"Kronos ranging (conf {confidence}%)",
-            None, {}, {}, source="kronos", kronos_raw=kronos,
+            f"Model ranging (conf {confidence}%)",
+            None, {}, {}, source="model", model_raw=model,
         )
 
     # SHORT side: combo path disabled — skip
@@ -295,31 +295,31 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
         return TradeSetupResult(
             "SKIP: SHORT DISABLED", False, mode,
             "short WR 25% negative EV, disabled",
-            None, {}, {}, source="kronos", kronos_raw=kronos,
+            None, {}, {}, source="model", model_raw=model,
         )
 
     # Must align with FVG zone direction
     expected = "LONG" if zone_direction == 1 else "SHORT"
     if direction != expected:
         return TradeSetupResult(
-            "SKIP: KRONOS CONFLICT", False, mode,
-            f"Kronos {direction} conflicts with {expected} FVG zone (conf {confidence}%)",
-            None, {}, {}, source="kronos", kronos_raw=kronos,
+            "SKIP: MODEL CONFLICT", False, mode,
+            f"Model {direction} conflicts with {expected} FVG zone (conf {confidence}%)",
+            None, {}, {}, source="model", model_raw=model,
         )
 
-    entry = float(kronos["entry"])
-    kronos_sl = float(kronos["sl"])
+    entry = float(model["entry"])
+    model_sl = float(model["sl"])
     buffer = _risk_buffer(zone)
     # SL anchored to FVG zone bottom (never inside zone)
     zone_sl = float(zone.bottom) - buffer
-    sl = min(kronos_sl, zone_sl)
+    sl = min(model_sl, zone_sl)
 
     risk = abs(entry - sl)
     if risk <= 0:
         return TradeSetupResult(
             "SKIP: INVALID RISK", False, mode,
             "entry == sl after zone anchor",
-            None, {}, {}, source="kronos", kronos_raw=kronos,
+            None, {}, {}, source="model", model_raw=model,
         )
 
     # TP always recomputed from actual risk → guaranteed 1:2 RR
@@ -335,11 +335,11 @@ def build_trade_from_kronos(kronos: dict, zone) -> TradeSetupResult:
         rr=2.0,
     )
     status = f"{direction} VALID"
-    reason = f"Kronos {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"
+    reason = f"Model {direction.lower()} — {timeframe.lower()} (conf {confidence}%)"
     return TradeSetupResult(
         status, True, mode, reason, trade, {}, {},
-        source="kronos", kronos_raw=kronos,
-        predicted_bars=kronos.get("predicted_bars"),
+        source="model", model_raw=model,
+        predicted_bars=model.get("predicted_bars"),
     )
 
 

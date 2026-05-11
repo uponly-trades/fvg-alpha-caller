@@ -52,7 +52,29 @@ CREATE INDEX IF NOT EXISTS idx_sim_trades_status ON sim_trades(status);
 CREATE INDEX IF NOT EXISTS idx_sim_trades_date ON sim_trades(date);
 CREATE INDEX IF NOT EXISTS idx_fvg_zones_date ON fvg_zones(date);
 
-CREATE TABLE IF NOT EXISTS kronos_decisions (
+DO $$
+BEGIN
+    IF to_regclass('public.signal_decisions') IS NULL
+       AND to_regclass('public.kronos_decisions') IS NOT NULL THEN
+        ALTER TABLE kronos_decisions RENAME TO signal_decisions;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'signal_decisions'
+          AND column_name = 'kronos_raw'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'signal_decisions'
+          AND column_name = 'model_raw'
+    ) THEN
+        ALTER TABLE signal_decisions RENAME COLUMN kronos_raw TO model_raw;
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS signal_decisions (
     id           TEXT PRIMARY KEY,
     fvg_id       TEXT NOT NULL,
     created_at   BIGINT NOT NULL,
@@ -62,7 +84,7 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
     event_type   TEXT NOT NULL,          -- 'new_fvg' | 'approach' | 'touch'
     zone_dir     SMALLINT NOT NULL,      -- 1=long, -1=short
     current_price DOUBLE PRECISION NOT NULL,
-    source       TEXT NOT NULL,          -- 'kronos' | 'combo'
+    source       TEXT NOT NULL,          -- 'model' | 'combo'
     status       TEXT NOT NULL,          -- e.g. 'LONG VALID', 'SKIP: RANGING', ...
     valid        BOOLEAN NOT NULL,
     mode         TEXT,
@@ -72,24 +94,25 @@ CREATE TABLE IF NOT EXISTS kronos_decisions (
     sl           DOUBLE PRECISION,
     tp1          DOUBLE PRECISION,
     tp2          DOUBLE PRECISION,
-    kronos_raw   JSONB,                  -- full Kronos response, null if combo fallback
+    model_raw    JSONB,                  -- full model response, null if combo fallback
     trade_id     TEXT,                   -- FK to sim_trades.id, null if no trade taken
     v2_valid     BOOLEAN,                -- shadow filter v2 decision (compare vs v1)
     v2_status    TEXT,                   -- v2 status string
     v2_reason    TEXT                    -- v2 skip/take reason
 );
 
-ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_valid  BOOLEAN;
-ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_status TEXT;
-ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS v2_reason TEXT;
-ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS confluence_score SMALLINT;
-ALTER TABLE kronos_decisions ADD COLUMN IF NOT EXISTS fvg_data JSONB;
-CREATE INDEX IF NOT EXISTS idx_kronos_decisions_v2_valid ON kronos_decisions(v2_valid);
-CREATE INDEX IF NOT EXISTS idx_kronos_decisions_confluence ON kronos_decisions(confluence_score);
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS v2_valid  BOOLEAN;
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS v2_status TEXT;
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS v2_reason TEXT;
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS confluence_score SMALLINT;
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS fvg_data JSONB;
+ALTER TABLE signal_decisions ADD COLUMN IF NOT EXISTS model_raw JSONB;
+CREATE INDEX IF NOT EXISTS idx_signal_decisions_v2_valid ON signal_decisions(v2_valid);
+CREATE INDEX IF NOT EXISTS idx_signal_decisions_confluence ON signal_decisions(confluence_score);
 
-CREATE INDEX IF NOT EXISTS idx_kronos_decisions_symbol ON kronos_decisions(symbol);
-CREATE INDEX IF NOT EXISTS idx_kronos_decisions_date ON kronos_decisions(date);
-CREATE INDEX IF NOT EXISTS idx_kronos_decisions_valid ON kronos_decisions(valid);
+CREATE INDEX IF NOT EXISTS idx_signal_decisions_symbol ON signal_decisions(symbol);
+CREATE INDEX IF NOT EXISTS idx_signal_decisions_date ON signal_decisions(date);
+CREATE INDEX IF NOT EXISTS idx_signal_decisions_valid ON signal_decisions(valid);
 
 CREATE TABLE IF NOT EXISTS sent_recaps (
     key TEXT PRIMARY KEY,
@@ -97,7 +120,7 @@ CREATE TABLE IF NOT EXISTS sent_recaps (
 );
 
 CREATE TABLE IF NOT EXISTS signal_features (
-    decision_id  TEXT PRIMARY KEY REFERENCES kronos_decisions(id) ON DELETE CASCADE,
+    decision_id  TEXT PRIMARY KEY REFERENCES signal_decisions(id) ON DELETE CASCADE,
     fvg_id       TEXT NOT NULL,
     created_at   BIGINT NOT NULL,
     date         DATE NOT NULL,
@@ -205,9 +228,9 @@ class SimTradeStore:
                         setup.reason,
                     ),
                 )
-                # Link kronos_decision → sim_trade (match by fvg_id + mode + valid)
+                # Link model_decision → sim_trade (match by fvg_id + mode + valid)
                 cur.execute(
-                    """UPDATE kronos_decisions SET trade_id = %s
+                    """UPDATE signal_decisions SET trade_id = %s
                        WHERE fvg_id = %s AND mode = %s AND valid = true AND trade_id IS NULL""",
                     (trade_id, fvg_id, setup.mode),
                 )
@@ -221,28 +244,28 @@ class SimTradeStore:
         fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
         return f"{fvg_id}-{event_type}-{int(zone.born_time)}-{int(current_price * 1000)}"
 
-    def add_kronos_decision(self, zone, setup, current_price: float, event_type: str) -> bool:
-        """Log every Kronos/combo decision (valid or skip) for ML training."""
+    def add_signal_decision(self, zone, setup, current_price: float, event_type: str) -> bool:
+        """Log every model/combo decision (valid or skip) for ML training."""
         fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
         decision_id = self.make_decision_id(zone, current_price, event_type)
         now = datetime.now(timezone.utc)
         trade = getattr(setup, "trade", None)
-        kronos_raw = getattr(setup, "kronos_raw", None)
+        model_raw = getattr(setup, "model_raw", None)
         try:
             with _cursor() as cur:
-                cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (decision_id,))
+                cur.execute("SELECT id FROM signal_decisions WHERE id = %s", (decision_id,))
                 if cur.fetchone():
                     return False
                 v2 = getattr(setup, "v2_decision", None)
-                # direction: trade direction if valid, else Kronos model direction from raw
-                # (LONG/SHORT/RANGING from Kronos, or long/short from trade)
-                k_direction = (kronos_raw or {}).get("direction") if kronos_raw else None
+                # direction: trade direction if valid, else model direction from raw
+                # (LONG/SHORT/RANGING from model, or long/short from trade)
+                k_direction = (model_raw or {}).get("direction") if model_raw else None
                 direction_val = (trade.direction if trade else None) or k_direction
                 cur.execute(
-                    """INSERT INTO kronos_decisions
+                    """INSERT INTO signal_decisions
                        (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
                         current_price, source, status, valid, mode, reason,
-                        direction, entry, sl, tp1, tp2, kronos_raw,
+                        direction, entry, sl, tp1, tp2, model_raw,
                         v2_valid, v2_status, v2_reason)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (
@@ -265,7 +288,7 @@ class SimTradeStore:
                         float(trade.sl) if trade else None,
                         float(trade.tp1) if trade else None,
                         float(trade.tp2) if trade else None,
-                        json.dumps(kronos_raw) if kronos_raw else None,
+                        json.dumps(model_raw) if model_raw else None,
                         bool(v2["valid"]) if v2 else None,
                         v2["status"] if v2 else None,
                         v2["reason"] if v2 else None,
@@ -273,11 +296,11 @@ class SimTradeStore:
                 )
             return True
         except Exception as e:
-            logger.error("add_kronos_decision failed: %s", e)
+            logger.error("add_signal_decision failed: %s", e)
             return False
 
     def add_v2_decision(self, signal, signal_id: str) -> bool:
-        """Persist a v2 signal as a kronos_decisions row so trade_executor.signal_poller picks it up.
+        """Persist a v2 signal as a signal_decisions row so trade_executor.signal_poller picks it up.
 
         valid=true is what poller filters on. The same signal is also written to
         sim_trades so public channel recaps remain fully simulation-based while
@@ -297,7 +320,7 @@ class SimTradeStore:
             tp2 = float(signal.entry) - r * 2
         try:
             with _cursor() as cur:
-                cur.execute("SELECT id FROM kronos_decisions WHERE id = %s", (signal_id,))
+                cur.execute("SELECT id FROM signal_decisions WHERE id = %s", (signal_id,))
                 if cur.fetchone():
                     return False
                 fvg_data = {
@@ -333,7 +356,7 @@ class SimTradeStore:
                     "htf_obstacle_tf": signal.indicators.get("htf_obstacle_tf", ""),
                 }
                 cur.execute(
-                    """INSERT INTO kronos_decisions
+                    """INSERT INTO signal_decisions
                        (id, fvg_id, created_at, date, symbol, tf, event_type, zone_dir,
                         current_price, source, status, valid, mode, reason,
                         direction, entry, sl, tp1, tp2, confluence_score, fvg_data)
@@ -406,7 +429,7 @@ class SimTradeStore:
                     ),
                 )
                 cur.execute(
-                    "UPDATE kronos_decisions SET trade_id = %s WHERE id = %s",
+                    "UPDATE signal_decisions SET trade_id = %s WHERE id = %s",
                     (trade_id, signal_id),
                 )
             return True

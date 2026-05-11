@@ -8,7 +8,7 @@ export async function GET() {
   await requireUser();
   const rows = await sql<any[]>`
     SELECT id, symbol, tf, direction, event_type, entry, sl, tp1, tp2, created_at
-    FROM kronos_decisions
+    FROM signal_decisions
     WHERE valid = true
     ORDER BY created_at DESC
     LIMIT 50

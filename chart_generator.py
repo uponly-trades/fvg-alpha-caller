@@ -98,7 +98,7 @@ def generate_chart(
     trade_plan=None,
     predicted_bars: Optional[List[Dict]] = None,
 ) -> Optional[bytes]:
-    """Generate candlestick chart with FVG zone, EMAs, RSI7, KDJ, StochRSI, and Kronos forecast."""
+    """Generate candlestick chart with FVG zone, EMAs, RSI7, KDJ, StochRSI, and model forecast."""
     try:
         df = pd.DataFrame({
             "Open": [b.open for b in bars],
@@ -232,7 +232,7 @@ def generate_chart(
                              color="white", fontsize=8, va="center",
                              bbox={"facecolor": color, "alpha": 0.85, "edgecolor": color})
 
-        # ── Kronos forecast ghost candles ─────────────────────────────────
+        # ── Model forecast ghost candles ─────────────────────────────────
         if predicted_bars:
             px_start = len(df)  # first forecast x index
             p_dir = "up"
@@ -268,7 +268,7 @@ def generate_chart(
             # Label
             ax_main.text(
                 px_start + len(predicted_bars) / 2, predicted_bars[-1]["close"],
-                "  Kronos →", color="#aaaaaa", fontsize=7, va="bottom",
+                "  Model →", color="#aaaaaa", fontsize=7, va="bottom",
             )
 
         ax_main.tick_params(labelbottom=False, colors="white")
