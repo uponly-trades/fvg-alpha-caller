@@ -322,6 +322,18 @@ def _bars_far_from_zone(zone, n=25):
     return [make_bar(i, far, far + 1, far - 1, far + 0.5, 100.0) for i in range(1, n + 1)]
 
 
+def _bars_retest_long(zone, n=25):
+    bars = _bars_far_from_zone(zone, n=n - 1)
+    bars.append(make_bar(n, zone.top - 0.4, zone.top + 0.5, zone.top - zone.size * 0.5, zone.top + 0.3, 100.0))
+    return bars
+
+
+def _bars_retest_short(zone, n=25):
+    bars = _bars_far_from_zone(zone, n=n - 1)
+    bars.append(make_bar(n, zone.bottom + 0.4, zone.bottom + zone.size * 0.5, zone.bottom - 0.5, zone.bottom - 0.3, 100.0))
+    return bars
+
+
 def test_eval_no_15m_no_30m_zones_returns_none():
     zones = {}
     bars_by_tf = {tf: [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)] for tf in ("15m", "30m", "1h", "2h", "4h")}
@@ -333,7 +345,7 @@ def test_eval_15m_touched_no_htf_confluence_returns_none():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m}
     bars_by_tf = {
-        "15m": _bars_at_zone(z_15m),
+        "15m": _bars_retest_long(z_15m),
         "30m": _bars_far_from_zone(z_15m),
         "1h": _bars_far_from_zone(z_15m),
         "2h": _bars_far_from_zone(z_15m),
@@ -350,7 +362,7 @@ def test_eval_rejects_touched_zone_without_volume_confirmation():
     z_15m.fvg_sell_volume = 80.0
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
-    bars_at = _bars_at_zone(z_15m)
+    bars_at = _bars_retest_long(z_15m)
     bars_by_tf = {
         "15m": bars_at,
         "30m": _bars_far_from_zone(z_15m),
@@ -365,7 +377,7 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
-    bars_at = _bars_at_zone(z_15m)
+    bars_at = _bars_retest_long(z_15m)
     bars_by_tf = {
         "15m": bars_at,
         "30m": _bars_far_from_zone(z_15m),
@@ -383,6 +395,9 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     assert sig.htf_touches["1h"] is False
     assert sig.indicators["quality_score"] == pytest.approx(z_15m.size / z_15m.atr)
     assert sig.indicators["quality_score_formula_live"] == "zeiierman_gap_atr"
+    assert sig.indicators["retest_score"] >= 60
+    assert sig.indicators["retest_reason"] == "valid"
+    assert sig.entry == pytest.approx(bars_at[-1].close)
     # tp = entry + 2R for long
     r = abs(sig.entry - sig.sl)
     assert abs(sig.tp - (sig.entry + 2 * r)) < 1e-9
@@ -409,7 +424,7 @@ def test_eval_short_mirror():
     z_15m = make_zone(tf="15m", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
     z_4h = make_zone(tf="4h", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
-    bars_at = _bars_at_zone(z_15m)
+    bars_at = _bars_retest_short(z_15m)
     bars_by_tf = {
         "15m": bars_at, "30m": _bars_far_from_zone(z_15m),
         "1h": _bars_far_from_zone(z_15m), "2h": _bars_far_from_zone(z_15m),
@@ -425,10 +440,218 @@ def test_eval_sl_below_fvg_bottom_long():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
-    bars_at = _bars_at_zone(z_15m)
+    bars_at = _bars_retest_long(z_15m)
     bars_by_tf = {tf: bars_at if tf in ("15m", "4h") else _bars_far_from_zone(z_15m)
                   for tf in ("15m", "30m", "1h", "2h", "4h")}
     sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
     assert sig is not None
     assert sig.sl < z_15m.bottom
     assert abs(sig.sl - 99.2) < 1e-9
+
+
+def test_v2_new_safety_config_imports():
+    import config
+
+    assert isinstance(config.V2_HTF_OBSTACLE_FILTER_ENABLED, bool)
+    assert config.V2_HTF_OBSTACLE_TFS == ["1h", "2h", "4h"]
+    assert config.V2_HTF_OBSTACLE_ATR_BUFFER >= 0
+    assert config.V2_ENTRY_MODE in {"close", "touch"}
+    assert 0 <= config.V2_MIN_TOUCH_DEPTH <= 1
+    assert config.V2_MIN_FVG_TIER in {"weak", "normal", "strong"}
+    assert isinstance(config.V2_RETEST_ENABLED, bool)
+    assert 0 <= config.V2_RETEST_MIN_DEPTH <= config.V2_RETEST_MAX_DEPTH <= 1
+    assert config.V2_RETEST_MIN_SCORE > 0
+    assert config.V2_STRONG_VOLUME_SCORE >= config.V2_NORMAL_VOLUME_SCORE
+    assert 0 <= config.V2_NORMAL_VOLUME_IMBALANCE <= 1
+    assert config.V2_STRONG_VOLUME_IMBALANCE >= config.V2_NORMAL_VOLUME_IMBALANCE
+    assert 0 < config.TRADE_MARGIN_USAGE_CAP <= 1
+
+
+from strategy_v2 import _htf_obstacle_decision
+
+
+def test_long_blocked_when_bearish_htf_fvg_contains_entry():
+    zones = {"bear_1h": make_zone(tf="1h", direction=-1, top=105.0, bottom=100.0)}
+
+    decision = _htf_obstacle_decision(
+        symbol="BTCUSDT", direction=1, entry=102.0, tp=108.0,
+        zones=zones, obstacle_tfs=["1h", "2h", "4h"], atr_buffer_mult=0.0,
+    )
+
+    assert decision.blocked is True
+    assert decision.reason == "entry_inside_opposite_htf_fvg"
+    assert decision.blocking_tf == "1h"
+    assert decision.blocking_direction == -1
+
+
+def test_long_blocked_when_bearish_htf_fvg_intersects_path_to_tp():
+    zones = {"bear_4h": make_zone(tf="4h", direction=-1, top=106.0, bottom=104.0)}
+
+    decision = _htf_obstacle_decision(
+        symbol="BTCUSDT", direction=1, entry=100.0, tp=108.0,
+        zones=zones, obstacle_tfs=["1h", "2h", "4h"], atr_buffer_mult=0.0,
+    )
+
+    assert decision.blocked is True
+    assert decision.reason == "tp_path_blocked_by_opposite_htf_fvg"
+    assert decision.blocking_tf == "4h"
+
+
+def test_short_blocked_when_bullish_htf_fvg_intersects_path_to_tp():
+    zones = {"bull_2h": make_zone(tf="2h", direction=1, top=96.0, bottom=94.0)}
+
+    decision = _htf_obstacle_decision(
+        symbol="BTCUSDT", direction=-1, entry=100.0, tp=92.0,
+        zones=zones, obstacle_tfs=["1h", "2h", "4h"], atr_buffer_mult=0.0,
+    )
+
+    assert decision.blocked is True
+    assert decision.reason == "tp_path_blocked_by_opposite_htf_fvg"
+    assert decision.blocking_tf == "2h"
+    assert decision.blocking_direction == 1
+
+
+def test_same_direction_htf_fvg_does_not_block():
+    zones = {"bull_1h": make_zone(tf="1h", direction=1, top=105.0, bottom=100.0)}
+
+    decision = _htf_obstacle_decision(
+        symbol="BTCUSDT", direction=1, entry=100.0, tp=108.0,
+        zones=zones, obstacle_tfs=["1h", "2h", "4h"], atr_buffer_mult=0.0,
+    )
+
+    assert decision.blocked is False
+    assert decision.reason == "clear"
+
+
+def test_obstacle_ignores_mitigated_or_wrong_symbol_zones():
+    mitigated = make_zone(symbol="BTCUSDT", tf="1h", direction=-1, top=105.0, bottom=100.0)
+    mitigated.mitigation = 1.0
+    wrong_symbol = make_zone(symbol="ETHUSDT", tf="1h", direction=-1, top=105.0, bottom=100.0)
+    zones = {"mitigated": mitigated, "wrong_symbol": wrong_symbol}
+
+    decision = _htf_obstacle_decision(
+        symbol="BTCUSDT", direction=1, entry=102.0, tp=108.0,
+        zones=zones, obstacle_tfs=["1h", "2h", "4h"], atr_buffer_mult=0.0,
+    )
+
+    assert decision.blocked is False
+
+
+from strategy_v2 import _zone_touch_depth, _touch_depth_ok, _live_touch_qualifies, _fvg_strength_tier, _fvg_retest_decision
+
+
+def test_zone_touch_depth_for_long_zone():
+    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    assert _zone_touch_depth(z, 100.0) == 0.0
+    assert _zone_touch_depth(z, 99.5) == 0.25
+    assert _zone_touch_depth(z, 99.0) == 0.5
+    assert _zone_touch_depth(z, 97.0) == 1.0
+
+
+def test_zone_touch_depth_for_short_zone():
+    z = make_zone(direction=-1, top=100.0, bottom=98.0)
+    assert _zone_touch_depth(z, 98.0) == 0.0
+    assert _zone_touch_depth(z, 98.5) == 0.25
+    assert _zone_touch_depth(z, 99.0) == 0.5
+    assert _zone_touch_depth(z, 101.0) == 1.0
+
+
+def test_touch_depth_ok_respects_min_depth():
+    long_zone = make_zone(direction=1, top=100.0, bottom=98.0)
+    assert _touch_depth_ok(long_zone, touch_price=99.5, min_depth=0.25) is True
+    assert _touch_depth_ok(long_zone, touch_price=99.8, min_depth=0.25) is False
+
+
+def test_live_touch_qualifies_long_only_after_min_depth():
+    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    assert _live_touch_qualifies(z, live_price=99.5, min_depth=0.25) is True
+    assert _live_touch_qualifies(z, live_price=99.75, min_depth=0.25) is False
+    assert _live_touch_qualifies(z, live_price=101.0, min_depth=0.25) is False
+
+
+def test_live_touch_qualifies_short_only_after_min_depth():
+    z = make_zone(direction=-1, top=100.0, bottom=98.0)
+    assert _live_touch_qualifies(z, live_price=98.5, min_depth=0.25) is True
+    assert _live_touch_qualifies(z, live_price=98.25, min_depth=0.25) is False
+    assert _live_touch_qualifies(z, live_price=97.0, min_depth=0.25) is False
+
+
+def test_fvg_strength_tier_strong_when_volume_and_strength_are_high():
+    z = make_zone(direction=1)
+    z.volume_score = 1.8
+    z.fvg_buy_volume = 150.0
+    z.fvg_sell_volume = 50.0
+    z.main_strength = 80
+    tier, metrics = _fvg_strength_tier(z)
+    assert tier == "strong"
+    assert metrics["fvg_volume_imbalance"] == pytest.approx(0.5)
+    assert metrics["fvg_volume_aligned"] is True
+
+
+def test_fvg_strength_tier_weak_when_directional_volume_is_wrong():
+    z = make_zone(direction=1)
+    z.volume_score = 2.0
+    z.fvg_buy_volume = 40.0
+    z.fvg_sell_volume = 160.0
+    z.main_strength = 90
+    tier, metrics = _fvg_strength_tier(z)
+    assert tier == "weak"
+    assert metrics["fvg_volume_aligned"] is False
+
+
+def test_fvg_retest_decision_accepts_bullish_reclaim():
+    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    bars = _bars_retest_long(z)
+    decision = _fvg_retest_decision(z, bars)
+    assert decision.valid is True
+    assert decision.reason == "valid"
+    assert decision.touch_depth == pytest.approx(0.5)
+    assert decision.confirmation_close == pytest.approx(bars[-1].close)
+
+
+def test_fvg_retest_decision_rejects_plain_touch_without_reclaim():
+    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    bars = _bars_at_zone(z)
+    decision = _fvg_retest_decision(z, bars)
+    assert decision.valid is False
+    assert decision.reason in {"retest_too_deep", "no_bullish_reclaim"}
+
+
+def test_fvg_retest_decision_accepts_bearish_reject():
+    z = make_zone(direction=-1, top=100.0, bottom=98.0)
+    bars = _bars_retest_short(z)
+    decision = _fvg_retest_decision(z, bars)
+    assert decision.valid is True
+    assert decision.reason == "valid"
+    assert decision.touch_depth == pytest.approx(0.5)
+
+
+def test_evaluate_v2_signal_skips_long_when_bearish_htf_fvg_blocks_tp_path(monkeypatch):
+    import strategy_v2
+
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", True)
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_TFS", ["1h", "2h", "4h"])
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_ATR_BUFFER", 0.0)
+    monkeypatch.setattr(strategy_v2, "V2_HTF_MIN_SCORE", 1)
+    monkeypatch.setattr(strategy_v2, "V2_MIN_QUALITY_SCORE", 0.0)
+    monkeypatch.setattr(strategy_v2, "V2_MIN_FVG_TIER", "normal")
+
+    trigger = make_zone(tf="15m", direction=1, top=100.0, bottom=99.0, born_time=1000, atr_val=1.0)
+    trigger.quality_score = 100.0
+    trigger.volume_score = 1.8
+    trigger.fvg_buy_volume = 150.0
+    trigger.fvg_sell_volume = 50.0
+    trigger.main_strength = 80
+
+    same_dir_htf = make_zone(tf="1h", direction=1, top=99.5, bottom=98.5, born_time=900, atr_val=1.0)
+    blocker = make_zone(tf="4h", direction=-1, top=102.0, bottom=101.0, born_time=800, atr_val=1.0)
+
+    zones = {"trigger": trigger, "same_dir_htf": same_dir_htf, "blocker": blocker}
+    bars_by_tf = {
+        "15m": _bars_retest_long(trigger),
+        "1h": _bars_at_zone(same_dir_htf),
+        "2h": _bars_far_from_zone(trigger),
+        "4h": _bars_far_from_zone(trigger),
+    }
+
+    assert strategy_v2.evaluate_v2_signal("BTCUSDT", zones, bars_by_tf) is None

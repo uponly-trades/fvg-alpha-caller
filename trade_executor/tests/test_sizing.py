@@ -98,3 +98,24 @@ def test_compute_size_percent_risk_below_exchange_min_skips():
     assert res.skip_reason == "min_notional"
     assert res.notional_usdt == pytest.approx(60.0)
     assert res.capped is False
+
+
+def test_compute_size_skips_when_required_margin_exceeds_free_balance_cap():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=100, risk_pct=3, entry=100, sl=99.9, leverage=10, meta=meta,
+        free_balance=20, margin_usage_cap=0.70,
+    )
+    assert res.skip_reason == "margin_required"
+    assert res.margin_usdt > 14.0
+
+
+def test_compute_size_allows_when_required_margin_within_free_balance_cap():
+    meta = SymbolMeta(step_size=0.001, min_notional=5.0)
+    res = compute_size(
+        balance=100, risk_pct=3, entry=100, sl=99, leverage=10, meta=meta,
+        free_balance=50, margin_usage_cap=0.70,
+    )
+    assert res.skip_reason is None
+    assert res.notional_usdt == pytest.approx(300.0)
+    assert res.margin_usdt == pytest.approx(30.0)

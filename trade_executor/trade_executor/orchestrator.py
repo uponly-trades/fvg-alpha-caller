@@ -66,9 +66,9 @@ async def handle_signal_for_user(
     ex,
     risk_pct: float,
     leverage: int,
-    margin_mode: str = "ISOLATED",
     max_concurrent: int,
     daily_loss_cap_pct: float,
+    margin_mode: str = "ISOLATED",
     rr_ratio: float = 1.0,
     fixed_notional_usdt: float | None = None,
     fixed_risk_usdt: float | None = None,
@@ -126,6 +126,9 @@ async def handle_signal_for_user(
         size = compute_size(
             balance=float(balance), risk_pct=risk_pct, entry=live_entry, sl=sl,
             leverage=leverage, meta=meta,
+            fixed_notional_usdt=fixed_notional_usdt,
+            fixed_risk_usdt=fixed_risk_usdt,
+            max_notional_usdt=max_notional_usdt,
             free_balance=free_balance, margin_usage_cap=margin_usage_cap,
         )
         if size.skip_reason:

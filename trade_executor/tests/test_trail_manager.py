@@ -3,12 +3,24 @@ import os
 import pytest
 
 from trade_executor import db
-from trade_executor.trail_manager import maybe_trail
+from trade_executor.trail_manager import maybe_trail, r_progress, trail_sl_for_progress
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("TEST_DATABASE_URL"),
-    reason="TEST_DATABASE_URL not set",
-)
+def test_r_progress_long_and_short():
+    assert r_progress(direction="long", entry=100, sl=95, price=107.5) == pytest.approx(1.5)
+    assert r_progress(direction="short", entry=100, sl=105, price=92.5) == pytest.approx(1.5)
+
+
+def test_trail_sl_for_progress_locks_profit_stages():
+    assert trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=95, price=107.5) == pytest.approx(105.0)
+    assert trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=105, price=112.5) == pytest.approx(107.5)
+    assert trail_sl_for_progress(direction="short", entry=100, sl=105, sl_current=105, price=92.5) == pytest.approx(95.0)
+    assert trail_sl_for_progress(direction="short", entry=100, sl=105, sl_current=95, price=87.5) == pytest.approx(92.5)
+
+
+def test_trail_sl_for_progress_does_not_loosen_or_repeat_same_stage():
+    assert trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=105, price=107.5) is None
+    assert trail_sl_for_progress(direction="short", entry=100, sl=105, sl_current=95, price=92.5) is None
+    assert trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=95, price=104.9) is None
 
 
 class FakeEx:
@@ -28,8 +40,9 @@ class FakeEx:
         return {"id": "new-sl"}
 
 
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
 @pytest.mark.asyncio
-async def test_long_trails_when_price_crosses_tp1(monkeypatch):
+async def test_long_trails_when_price_reaches_1_5r(monkeypatch):
     pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
     try:
         async with pool.acquire() as conn:
@@ -63,8 +76,9 @@ async def test_long_trails_when_price_crosses_tp1(monkeypatch):
         await pool.close()
 
 
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
 @pytest.mark.asyncio
-async def test_short_trails_when_price_crosses_tp1():
+async def test_short_trails_when_price_reaches_1_5r():
     pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
     try:
         async with pool.acquire() as conn:
@@ -88,8 +102,9 @@ async def test_short_trails_when_price_crosses_tp1():
         await pool.close()
 
 
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
 @pytest.mark.asyncio
-async def test_no_trail_when_price_below_tp1_long():
+async def test_no_trail_when_price_below_1_5r_long():
     pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
     try:
         async with pool.acquire() as conn:
@@ -106,7 +121,7 @@ async def test_no_trail_when_price_below_tp1_long():
                 f"{uid}-tr-3", uid,
             )
         ex = FakeEx()
-        trailed = await maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=104.0)
+        trailed = await maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=107.4)
         assert trailed is False
     finally:
         await pool.close()

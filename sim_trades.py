@@ -279,10 +279,14 @@ class SimTradeStore:
     def add_v2_decision(self, signal, signal_id: str) -> bool:
         """Persist a v2 signal as a kronos_decisions row so trade_executor.signal_poller picks it up.
 
-        valid=true is what poller filters on. tp1=entry+1R (initial executor TP), tp2=entry+2R.
+        valid=true is what poller filters on. The same signal is also written to
+        sim_trades so public channel recaps remain fully simulation-based while
+        the per-user bot/executor can process real trades separately.
+        tp1=entry+1R (initial executor TP), tp2=entry+2R.
         Idempotent on (id) — duplicate signal_id returns False.
         """
         fvg_id = f"{signal.symbol}-{signal.trigger_tf}-{int(signal.zone_born_time)}"
+        trade_id = f"{signal_id}-sim"
         now = datetime.now(timezone.utc)
         r = abs(float(signal.entry) - float(signal.sl))
         if signal.direction == 1:
@@ -312,6 +316,21 @@ class SimTradeStore:
                     "main_strength": int(signal.indicators.get("main_strength", 0)),
                     "bull_strength": int(signal.indicators.get("bull_strength", 0)),
                     "bear_strength": int(signal.indicators.get("bear_strength", 0)),
+                    "fvg_strength_tier": signal.indicators.get("fvg_strength_tier", "weak"),
+                    "fvg_volume_imbalance": float(signal.indicators.get("fvg_volume_imbalance", 0.0) or 0.0),
+                    "fvg_volume_aligned": bool(signal.indicators.get("fvg_volume_aligned", False)),
+                    "touch_depth": float(signal.indicators.get("touch_depth", 0.0) or 0.0),
+                    "entry_mode": signal.indicators.get("entry_mode", "close"),
+                    "retest_enabled": bool(signal.indicators.get("retest_enabled", 0.0)),
+                    "retest_score": float(signal.indicators.get("retest_score", 0.0) or 0.0),
+                    "retest_reason": signal.indicators.get("retest_reason", ""),
+                    "retest_touch_depth": float(signal.indicators.get("retest_touch_depth", 0.0) or 0.0),
+                    "retest_rejection_ratio": float(signal.indicators.get("retest_rejection_ratio", 0.0) or 0.0),
+                    "retest_body_ratio": float(signal.indicators.get("retest_body_ratio", 0.0) or 0.0),
+                    "retest_confirmation_time": int(signal.indicators.get("retest_confirmation_time", 0) or 0),
+                    "htf_obstacle_blocked": bool(signal.indicators.get("htf_obstacle_blocked", 0.0)),
+                    "htf_obstacle_reason": signal.indicators.get("htf_obstacle_reason", "clear"),
+                    "htf_obstacle_tf": signal.indicators.get("htf_obstacle_tf", ""),
                 }
                 cur.execute(
                     """INSERT INTO kronos_decisions
@@ -326,14 +345,14 @@ class SimTradeStore:
                         now.date(),
                         signal.symbol,
                         signal.trigger_tf,
-                        "v2_fvg_touch",
+                        "v2_fvg_retest",
                         int(signal.direction),
                         float(signal.entry),
                         "v2",
                         f"v2 {signal.direction_str.upper()} score={signal.confluence_score}",
                         True,
                         signal.direction_str,
-                        f"v2 multi-tf confluence (score={signal.confluence_score})",
+                        f"v2 FVG retest confluence (score={signal.confluence_score})",
                         signal.direction_str,
                         float(signal.entry),
                         float(signal.sl),
@@ -342,6 +361,53 @@ class SimTradeStore:
                         int(signal.confluence_score),
                         psycopg2.extras.Json(fvg_data),
                     ),
+                )
+                cur.execute(
+                    """INSERT INTO fvg_zones
+                       (id, created_at, date, symbol, tf, direction, zone_top, zone_bottom,
+                        price, strength, rsi, atr)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (id) DO NOTHING""",
+                    (
+                        fvg_id,
+                        int(signal.zone_born_time),
+                        now.date(),
+                        signal.symbol,
+                        signal.trigger_tf,
+                        int(signal.direction),
+                        float(signal.zone_top),
+                        float(signal.zone_bottom),
+                        float(signal.entry),
+                        int(signal.indicators.get("main_strength", 0) or 0),
+                        float(signal.indicators.get("rsi", 50.0) or 50.0),
+                        float(signal.atr),
+                    ),
+                )
+                cur.execute(
+                    """INSERT INTO sim_trades
+                       (id, fvg_id, created_at, date, symbol, tf, mode, direction,
+                        entry, sl, tp1, tp2, status, reason)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'open',%s)
+                       ON CONFLICT (id) DO NOTHING""",
+                    (
+                        trade_id,
+                        fvg_id,
+                        int(time.time() * 1000),
+                        now.date(),
+                        signal.symbol,
+                        signal.trigger_tf,
+                        "v2_retest",
+                        signal.direction_str,
+                        float(signal.entry),
+                        float(signal.sl),
+                        tp1,
+                        tp2,
+                        f"v2 FVG retest confluence (score={signal.confluence_score})",
+                    ),
+                )
+                cur.execute(
+                    "UPDATE kronos_decisions SET trade_id = %s WHERE id = %s",
+                    (trade_id, signal_id),
                 )
             return True
         except Exception as e:
@@ -490,10 +556,6 @@ class SimTradeStore:
     def daily_recap(self, date: Optional[str] = None) -> Dict:
         if date is None:
             date = datetime.now(timezone.utc).date().isoformat()
-
-        live = self._live_daily_recap(date)
-        if live is not None:
-            return live
 
         try:
             with _cursor() as cur:

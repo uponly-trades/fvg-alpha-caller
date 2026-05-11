@@ -199,6 +199,10 @@ class AlphaCaller:
                 logger.info("v2 stopped %s %s | sl=%g price=%g",
                             st.symbol, st.signal_id, st.sl_at_stop, st.last_price)
 
+    # Retest-entry flow:
+    # - Current production path is bar-close based: _on_bar_close -> _v2_try_emit_signal.
+    # - strategy_v2 now requires a valid FVG retest/rejection before alerting.
+    # - The executor still enters with a market order after the decision is persisted.
     def _v2_try_emit_signal(self, symbol: str, tf: str, bars) -> None:
         bars_by_tf = self._timeframe_bars(symbol)
         sig = evaluate_v2_signal(symbol, self.tracker.zones, bars_by_tf)

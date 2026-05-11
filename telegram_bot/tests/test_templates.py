@@ -43,6 +43,20 @@ def test_fmt_tp2_uses_plus_sign_for_profit():
     assert "+$5.41" in msg or "+5.41" in msg
 
 
+def test_fmt_tp2_single_target_uses_tp_hit_label():
+    msg = fmt_tp2(symbol="BTCUSDT", pnl_usdt=5.41, pnl_pct=2.0, **{**_CLOSE_KW, "tp2": 101.0})
+    assert "TP HIT" in msg
+    assert "TP2 HIT" not in msg
+    assert " tp " in msg
+    assert "tp2" not in msg
+
+
+def test_fmt_tp2_multi_target_keeps_tp2_label():
+    msg = fmt_tp2(symbol="BTCUSDT", pnl_usdt=5.41, pnl_pct=2.0, **{**_CLOSE_KW, "tp2": 103.0})
+    assert "TP2 HIT" in msg
+    assert "tp2" in msg
+
+
 def test_fmt_sl_uses_minus_sign_for_loss():
     msg = fmt_sl(symbol="BTCUSDT", pnl_usdt=-2.71, pnl_pct=-1.0, **_CLOSE_KW)
     assert "-$2.71" in msg or "-2.71" in msg

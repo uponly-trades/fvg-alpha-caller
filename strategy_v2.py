@@ -6,6 +6,11 @@ from config import (
     V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_HTF_MIN_SCORE, V2_RR,
     V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2, V2_MIN_QUALITY_SCORE,
     V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE, V2_REQUIRE_DIRECTIONAL_VOLUME,
+    V2_HTF_OBSTACLE_FILTER_ENABLED, V2_HTF_OBSTACLE_TFS, V2_HTF_OBSTACLE_ATR_BUFFER,
+    V2_ENTRY_MODE, V2_MIN_TOUCH_DEPTH, V2_MIN_FVG_TIER,
+    V2_RETEST_ENABLED, V2_RETEST_MIN_DEPTH, V2_RETEST_MAX_DEPTH, V2_RETEST_MIN_SCORE,
+    V2_NORMAL_VOLUME_SCORE, V2_NORMAL_VOLUME_IMBALANCE, V2_NORMAL_MAIN_STRENGTH,
+    V2_STRONG_VOLUME_SCORE, V2_STRONG_VOLUME_IMBALANCE, V2_STRONG_MAIN_STRENGTH,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
 
@@ -35,6 +40,28 @@ class V2Signal:
         return "long" if self.direction == 1 else "short"
 
 
+@dataclass(frozen=True)
+class HTFObstacleDecision:
+    blocked: bool
+    reason: str = "clear"
+    blocking_tf: str = ""
+    blocking_direction: int = 0
+    zone_top: float = 0.0
+    zone_bottom: float = 0.0
+
+
+@dataclass(frozen=True)
+class RetestDecision:
+    valid: bool
+    reason: str = "valid"
+    touch_depth: float = 0.0
+    retest_score: float = 0.0
+    rejection_ratio: float = 0.0
+    body_ratio: float = 0.0
+    confirmation_close: float = 0.0
+    confirmation_time: int = 0
+
+
 def _htf_active_and_touched(
     zone: Optional[FVGZone],
     bars: List,
@@ -62,6 +89,71 @@ def _htf_active_and_touched(
 
 
 _TF_SECONDS = {"15m": 900, "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400}
+_TIER_RANK = {"weak": 0, "normal": 1, "strong": 2}
+
+
+def _expanded_zone_bounds(zone: FVGZone, atr_buffer_mult: float) -> tuple[float, float]:
+    atr_val = float(getattr(zone, "atr", 0.0) or 0.0)
+    buffer = max(0.0, atr_val * max(0.0, float(atr_buffer_mult)))
+    return float(zone.bottom) - buffer, float(zone.top) + buffer
+
+
+def _price_inside_zone(price: float, zone: FVGZone, atr_buffer_mult: float = 0.0) -> bool:
+    bottom, top = _expanded_zone_bounds(zone, atr_buffer_mult)
+    return bottom <= float(price) <= top
+
+
+def _path_intersects_zone(entry: float, tp: float, zone: FVGZone, atr_buffer_mult: float = 0.0) -> bool:
+    path_low = min(float(entry), float(tp))
+    path_high = max(float(entry), float(tp))
+    zone_bottom, zone_top = _expanded_zone_bounds(zone, atr_buffer_mult)
+    return max(path_low, zone_bottom) <= min(path_high, zone_top)
+
+
+def _htf_obstacle_decision(
+    *,
+    symbol: str,
+    direction: int,
+    entry: float,
+    tp: float,
+    zones: Dict[str, FVGZone],
+    obstacle_tfs: List[str],
+    atr_buffer_mult: float,
+) -> HTFObstacleDecision:
+    """Return whether an opposite 1h/2h/4h FVG blocks this trade."""
+    opposite_direction = -1 if direction == 1 else 1
+    for zone in zones.values():
+        if zone.symbol != symbol:
+            continue
+        if zone.tf not in obstacle_tfs:
+            continue
+        if zone.direction != opposite_direction:
+            continue
+        if zone.mitigation >= 1.0:
+            continue
+        if _price_inside_zone(entry, zone, atr_buffer_mult):
+            return HTFObstacleDecision(
+                blocked=True,
+                reason="entry_inside_opposite_htf_fvg",
+                blocking_tf=zone.tf,
+                blocking_direction=zone.direction,
+                zone_top=float(zone.top),
+                zone_bottom=float(zone.bottom),
+            )
+        if _path_intersects_zone(entry, tp, zone, atr_buffer_mult):
+            return HTFObstacleDecision(
+                blocked=True,
+                reason="tp_path_blocked_by_opposite_htf_fvg",
+                blocking_tf=zone.tf,
+                blocking_direction=zone.direction,
+                zone_top=float(zone.top),
+                zone_bottom=float(zone.bottom),
+            )
+    return HTFObstacleDecision(blocked=False)
+
+
+def _tier_allowed(tier: str, minimum: str) -> bool:
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK.get(minimum, 1)
 
 
 def _zeiierman_quality(z: FVGZone) -> float:
@@ -196,30 +288,154 @@ def _compute_sl(zone: FVGZone, atr_val: float) -> float:
     return zone.top + buf
 
 
-def _volume_confirmation(zone: FVGZone) -> tuple[bool, dict]:
-    """Return whether the FVG formation volume confirms the zone direction.
+def _clamp01(v: float) -> float:
+    return max(0.0, min(1.0, float(v)))
 
-    Imbalance = abs(buy-sell)/(buy+sell). Directional alignment means:
-    - long/bullish FVG: taker buy volume > taker sell volume
-    - short/bearish FVG: taker sell volume > taker buy volume
+
+def _zone_touch_depth(zone: FVGZone, touch_price: float) -> float:
+    size = abs(float(zone.top) - float(zone.bottom))
+    if size <= 0:
+        return 0.0
+    price = float(touch_price)
+    if zone.direction == 1:
+        return _clamp01((float(zone.top) - price) / size)
+    return _clamp01((price - float(zone.bottom)) / size)
+
+
+def _touch_depth_ok(zone: FVGZone, *, touch_price: float, min_depth: float) -> bool:
+    return _zone_touch_depth(zone, touch_price) >= _clamp01(min_depth)
+
+
+def _live_touch_qualifies(zone: FVGZone, *, live_price: float, min_depth: float) -> bool:
+    price = float(live_price)
+    if zone.direction == 1:
+        if price > float(zone.top):
+            return False
+        return _touch_depth_ok(zone, touch_price=price, min_depth=min_depth)
+    if price < float(zone.bottom):
+        return False
+    return _touch_depth_ok(zone, touch_price=price, min_depth=min_depth)
+
+
+def _fvg_strength_tier(zone: FVGZone) -> tuple[str, dict]:
+    """Classify FVG formation volume as weak/normal/strong.
+
+    This keeps the strategy FVG-first, but stops weak churn zones from passing
+    merely because price touched them. Strong requires aligned directional volume,
+    higher imbalance, and higher existing Zeiierman-style main_strength.
     """
     buy = float(getattr(zone, "fvg_buy_volume", 0.0) or 0.0)
     sell = float(getattr(zone, "fvg_sell_volume", 0.0) or 0.0)
     total = buy + sell
     imbalance = abs(buy - sell) / total if total > 0 else 0.0
     volume_score = float(getattr(zone, "volume_score", 0.0) or 0.0)
+    main_strength = int(getattr(zone, "main_strength", 0) or 0)
     aligned = (buy > sell) if zone.direction == 1 else (sell > buy)
-    passed = (
-        volume_score >= V2_MIN_VOLUME_SCORE
-        and imbalance >= V2_MIN_VOLUME_IMBALANCE
-        and (aligned or not V2_REQUIRE_DIRECTIONAL_VOLUME)
-    )
-    return passed, {
+
+    tier = "weak"
+    if aligned or not V2_REQUIRE_DIRECTIONAL_VOLUME:
+        if (
+            volume_score >= V2_STRONG_VOLUME_SCORE
+            and imbalance >= V2_STRONG_VOLUME_IMBALANCE
+            and main_strength >= V2_STRONG_MAIN_STRENGTH
+        ):
+            tier = "strong"
+        elif (
+            volume_score >= V2_NORMAL_VOLUME_SCORE
+            and imbalance >= V2_NORMAL_VOLUME_IMBALANCE
+            and main_strength >= V2_NORMAL_MAIN_STRENGTH
+        ):
+            tier = "normal"
+        elif volume_score >= V2_MIN_VOLUME_SCORE and imbalance >= V2_MIN_VOLUME_IMBALANCE:
+            tier = "normal"
+
+    return tier, {
         "fvg_total_volume": total,
         "fvg_volume_imbalance": imbalance,
         "fvg_volume_aligned": aligned,
         "volume_score": volume_score,
+        "main_strength": main_strength,
+        "fvg_strength_tier": tier,
     }
+
+
+def _volume_confirmation(zone: FVGZone) -> tuple[bool, dict]:
+    """Return whether the FVG formation volume confirms the zone direction."""
+    tier, metrics = _fvg_strength_tier(zone)
+    passed = _tier_allowed(tier, V2_MIN_FVG_TIER)
+    return passed, metrics
+
+
+def _score_depth(depth: float, min_depth: float, max_depth: float) -> float:
+    if depth < min_depth or depth > max_depth:
+        return 0.0
+    ideal = (min_depth + max_depth) / 2
+    span = max(ideal - min_depth, max_depth - ideal, 1e-9)
+    return max(0.0, 1.0 - abs(depth - ideal) / span)
+
+
+def _fvg_retest_decision(
+    zone: FVGZone,
+    bars: List,
+    *,
+    min_depth: float = V2_RETEST_MIN_DEPTH,
+    max_depth: float = V2_RETEST_MAX_DEPTH,
+    min_score: float = V2_RETEST_MIN_SCORE,
+) -> RetestDecision:
+    """Confirm an FVG retest on the latest closed candle."""
+    if not bars:
+        return RetestDecision(valid=False, reason="no_bars")
+
+    b = bars[-1]
+    candle_range = max(float(b.high) - float(b.low), abs(float(b.close)) * 1e-6, 1e-9)
+    body_ratio = abs(float(b.close) - float(b.open)) / candle_range
+
+    if zone.direction == 1:
+        if float(b.low) > float(zone.top):
+            return RetestDecision(valid=False, reason="no_retest_touch")
+        depth = _zone_touch_depth(zone, float(b.low))
+        if depth < min_depth:
+            return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
+        if depth > max_depth or float(b.low) < float(zone.bottom):
+            return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
+        if float(b.close) <= float(zone.top):
+            return RetestDecision(valid=False, reason="no_bullish_reclaim", touch_depth=depth)
+        if float(b.close) <= float(b.open):
+            return RetestDecision(valid=False, reason="no_bullish_rejection", touch_depth=depth)
+        rejection_ratio = _clamp01((float(b.close) - float(b.low)) / candle_range)
+        reclaim_ratio = _clamp01((float(b.close) - float(zone.top)) / max(float(zone.size), 1e-9))
+    else:
+        if float(b.high) < float(zone.bottom):
+            return RetestDecision(valid=False, reason="no_retest_touch")
+        depth = _zone_touch_depth(zone, float(b.high))
+        if depth < min_depth:
+            return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
+        if depth > max_depth or float(b.high) > float(zone.top):
+            return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
+        if float(b.close) >= float(zone.bottom):
+            return RetestDecision(valid=False, reason="no_bearish_reject", touch_depth=depth)
+        if float(b.close) >= float(b.open):
+            return RetestDecision(valid=False, reason="no_bearish_rejection", touch_depth=depth)
+        rejection_ratio = _clamp01((float(b.high) - float(b.close)) / candle_range)
+        reclaim_ratio = _clamp01((float(zone.bottom) - float(b.close)) / max(float(zone.size), 1e-9))
+
+    depth_score = _score_depth(depth, min_depth, max_depth)
+    retest_score = (
+        depth_score * 35.0
+        + rejection_ratio * 30.0
+        + min(body_ratio, 1.0) * 20.0
+        + reclaim_ratio * 15.0
+    )
+    return RetestDecision(
+        valid=retest_score >= min_score,
+        reason="valid" if retest_score >= min_score else "retest_score_low",
+        touch_depth=depth,
+        retest_score=retest_score,
+        rejection_ratio=rejection_ratio,
+        body_ratio=body_ratio,
+        confirmation_close=float(b.close),
+        confirmation_time=int(getattr(b, "open_time", 0) or 0),
+    )
 
 
 def evaluate_v2_signal(
@@ -263,13 +479,27 @@ def evaluate_v2_signal(
                 )
                 continue
 
+            last_bar = bars[-1]
+            touch_price = float(last_bar.low) if direction == 1 else float(last_bar.high)
+            touch_depth = _zone_touch_depth(triggered, touch_price)
+
+            retest = _fvg_retest_decision(triggered, bars)
+            if V2_RETEST_ENABLED and not retest.valid:
+                logger.info(
+                    "v2 skip %s %s %s | retest=%s depth=%.3f score=%.1f",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    retest.reason, retest.touch_depth, retest.retest_score,
+                )
+                continue
+
             volume_ok, volume_metrics = _volume_confirmation(triggered)
             if not volume_ok:
                 logger.info(
-                    "v2 skip %s %s %s | volume_score=%.2f imbalance=%.3f aligned=%s thresholds=(%.2f, %.2f)",
+                    "v2 skip %s %s %s | fvg_tier=%s volume_score=%.2f imbalance=%.3f aligned=%s min_tier=%s",
                     symbol, trigger_tf, "long" if direction == 1 else "short",
-                    volume_metrics["volume_score"], volume_metrics["fvg_volume_imbalance"],
-                    volume_metrics["fvg_volume_aligned"], V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE,
+                    volume_metrics["fvg_strength_tier"], volume_metrics["volume_score"],
+                    volume_metrics["fvg_volume_imbalance"], volume_metrics["fvg_volume_aligned"],
+                    V2_MIN_FVG_TIER,
                 )
                 continue
 
@@ -288,12 +518,30 @@ def evaluate_v2_signal(
                     atr_val = triggered.size
 
             sl = _compute_sl(triggered, atr_val)
-            # Zeiierman parity: entry at FVG zone edge (not close price)
-            # LONG (bullish FVG): enter at zone.top (above the gap)
-            # SHORT (bearish FVG): enter at zone.bottom (below the gap)
-            entry = float(triggered.top) if direction == 1 else float(triggered.bottom)
+            # In retest mode the signal is confirmed on candle close, and the
+            # executor enters with a market order after this decision is stored.
+            entry = retest.confirmation_close if V2_RETEST_ENABLED else (
+                float(triggered.top) if direction == 1 else float(triggered.bottom)
+            )
             r = abs(entry - sl)
             tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
+
+            obstacle = _htf_obstacle_decision(
+                symbol=symbol,
+                direction=direction,
+                entry=entry,
+                tp=tp,
+                zones=zones,
+                obstacle_tfs=V2_HTF_OBSTACLE_TFS,
+                atr_buffer_mult=V2_HTF_OBSTACLE_ATR_BUFFER,
+            )
+            if V2_HTF_OBSTACLE_FILTER_ENABLED and obstacle.blocked:
+                logger.info(
+                    "v2 skip %s %s %s | htf_obstacle=%s tf=%s zone=[%g,%g]",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    obstacle.reason, obstacle.blocking_tf, obstacle.zone_bottom, obstacle.zone_top,
+                )
+                continue
 
             return V2Signal(
                 symbol=symbol,
@@ -322,6 +570,20 @@ def evaluate_v2_signal(
                     "fvg_total_volume": volume_metrics["fvg_total_volume"],
                     "fvg_volume_imbalance": volume_metrics["fvg_volume_imbalance"],
                     "fvg_volume_aligned": volume_metrics["fvg_volume_aligned"],
+                    "fvg_strength_tier": volume_metrics["fvg_strength_tier"],
+                    "touch_depth": touch_depth,
+                    "entry_mode": V2_ENTRY_MODE,
+                    "min_touch_depth": V2_MIN_TOUCH_DEPTH,
+                    "retest_enabled": float(V2_RETEST_ENABLED),
+                    "retest_score": retest.retest_score,
+                    "retest_reason": retest.reason,
+                    "retest_touch_depth": retest.touch_depth,
+                    "retest_rejection_ratio": retest.rejection_ratio,
+                    "retest_body_ratio": retest.body_ratio,
+                    "retest_confirmation_time": retest.confirmation_time,
+                    "htf_obstacle_blocked": float(obstacle.blocked),
+                    "htf_obstacle_reason": obstacle.reason,
+                    "htf_obstacle_tf": obstacle.blocking_tf,
                 },
             )
     return None

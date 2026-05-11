@@ -150,6 +150,41 @@ V2_MIN_VOLUME_SCORE = float(os.environ.get("V2_MIN_VOLUME_SCORE", "1.0"))
 V2_MIN_VOLUME_IMBALANCE = float(os.environ.get("V2_MIN_VOLUME_IMBALANCE", "0.10"))
 V2_REQUIRE_DIRECTIONAL_VOLUME = os.environ.get("V2_REQUIRE_DIRECTIONAL_VOLUME", "1") == "1"
 
+# v2 HTF opposite FVG obstacle filter.
+# Protects FVG-triggered LONGs from entering into nearby bearish HTF supply,
+# and SHORTs from entering into nearby bullish HTF demand.
+V2_HTF_OBSTACLE_FILTER_ENABLED = os.environ.get("V2_HTF_OBSTACLE_FILTER_ENABLED", "1") == "1"
+V2_HTF_OBSTACLE_TFS = [
+    tf.strip()
+    for tf in os.environ.get("V2_HTF_OBSTACLE_TFS", "1h,2h,4h").split(",")
+    if tf.strip()
+]
+V2_HTF_OBSTACLE_ATR_BUFFER = float(os.environ.get("V2_HTF_OBSTACLE_ATR_BUFFER", "0.25"))
+
+# v2 entry timing mode. "close" preserves current bar-close behavior; "touch"
+# is reserved for live-price wiring after safety filters are proven.
+V2_ENTRY_MODE = os.environ.get("V2_ENTRY_MODE", "close").lower()
+V2_MIN_TOUCH_DEPTH = float(os.environ.get("V2_MIN_TOUCH_DEPTH", "0.25"))
+
+# v2 retest confirmation. Signals are emitted only after the trigger candle
+# enters the FVG and rejects back out in the signal direction.
+V2_RETEST_ENABLED = os.environ.get("V2_RETEST_ENABLED", "1") == "1"
+V2_RETEST_MIN_DEPTH = float(os.environ.get("V2_RETEST_MIN_DEPTH", str(V2_MIN_TOUCH_DEPTH)))
+V2_RETEST_MAX_DEPTH = float(os.environ.get("V2_RETEST_MAX_DEPTH", "0.95"))
+V2_RETEST_MIN_SCORE = float(os.environ.get("V2_RETEST_MIN_SCORE", "60"))
+
+# v2 Zeiierman-style FVG strength tiers from formation volume and main strength.
+V2_MIN_FVG_TIER = os.environ.get("V2_MIN_FVG_TIER", "normal").lower()
+V2_NORMAL_VOLUME_SCORE = float(os.environ.get("V2_NORMAL_VOLUME_SCORE", "1.1"))
+V2_NORMAL_VOLUME_IMBALANCE = float(os.environ.get("V2_NORMAL_VOLUME_IMBALANCE", "0.10"))
+V2_NORMAL_MAIN_STRENGTH = int(os.environ.get("V2_NORMAL_MAIN_STRENGTH", "50"))
+V2_STRONG_VOLUME_SCORE = float(os.environ.get("V2_STRONG_VOLUME_SCORE", "1.5"))
+V2_STRONG_VOLUME_IMBALANCE = float(os.environ.get("V2_STRONG_VOLUME_IMBALANCE", "0.20"))
+V2_STRONG_MAIN_STRENGTH = int(os.environ.get("V2_STRONG_MAIN_STRENGTH", "70"))
+
+# Executor preflight: skip trades whose required margin would consume too much free/equity.
+TRADE_MARGIN_USAGE_CAP = float(os.environ.get("TRADE_MARGIN_USAGE_CAP", "0.70"))
+
 # v2 trail
 V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
 

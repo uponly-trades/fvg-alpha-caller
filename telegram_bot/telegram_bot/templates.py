@@ -23,16 +23,21 @@ def fmt_opened(*, symbol, tf, direction, entry, sl, tp1, tp2,
     )
 
 
+def _same_price(a: float, b: float) -> bool:
+    return abs(float(a) - float(b)) <= max(abs(float(a)), abs(float(b)), 1.0) * 1e-6
+
+
 def _trade_setup_block(*, tf: str, direction: str, entry: float, sl: float,
                        tp1: float, tp2: float, qty: float, leverage: int,
                        notional: float) -> str:
-    """Show original signal setup so user can evaluate the strategy in context."""
     sl_pct = (entry - sl) / entry * 100 if direction == "long" else (sl - entry) / entry * 100
-    tp2_pct = (tp2 - entry) / entry * 100 if direction == "long" else (entry - tp2) / entry * 100
-    rr = (tp2_pct / abs(sl_pct)) if sl_pct else 0
+    target = tp1 if _same_price(tp1, tp2) else tp2
+    target_label = "tp" if _same_price(tp1, tp2) else "tp2"
+    tp_pct = (target - entry) / entry * 100 if direction == "long" else (entry - target) / entry * 100
+    rr = (tp_pct / abs(sl_pct)) if sl_pct else 0
     return (
         f"   {tf} {direction.upper()}  entry {_px(entry)}\n"
-        f"   sl {_px(sl)} ({_pct(-abs(sl_pct))})  tp2 {_px(tp2)} ({_pct(tp2_pct)})  RR <b>{rr:.2f}</b>\n"
+        f"   sl {_px(sl)} ({_pct(-abs(sl_pct))})  {target_label} {_px(target)} ({_pct(tp_pct)})  RR <b>{rr:.2f}</b>\n"
         f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional)"
     )
 
@@ -43,7 +48,8 @@ def fmt_tp2(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
         tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
         qty=qty, leverage=leverage, notional=notional,
     )
-    return f"✅ <b>TP2 HIT</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
+    label = "TP HIT" if _same_price(tp1, tp2) else "TP2 HIT"
+    return f"✅ <b>{label}</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
 def fmt_sl(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,

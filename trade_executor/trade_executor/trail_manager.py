@@ -21,38 +21,69 @@ log = logging.getLogger("trail_manager")
 async def _open_in_symbol(conn, symbol: str) -> list[dict]:
     rows = await conn.fetch(
         """
-        SELECT id, user_id, direction, qty, tp1, sl_order_id, sl_current
+        SELECT id, user_id, direction, qty, entry, sl, sl_order_id, sl_current
         FROM user_trades
-        WHERE symbol=$1 AND status='open'
+        WHERE symbol=$1 AND status IN ('open','tp1_trailed')
         """,
         symbol,
     )
     return [dict(r) for r in rows]
 
 
-async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
-    """For each open trade in symbol, if price has crossed TP1, trail SL to TP1.
+def r_progress(*, direction: str, entry: float, sl: float, price: float) -> float:
+    r = abs(float(entry) - float(sl))
+    if r <= 0:
+        return 0.0
+    if direction == "long":
+        return (float(price) - float(entry)) / r
+    return (float(entry) - float(price)) / r
 
-    Returns True if at least one trade was trailed.
-    """
+
+def trail_sl_for_progress(*, direction: str, entry: float, sl: float, sl_current: float, price: float) -> float | None:
+    progress = r_progress(direction=direction, entry=entry, sl=sl, price=price)
+    if progress >= 3.5:
+        locked_r = 2.5
+    elif progress >= 2.5:
+        locked_r = 1.5
+    elif progress >= 1.5:
+        locked_r = 1.0
+    else:
+        return None
+
+    r = abs(float(entry) - float(sl))
+    if direction == "long":
+        next_sl = float(entry) + r * locked_r
+        if next_sl <= float(sl_current):
+            return None
+    else:
+        next_sl = float(entry) - r * locked_r
+        if next_sl >= float(sl_current):
+            return None
+    return next_sl
+
+
+async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
     trailed_any = False
     async with pool.acquire() as conn:
         trades = await _open_in_symbol(conn, symbol)
 
     for t in trades:
         is_long = t["direction"] == "long"
-        crossed = (is_long and price >= float(t["tp1"])) or (
-            not is_long and price <= float(t["tp1"])
+        side = "long" if is_long else "short"
+        trail_price = trail_sl_for_progress(
+            direction=side,
+            entry=float(t["entry"]),
+            sl=float(t["sl"]),
+            sl_current=float(t["sl_current"]),
+            price=price,
         )
-        if not crossed:
+        if trail_price is None:
             continue
 
         if t["sl_order_id"]:
             await cancel_algo(ex, symbol=symbol, algo_id=t["sl_order_id"])
 
         close_side = "SELL" if is_long else "BUY"
-        side = "long" if is_long else "short"
-        trail_price = float(t["tp1"])
         mark = await fetch_mark_price(ex, symbol)
         if mark:
             trail_price = adjust_sl_for_mark(side=side, sl_price=trail_price, mark=mark)
@@ -75,7 +106,7 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
                 """
                 UPDATE user_trades
                 SET status='tp1_trailed', sl_current=$1, sl_order_id=$2
-                WHERE id=$3 AND status='open'
+                WHERE id=$3 AND status IN ('open','tp1_trailed')
                 """,
                 trail_price, new_sl_id, t["id"],
             )

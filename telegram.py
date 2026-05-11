@@ -650,7 +650,7 @@ def _v2_taker_buy_sell_lines(timeframe_bars: dict, tf: str = "15m") -> List[str]
 def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = None) -> None:
     """Send a v2 entry alert. `signal` is a strategy_v2.V2Signal instance."""
     direction_emoji = "🟢 LONG" if signal.direction == 1 else "🔴 SHORT"
-    status_trade = "NEW LONG" if signal.direction == 1 else "NEW SHORT"
+    status_trade = "SIM LONG" if signal.direction == 1 else "SIM SHORT"
     title = f"({status_trade} | {signal.symbol} | {signal.trigger_tf})"
 
     sl_pct = (signal.sl - signal.entry) / signal.entry * 100 if signal.entry else 0.0
@@ -677,12 +677,13 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         f"<b>{title}</b>",
         "",
         f"{direction_emoji}",
+        "Mode: simulation channel",
         f"📍 Entry: <code>{signal.entry:g}</code>",
         f"🛑 SL:    <code>{signal.sl:g}</code> ({sl_pct:+.2f}%)",
         tp_line,
         "",
         f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/{htf_max})",
-        f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} touch",
+        f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} retest",
         f"HTF:     {htf_line}",
         "",
         f"<a href='{_tv_link(signal.symbol, signal.trigger_tf)}'>📊 TradingView</a>",
@@ -723,5 +724,3 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
             requests.post(TELEGRAM_URL, json=payload, timeout=15)
         except Exception as e:
             logger.error("send_v2_alert failed: %s", e)
-
-
