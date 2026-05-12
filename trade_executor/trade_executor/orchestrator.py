@@ -131,12 +131,26 @@ async def handle_signal_for_user(
         sl = entry + widened_distance
     rr_ratio = max(1.0, float(rr_ratio or 1.0))
     risk_distance = widened_distance
-    if direction == "long":
-        tp1 = entry + risk_distance
-        tp2 = entry + risk_distance * rr_ratio
+
+    # Prefer magnet-derived TPs from strategy if available on the signal row.
+    # Fall back to fixed RR math when fields are missing or zero.
+    sig_tp1 = signal.get("tp1")
+    sig_tp2 = signal.get("tp2")
+    use_sig = (
+        sig_tp1 is not None and sig_tp2 is not None
+        and float(sig_tp1) > 0 and float(sig_tp2) > 0
+        and float(sig_tp1) != float(sig_tp2)
+    )
+    if use_sig:
+        tp1 = float(sig_tp1)
+        tp2 = float(sig_tp2)
     else:
-        tp1 = entry - risk_distance
-        tp2 = entry - risk_distance * rr_ratio
+        if direction == "long":
+            tp1 = entry + risk_distance
+            tp2 = entry + risk_distance * rr_ratio
+        else:
+            tp1 = entry - risk_distance
+            tp2 = entry - risk_distance * rr_ratio
 
     async with pool.acquire() as conn:
         usdt_balance = (await ex.fetch_balance()).get("USDT", {})

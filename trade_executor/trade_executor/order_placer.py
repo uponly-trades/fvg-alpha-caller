@@ -86,12 +86,17 @@ async def place_full_sequence(
 
     close_side = "SELL" if side == "BUY" else "BUY"
     entry_side = "long" if side == "BUY" else "short"
-    planned_risk_distance = abs(avg - sl_price) if sl_price is not None else abs(tp_price - avg)
     rr_ratio = max(1.0, float(rr_ratio or 1.0))
-    if side == "BUY":
-        tp_price = avg + planned_risk_distance * rr_ratio
-    else:
-        tp_price = avg - planned_risk_distance * rr_ratio
+    if sl_price is not None:
+        # Recompute TP from actual fill price + SL distance * RR (handles slippage)
+        planned_risk_distance = abs(avg - sl_price)
+        if side == "BUY":
+            tp_price = avg + planned_risk_distance * rr_ratio
+        else:
+            tp_price = avg - planned_risk_distance * rr_ratio
+    # When SL is OFF, use the TP price passed in as-is. Do NOT derive a
+    # synthetic risk from (tp - avg) and multiply by rr_ratio — that double-
+    # extends the target and ignores the orchestrator's structural TP2.
 
     # Re-validate SL vs current mark — entry slippage may have moved mark past
     # planned SL, which would trigger -2021 "Order would immediately trigger".
