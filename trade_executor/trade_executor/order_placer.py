@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import os
 from dataclasses import dataclass
 
 from trade_executor.algo_orders import (
@@ -14,6 +16,10 @@ from trade_executor.exchange import set_isolated_and_leverage
 
 log = logging.getLogger("order_placer")
 
+# Tiered TP: fraction of qty closed at TP1 (rest runs to TP2). Set to 0 to
+# disable tiered TP and fall back to single TP at tp2.
+TP1_FRACTION = float(os.environ.get("V2_TP1_FRACTION", "0.5"))
+
 
 class OrderError(Exception):
     def __init__(self, stage: str, message: str):
@@ -25,10 +31,14 @@ class OrderError(Exception):
 class PlacedOrders:
     entry_order_id: str
     sl_order_id: str | None
-    tp_order_id: str | None
+    tp_order_id: str | None        # TP2 (runner) order id — kept for legacy
     avg_price: float
     sl_price: float
-    tp_price: float
+    tp_price: float                 # TP2 price after mark-adjust
+    tp1_order_id: str | None = None
+    tp1_price: float = 0.0
+    tp1_qty: float = 0.0
+    tp2_qty: float = 0.0
 
 
 async def place_full_sequence(
@@ -42,6 +52,7 @@ async def place_full_sequence(
     leverage: int,
     margin_mode: str = "ISOLATED",
     rr_ratio: float = 1.0,
+    tp1_price: float | None = None,
 ) -> PlacedOrders:
     sl_off = sl_price is None or (isinstance(sl_price, (int, float)) and sl_price <= 0)
     if sl_off:
@@ -129,10 +140,56 @@ async def place_full_sequence(
                 log.critical("EMERGENCY CLOSE FAILED %s: %s", symbol, ee)
             raise OrderError("sl", str(e))
 
+    # Tiered TP: split qty into TP1 + TP2 when tp1_price provided and fraction>0.
+    # TP1 = reduceOnly partial close at the nearer magnet; remaining runner sits
+    # on TP2. After TP1 fills, trail_manager auto-arms protective SL to BE+.
+    tp1_qty = 0.0
+    tp2_qty = qty
+    tp1_id: str | None = None
+    tp1_actual: float = 0.0
+
+    if (
+        tp1_price is not None
+        and tp1_price > 0
+        and TP1_FRACTION > 0.0
+        and TP1_FRACTION < 1.0
+    ):
+        # Adjust TP1 vs mark before precision so the order survives -2021.
+        adj_tp1 = adjust_tp_for_mark(side=entry_side, tp_price=float(tp1_price), mark=mark) if mark else float(tp1_price)
+        # Step-size aware split
+        try:
+            raw_tp1_qty = qty * TP1_FRACTION
+            tp1_qty_str = ex.amount_to_precision(symbol, raw_tp1_qty)
+            tp1_qty_p = float(tp1_qty_str)
+        except Exception:
+            tp1_qty_p = 0.0
+        # Avoid placing a zero-qty or oversize order
+        if tp1_qty_p > 0 and tp1_qty_p < qty:
+            tp2_qty_candidate = qty - tp1_qty_p
+            try:
+                tp2_qty_p = float(ex.amount_to_precision(symbol, tp2_qty_candidate))
+            except Exception:
+                tp2_qty_p = tp2_qty_candidate
+            if tp2_qty_p > 0:
+                try:
+                    tp1_resp = await place_algo_stop(
+                        ex, symbol=symbol, close_side=close_side, quantity=tp1_qty_p,
+                        trigger_price=adj_tp1, order_type="TAKE_PROFIT_MARKET",
+                        position_side=pos_side_for_close,
+                    )
+                    tp1_id = algo_id_of(tp1_resp)
+                    tp1_actual = adj_tp1
+                    tp1_qty = tp1_qty_p
+                    tp2_qty = tp2_qty_p
+                except Exception as e:
+                    log.error("TP1 placement failed for %s: %s — falling back to single TP", symbol, e)
+                    tp1_qty = 0.0
+                    tp2_qty = qty
+
     tp_id: str | None = None
     try:
         tp = await place_algo_stop(
-            ex, symbol=symbol, close_side=close_side, quantity=qty,
+            ex, symbol=symbol, close_side=close_side, quantity=tp2_qty,
             trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
             position_side=pos_side_for_close,
         )
@@ -147,4 +204,8 @@ async def place_full_sequence(
         avg_price=avg,
         sl_price=sl_price if sl_price is not None else 0.0,
         tp_price=tp_price,
+        tp1_order_id=tp1_id,
+        tp1_price=tp1_actual,
+        tp1_qty=tp1_qty,
+        tp2_qty=tp2_qty,
     )

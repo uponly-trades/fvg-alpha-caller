@@ -185,6 +185,15 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
                     break
             if cum_qty <= 0:
                 continue
+            # Partial close (e.g. TP1 fill of tiered TP): position still alive
+            # on Binance. Skip reconcile so we do not mark the trade closed
+            # prematurely. trail_manager will arm protective SL on next tick.
+            if pos_amt != 0.0 and cum_qty < qty - 1e-9:
+                log.info(
+                    "reconcile %s: partial close detected (cum=%.6f / qty=%.6f) — leaving open",
+                    t["id"], cum_qty, qty,
+                )
+                continue
             close_px = cum_notional / cum_qty
             gross = sign_dir * (close_px - entry_px) * qty
             pnl_usdt = gross - cum_fee

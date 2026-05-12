@@ -148,7 +148,7 @@ async def test_e2e_sl_on_isolated_places_full_sequence():
     sl_calls = [o for o in ex.algo_orders if o["type"] == "STOP_MARKET"]
     tp_calls = [o for o in ex.algo_orders if o["type"] == "TAKE_PROFIT_MARKET"]
     assert len(sl_calls) == 1, "SL must be placed when sl_enabled=True"
-    assert len(tp_calls) == 1, "TP must be placed"
+    assert len(tp_calls) == 2, "Tiered TP: TP1 + TP2 must both be placed"
 
 
 @pytest.mark.asyncio
@@ -166,7 +166,7 @@ async def test_e2e_sl_off_isolated_skips_sl_keeps_tp():
     sl_calls = [o for o in ex.algo_orders if o["type"] == "STOP_MARKET"]
     tp_calls = [o for o in ex.algo_orders if o["type"] == "TAKE_PROFIT_MARKET"]
     assert len(sl_calls) == 0, "SL must NOT be placed when sl_enabled=False"
-    assert len(tp_calls) == 1, "TP still placed"
+    assert len(tp_calls) == 2, "Tiered TP: both TP1 and TP2 placed even when SL OFF"
 
 
 @pytest.mark.asyncio

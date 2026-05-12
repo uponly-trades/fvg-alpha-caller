@@ -232,6 +232,7 @@ async def handle_signal_for_user(
             ex, symbol=symbol, side=side, qty=size.qty,
             sl_price=sl_for_placement, tp_price=tp2, leverage=leverage,
             margin_mode=margin_mode, rr_ratio=rr_ratio,
+            tp1_price=tp1,
         )
     except OrderError as e:
         async with pool.acquire() as conn:
@@ -249,11 +250,14 @@ async def handle_signal_for_user(
             UPDATE user_trades SET
               status='open',
               entry=$1, sl=$2, sl_current=$3, tp1=$4, tp2=$5,
-              entry_order_id=$6, sl_order_id=$7, tp_order_id=$8
-            WHERE id=$9
+              entry_order_id=$6, sl_order_id=$7, tp_order_id=$8,
+              tp1_order_id=$9, tp1_qty=$10, tp2_qty=$11
+            WHERE id=$12
             """,
-            placed.avg_price, placed.sl_price, placed.sl_price, placed.tp_price, placed.tp_price,
+            placed.avg_price, placed.sl_price, placed.sl_price,
+            placed.tp1_price or tp1, placed.tp_price,
             placed.entry_order_id, placed.sl_order_id, placed.tp_order_id,
+            placed.tp1_order_id, placed.tp1_qty, placed.tp2_qty,
             trade_id,
         )
         await notify(conn, "trade_opened", {"user_id": user_id, "trade_id": trade_id})
