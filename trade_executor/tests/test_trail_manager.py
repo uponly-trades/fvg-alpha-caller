@@ -1,5 +1,9 @@
 import os
 
+# Legacy tests assert the percent-ladder trail behavior. Must be set BEFORE
+# importing trail_manager so module-level _V2_TRAIL_MODE captures it.
+os.environ.setdefault("V2_TRAIL_MODE", "percent")
+
 import pytest
 
 from trade_executor import db
@@ -125,3 +129,44 @@ async def test_no_trail_when_price_below_1_5r_long():
         assert trailed is False
     finally:
         await pool.close()
+
+
+# ---------------------------------------------------------------------------
+# Structural trail mode (V2_TRAIL_MODE=structural)
+# Spec: .specify/specs/dynamic-sltp.md R7
+# ---------------------------------------------------------------------------
+def test_structural_trail_moves_to_breakeven_at_1r(monkeypatch):
+    import importlib
+    import trade_executor.trail_manager as tm
+    monkeypatch.setenv("V2_TRAIL_MODE", "structural")
+    importlib.reload(tm)
+    # long: entry 100, sl 95, progress=1.0R at price 105 → BE = 100
+    assert tm.trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=95, price=105) == pytest.approx(100.0)
+    # short: entry 100, sl 105, progress=1.0R at price 95 → BE = 100
+    assert tm.trail_sl_for_progress(direction="short", entry=100, sl=105, sl_current=105, price=95) == pytest.approx(100.0)
+    monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+    importlib.reload(tm)
+
+
+def test_structural_trail_ladder_stages(monkeypatch):
+    import importlib
+    import trade_executor.trail_manager as tm
+    monkeypatch.setenv("V2_TRAIL_MODE", "structural")
+    importlib.reload(tm)
+    # progress 2.0R locks +1R: long entry 100 sl 95 price 110 → SL 105
+    assert tm.trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=100, price=110) == pytest.approx(105.0)
+    # progress 3.0R locks +2R: long entry 100 sl 95 price 115 → SL 110
+    assert tm.trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=105, price=115) == pytest.approx(110.0)
+    monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+    importlib.reload(tm)
+
+
+def test_structural_trail_never_loosens(monkeypatch):
+    import importlib
+    import trade_executor.trail_manager as tm
+    monkeypatch.setenv("V2_TRAIL_MODE", "structural")
+    importlib.reload(tm)
+    # sl_current already above BE → no loosen
+    assert tm.trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=105, price=105) is None
+    monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+    importlib.reload(tm)

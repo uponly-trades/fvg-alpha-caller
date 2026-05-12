@@ -312,12 +312,17 @@ class SimTradeStore:
         trade_id = f"{signal_id}-sim"
         now = datetime.now(timezone.utc)
         r = abs(float(signal.entry) - float(signal.sl))
+        # Magnet-aware TP: strategy_v2 writes tp1 magnet into indicators["tp1"]
+        # and tp2 magnet into signal.tp when V2_TP_MODE=magnet. Fall back to
+        # fixed 1R/2R if magnet not produced.
+        tp1_ind = float(signal.indicators.get("tp1", 0.0) or 0.0)
+        tp2_sig = float(signal.tp or 0.0)
         if signal.direction == 1:
-            tp1 = float(signal.entry) + r
-            tp2 = float(signal.entry) + r * 2
+            tp1 = tp1_ind if tp1_ind > 0 else float(signal.entry) + r
+            tp2 = tp2_sig if tp2_sig > 0 else float(signal.entry) + r * 2
         else:
-            tp1 = float(signal.entry) - r
-            tp2 = float(signal.entry) - r * 2
+            tp1 = tp1_ind if tp1_ind > 0 else float(signal.entry) - r
+            tp2 = tp2_sig if tp2_sig > 0 else float(signal.entry) - r * 2
         try:
             with _cursor() as cur:
                 cur.execute("SELECT id FROM signal_decisions WHERE id = %s", (signal_id,))
@@ -354,6 +359,11 @@ class SimTradeStore:
                     "htf_obstacle_blocked": bool(signal.indicators.get("htf_obstacle_blocked", 0.0)),
                     "htf_obstacle_reason": signal.indicators.get("htf_obstacle_reason", "clear"),
                     "htf_obstacle_tf": signal.indicators.get("htf_obstacle_tf", ""),
+                    "sl_mode": signal.indicators.get("sl_mode", "atr"),
+                    "tp_mode": signal.indicators.get("tp_mode", "fixed"),
+                    "tp1_magnet_kind": signal.indicators.get("tp1_magnet_kind", "none"),
+                    "tp2_magnet_kind": signal.indicators.get("tp2_magnet_kind", "none"),
+                    "structural_rr": float(signal.indicators.get("structural_rr", 0.0) or 0.0),
                 }
                 cur.execute(
                     """INSERT INTO signal_decisions

@@ -11,6 +11,9 @@ from config import (
     V2_RETEST_ENABLED, V2_RETEST_MIN_DEPTH, V2_RETEST_MAX_DEPTH, V2_RETEST_MIN_SCORE,
     V2_NORMAL_VOLUME_SCORE, V2_NORMAL_VOLUME_IMBALANCE, V2_NORMAL_MAIN_STRENGTH,
     V2_STRONG_VOLUME_SCORE, V2_STRONG_VOLUME_IMBALANCE, V2_STRONG_MAIN_STRENGTH,
+    V2_SL_MODE, V2_TP_MODE, V2_MIN_STRUCTURAL_RR, V2_RR_CAP,
+    V2_SWING_LOOKBACK, V2_SWING_FRACTAL, V2_TP_MIN_DIST_R,
+    V2_TP_MAGNET_REQUIRED,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
 
@@ -287,6 +290,154 @@ def _compute_sl(zone: FVGZone, atr_val: float) -> float:
         return zone.bottom - buf
     return zone.top + buf
 
+# ---------------------------------------------------------------------------
+# Dynamic SL/TP helpers — spec: .specify/specs/dynamic-sltp.md
+# ---------------------------------------------------------------------------
+
+def _swings(bars, kind: str, lookback: int = 60, fractal: int = 2):
+    """Fractal swing detector. Returns list of (index, price).
+
+    A swing high at index i requires bars[i].high strictly greater than the
+    `fractal` neighbors on each side. The last `fractal` bars cannot confirm
+    a swing because they lack right-side neighbors.
+    """
+    if not bars or len(bars) < (2 * fractal + 1):
+        return []
+    n = len(bars)
+    start = max(fractal, n - lookback)
+    out = []
+    for i in range(start, n - fractal):
+        if kind == "high":
+            pivot = float(bars[i].high)
+            ok = all(float(bars[i - k].high) < pivot for k in range(1, fractal + 1)) and \
+                 all(float(bars[i + k].high) < pivot for k in range(1, fractal + 1))
+            if ok:
+                out.append((i, pivot))
+        else:
+            pivot = float(bars[i].low)
+            ok = all(float(bars[i - k].low) > pivot for k in range(1, fractal + 1)) and \
+                 all(float(bars[i + k].low) > pivot for k in range(1, fractal + 1))
+            if ok:
+                out.append((i, pivot))
+    return out
+
+
+def _structural_sl(
+    zone: FVGZone,
+    bars,
+    atr_val: float,
+    side: str,
+    lookback: int = V2_SWING_LOOKBACK,
+    fractal: int = V2_SWING_FRACTAL,
+    buffer_atr: float = 0.25,
+) -> float:
+    """Anchor SL behind the worst-case of {zone far edge, latest swing extreme}.
+
+    Long: SL = min(zone.bottom, last swing low) - buffer*ATR
+    Short: SL = max(zone.top, last swing high) + buffer*ATR
+    Falls back to zone-edge baseline if no qualifying swing exists.
+    """
+    buf = max(0.0, float(atr_val)) * float(buffer_atr)
+    if side == "long":
+        baseline = float(zone.bottom)
+        lows = _swings(bars, "low", lookback=lookback, fractal=fractal)
+        # only consider swings strictly below baseline (otherwise zone edge wins)
+        candidates = [p for _, p in lows if p < baseline]
+        anchor = min(candidates) if candidates else baseline
+        return anchor - buf
+    else:
+        baseline = float(zone.top)
+        highs = _swings(bars, "high", lookback=lookback, fractal=fractal)
+        candidates = [p for _, p in highs if p > baseline]
+        anchor = max(candidates) if candidates else baseline
+        return anchor + buf
+
+
+def _tp_magnets(
+    *,
+    entry: float,
+    side: str,
+    risk: float,
+    bars_15m,
+    htf_zones: dict,
+    min_dist_r: float = V2_TP_MIN_DIST_R,
+    rr_cap: float = V2_RR_CAP,
+    lookback: int = V2_SWING_LOOKBACK,
+    fractal: int = V2_SWING_FRACTAL,
+):
+    """Find TP1 and TP2 magnets.
+
+    Magnet candidates (long): swing highs above entry on 15m, plus the near
+    edge (bottom) of opposite-direction (bear) FVG zones on 1h/4h that sit
+    above entry. Mirrored for short.
+
+    Returns (tp1, tp1_kind, tp2, tp2_kind). tp1 may be None if no qualifying
+    magnet exists; in that case tp2_kind is "none" too. tp2 falls back to
+    `entry ± risk * rr_cap` capped distance when only one magnet exists.
+    """
+    if risk <= 0:
+        return None, "none", None, "none"
+    min_dist = float(risk) * float(min_dist_r)
+    cap_distance = float(risk) * float(rr_cap)
+
+    candidates = []  # list of (price, distance, kind)
+    if side == "long":
+        for _, p in _swings(bars_15m, "high", lookback=lookback, fractal=fractal):
+            if p > entry:
+                candidates.append((p, p - entry, "swing"))
+        for tf in ("1h", "4h"):
+            for z in htf_zones.get(tf, []) or []:
+                if int(getattr(z, "direction", 0)) != -1:
+                    continue
+                if float(getattr(z, "mitigation", 0.0) or 0.0) >= 1.0:
+                    continue
+                near_edge = float(z.bottom)
+                if near_edge > entry:
+                    candidates.append((near_edge, near_edge - entry, f"fvg_{tf}"))
+    else:
+        for _, p in _swings(bars_15m, "low", lookback=lookback, fractal=fractal):
+            if p < entry:
+                candidates.append((p, entry - p, "swing"))
+        for tf in ("1h", "4h"):
+            for z in htf_zones.get(tf, []) or []:
+                if int(getattr(z, "direction", 0)) != 1:
+                    continue
+                if float(getattr(z, "mitigation", 0.0) or 0.0) >= 1.0:
+                    continue
+                near_edge = float(z.top)
+                if near_edge < entry:
+                    candidates.append((near_edge, entry - near_edge, f"fvg_{tf}"))
+
+    # drop too-close magnets and cap-far magnets
+    candidates = [c for c in candidates if c[1] >= min_dist and c[1] <= cap_distance]
+    candidates.sort(key=lambda c: c[1])
+
+    if not candidates:
+        return None, "none", None, "none"
+
+    tp1_price, _, tp1_kind = candidates[0]
+    if len(candidates) >= 2:
+        tp2_price, _, tp2_kind = candidates[1]
+    else:
+        if side == "long":
+            tp2_price = float(entry) + cap_distance
+        else:
+            tp2_price = float(entry) - cap_distance
+        tp2_kind = "cap"
+    return tp1_price, tp1_kind, tp2_price, tp2_kind
+
+
+def _structural_rr(*, entry: float, sl: float, tp1, min_rr: float):
+    """Return (rr, ok). rr=0 when tp1 missing or sl distance is zero."""
+    if tp1 is None:
+        return 0.0, False
+    risk = abs(float(entry) - float(sl))
+    if risk <= 0:
+        return 0.0, False
+    rr = abs(float(tp1) - float(entry)) / risk
+    return rr, rr >= float(min_rr)
+
+
 
 def _clamp01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
@@ -517,14 +668,97 @@ def evaluate_v2_signal(
                 else:
                     atr_val = triggered.size
 
-            sl = _compute_sl(triggered, atr_val)
             # In retest mode the signal is confirmed on candle close, and the
             # executor enters with a market order after this decision is stored.
             entry = retest.confirmation_close if V2_RETEST_ENABLED else (
                 float(triggered.top) if direction == 1 else float(triggered.bottom)
             )
+
+            # ---- Dynamic SL ----
+            side_str = "long" if direction == 1 else "short"
+            sl_legacy = _compute_sl(triggered, atr_val)
+            sl_mode_used = V2_SL_MODE
+            if V2_SL_MODE == "structural":
+                sl_struct = _structural_sl(
+                    triggered, bars, atr_val, side_str,
+                    lookback=V2_SWING_LOOKBACK, fractal=V2_SWING_FRACTAL,
+                    buffer_atr=ATR_BUFFER_V2,
+                )
+                # never tighter than legacy zone-edge anchor
+                if direction == 1:
+                    sl = min(sl_struct, sl_legacy)
+                else:
+                    sl = max(sl_struct, sl_legacy)
+                if sl == sl_legacy:
+                    sl_mode_used = "atr_fallback"
+            else:
+                sl = sl_legacy
+
             r = abs(entry - sl)
-            tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
+            if r <= 0:
+                logger.info(
+                    "v2 skip %s %s %s | sl_distance_zero entry=%g sl=%g",
+                    symbol, trigger_tf, side_str, entry, sl,
+                )
+                continue
+
+            # ---- Dynamic TP magnets ----
+            tp_mode_used = V2_TP_MODE
+            tp1_magnet = None
+            tp1_kind = "none"
+            tp2_kind = "none"
+            structural_rr = 0.0
+            if V2_TP_MODE == "magnet":
+                all_zones = list(zones.values()) if isinstance(zones, dict) else []
+                htf_zones_for_magnet = {
+                    "1h": [z for z in all_zones
+                           if getattr(z, "tf", "") == "1h"
+                           and getattr(z, "symbol", "") == symbol],
+                    "4h": [z for z in all_zones
+                           if getattr(z, "tf", "") == "4h"
+                           and getattr(z, "symbol", "") == symbol],
+                }
+                tp1_magnet, tp1_kind, tp2_magnet, tp2_kind = _tp_magnets(
+                    entry=entry, side=side_str, risk=r,
+                    bars_15m=bars, htf_zones=htf_zones_for_magnet,
+                    min_dist_r=V2_TP_MIN_DIST_R, rr_cap=V2_RR_CAP,
+                    lookback=V2_SWING_LOOKBACK, fractal=V2_SWING_FRACTAL,
+                )
+                if tp1_magnet is None:
+                    if V2_TP_MAGNET_REQUIRED:
+                        logger.info(
+                            "v2 skip %s %s %s | no_tp_room entry=%g sl=%g r=%g",
+                            symbol, trigger_tf, side_str, entry, sl, r,
+                        )
+                        continue
+                    # Fallback: fixed-RR target
+                    tp_mode_used = "fixed_fallback"
+                    tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
+                    tp1_magnet = entry + r if direction == 1 else entry - r
+                    tp1_kind = "fixed_1r"
+                    tp2_kind = "fixed_rr"
+                    structural_rr = abs(tp1_magnet - entry) / r if r > 0 else 0.0
+                else:
+                    structural_rr, rr_ok = _structural_rr(
+                        entry=entry, sl=sl, tp1=tp1_magnet, min_rr=V2_MIN_STRUCTURAL_RR,
+                    )
+                    if not rr_ok:
+                        if V2_TP_MAGNET_REQUIRED:
+                            logger.info(
+                                "v2 skip %s %s %s | rr_too_low_structural rr=%.2f min=%.2f",
+                                symbol, trigger_tf, side_str, structural_rr, V2_MIN_STRUCTURAL_RR,
+                            )
+                            continue
+                        # Fallback: keep magnet TP1 even if RR low (test-mode behavior)
+                        tp = tp2_magnet
+                    else:
+                        tp = tp2_magnet
+            else:
+                tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
+                tp1_magnet = entry + r if direction == 1 else entry - r
+                tp1_kind = "fixed_1r"
+                tp2_kind = "fixed_rr"
+                structural_rr = abs(tp1_magnet - entry) / r if r > 0 else 0.0
 
             obstacle = _htf_obstacle_decision(
                 symbol=symbol,
@@ -584,6 +818,12 @@ def evaluate_v2_signal(
                     "htf_obstacle_blocked": float(obstacle.blocked),
                     "htf_obstacle_reason": obstacle.reason,
                     "htf_obstacle_tf": obstacle.blocking_tf,
+                    "sl_mode": sl_mode_used,
+                    "tp_mode": tp_mode_used,
+                    "tp1": float(tp1_magnet) if tp1_magnet is not None else 0.0,
+                    "tp1_magnet_kind": tp1_kind,
+                    "tp2_magnet_kind": tp2_kind,
+                    "structural_rr": float(structural_rr),
                 },
             )
     return None

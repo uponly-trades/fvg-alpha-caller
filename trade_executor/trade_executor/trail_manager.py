@@ -39,16 +39,36 @@ def r_progress(*, direction: str, entry: float, sl: float, price: float) -> floa
     return (float(entry) - float(price)) / r
 
 
+import os
+
+# Trail mode: "structural" trips earlier (move to BE at 1R, then to +1R at 2R,
+# then +2R at 3R) which suits the new magnet-anchored TP2 (typically 1.2-2.5R).
+# Legacy "percent" mode keeps the 1.5R/2.5R/3.5R ladder used by fixed-RR TP=2.
+_V2_TRAIL_MODE = os.environ.get("V2_TRAIL_MODE", "structural").lower()
+
+
 def trail_sl_for_progress(*, direction: str, entry: float, sl: float, sl_current: float, price: float) -> float | None:
     progress = r_progress(direction=direction, entry=entry, sl=sl, price=price)
-    if progress >= 3.5:
-        locked_r = 2.5
-    elif progress >= 2.5:
-        locked_r = 1.5
-    elif progress >= 1.5:
-        locked_r = 1.0
+
+    if _V2_TRAIL_MODE == "structural":
+        # Earlier breakeven + tighter ladder for magnet-mode trades.
+        if progress >= 3.0:
+            locked_r = 2.0
+        elif progress >= 2.0:
+            locked_r = 1.0
+        elif progress >= 1.0:
+            locked_r = 0.0  # breakeven
+        else:
+            return None
     else:
-        return None
+        if progress >= 3.5:
+            locked_r = 2.5
+        elif progress >= 2.5:
+            locked_r = 1.5
+        elif progress >= 1.5:
+            locked_r = 1.0
+        else:
+            return None
 
     r = abs(float(entry) - float(sl))
     if direction == "long":
