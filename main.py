@@ -135,6 +135,16 @@ class AlphaCaller:
                 continue
             symbol, tf = key.rsplit("_", 1)
             self.tracker.update_buffer(symbol, tf, bars)
+            if tf in V2_TRIGGER_TFS:
+                st = _supertrend_recovery_state(bars)
+                self.sim_store.upsert_supertrend_state(
+                    symbol=symbol,
+                    tf=tf,
+                    trend=st.trend,
+                    band=st.band,
+                    switch_price=st.switch_price,
+                    bar_time=bars[-1].open_time,
+                )
             self._v2_backfill_zones(symbol, tf, bars)
         added = len(self.tracker.zones) - before
         try:
