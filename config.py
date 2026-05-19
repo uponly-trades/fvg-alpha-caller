@@ -129,20 +129,18 @@ BASE_URL = "https://fapi.binance.com"
 
 
 # =====================================================
-# v2 Strategy (Multi-TF FVG Touch Confluence)
+# v2 Strategy (15m FVG Retest)
 # =====================================================
 STRATEGY_VERSION = os.environ.get("STRATEGY_VERSION", "v1")  # "v1" or "v2"
 MODEL_ENABLED = os.environ.get("MODEL_ENABLED", "true").lower() == "true"
 
 # v2 detection params
-V2_TRIGGER_TFS = ["15m"]                                    # bullish/bearish FVG touch on these
-V2_HTF_TFS = ["30m", "1h", "2h", "4h"]                      # confluence sources
-V2_HTF_WEIGHTS = {"30m": 1, "1h": 1, "2h": 2, "4h": 3}      # weighted: HTF lebih lama = score lebih besar; max 7
-V2_HTF_MIN_SCORE = int(os.environ.get("V2_HTF_MIN_SCORE", "2"))  # require ≥2 same-direction HTF matches (weighted)
+V2_TRIGGER_TFS = ["15m"]                                    # Pine source timeframe for trade signals
+V2_HTF_TFS = ["30m", "1h", "2h", "4h"]                      # telemetry / TP magnet sources; not entry gates
+V2_HTF_WEIGHTS = {"30m": 1, "1h": 1, "2h": 2, "4h": 3}      # legacy telemetry weights only
 V2_RR = float(os.environ.get("V2_RR", "2.0"))               # display TP = entry ± R×RR
 V2_HTF_TOUCH_LOOKBACK = int(os.environ.get("HTF_TOUCH_LOOKBACK", "1"))  # closed-candle window for HTF "fresh touch"
 ATR_BUFFER_V2 = float(os.environ.get("ATR_BUFFER_V2", "0.3"))           # SL buffer multiplier
-V2_MIN_QUALITY_SCORE = float(os.environ.get("V2_MIN_QUALITY_SCORE", "0.0"))  # 0 = disabled; rely on Zeiierman top-N ranking only
 
 # v2 volume confirmation. Directional imbalance is abs(buy-sell)/(buy+sell),
 # and must align with signal direction (long: buy > sell, short: sell > buy).
@@ -161,17 +159,14 @@ V2_HTF_OBSTACLE_TFS = [
 ]
 V2_HTF_OBSTACLE_ATR_BUFFER = float(os.environ.get("V2_HTF_OBSTACLE_ATR_BUFFER", "0.25"))
 
-# v2 entry timing mode. "close" preserves current bar-close behavior; "touch"
-# is reserved for live-price wiring after safety filters are proven.
+# v2 entry timing mode. Retest signals confirm on candle close, matching the
+# Pine label behavior; executor then enters with a market order.
 V2_ENTRY_MODE = os.environ.get("V2_ENTRY_MODE", "close").lower()
-V2_MIN_TOUCH_DEPTH = float(os.environ.get("V2_MIN_TOUCH_DEPTH", "0.25"))
 
 # v2 retest confirmation. Signals are emitted only after the trigger candle
 # enters the FVG and rejects back out in the signal direction.
 V2_RETEST_ENABLED = os.environ.get("V2_RETEST_ENABLED", "1") == "1"
-V2_RETEST_MIN_DEPTH = float(os.environ.get("V2_RETEST_MIN_DEPTH", str(V2_MIN_TOUCH_DEPTH)))
 V2_RETEST_MAX_DEPTH = float(os.environ.get("V2_RETEST_MAX_DEPTH", "0.75"))
-V2_RETEST_MIN_SCORE = float(os.environ.get("V2_RETEST_MIN_SCORE", "60"))
 
 # Retest trigger parity with /Users/joseph/Downloads/fvg retest.txt.
 # Signals come from 15m FVG retests only; touch-only entries and HTF confluence
@@ -186,8 +181,6 @@ V2_SUPERTREND_MULTIPLIER = float(os.environ.get("V2_SUPERTREND_MULTIPLIER", "3.0
 V2_SUPERTREND_ALPHA_PCT = float(os.environ.get("V2_SUPERTREND_ALPHA_PCT", "5.0"))
 V2_SUPERTREND_THRESHOLD_ATR = float(os.environ.get("V2_SUPERTREND_THRESHOLD_ATR", "1.0"))
 
-# v2 Zeiierman-style FVG strength tiers from formation volume and main strength.
-V2_MIN_FVG_TIER = os.environ.get("V2_MIN_FVG_TIER", "normal").lower()
 V2_NORMAL_VOLUME_SCORE = float(os.environ.get("V2_NORMAL_VOLUME_SCORE", "1.1"))
 V2_NORMAL_VOLUME_IMBALANCE = float(os.environ.get("V2_NORMAL_VOLUME_IMBALANCE", "0.10"))
 V2_NORMAL_MAIN_STRENGTH = int(os.environ.get("V2_NORMAL_MAIN_STRENGTH", "50"))

@@ -43,7 +43,7 @@ async def handle_payload(pool, bot, channel: str, payload: dict) -> None:
             tp1=float(t["tp1"]), tp2=float(t["tp2"]),
             qty=float(t["qty"]), leverage=int(t["leverage"]),
             notional=float(t["notional_usdt"]), margin=float(t["margin_usdt"]),
-        ))
+        ), parse_mode="HTML")
     elif channel == "trade_closed":
         t = await _trade_row(pool, payload["trade_id"])
         if not t: return

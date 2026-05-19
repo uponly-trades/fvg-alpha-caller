@@ -36,6 +36,20 @@ def test_fmt_opened_long():
     assert "BTCUSDT" in msg
     assert "LONG" in msg
     assert "108,420" in msg or "108420" in msg
+    assert "FVG Retest" in msg
+    assert "TradingView" in msg
+    assert "BINANCE:BTCUSDT.P" in msg
+
+
+def test_fmt_opened_sl_off_is_clear_not_fake_100pct_sl():
+    msg = fmt_opened(
+        symbol="ORDIUSDT", tf="15m", direction="short",
+        entry=4.1310, sl=0.0, tp1=4.0323, tp2=3.9296,
+        qty=42.7, leverage=15, notional=176.35, margin=11.76,
+    )
+    assert "sl OFF (isolated)" in msg
+    assert "+100.00%" not in msg
+    assert "interval=15" in msg
 
 
 def test_fmt_tp2_uses_plus_sign_for_profit():

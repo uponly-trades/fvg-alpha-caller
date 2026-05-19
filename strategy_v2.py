@@ -3,12 +3,11 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
 from config import (
-    V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_HTF_MIN_SCORE, V2_RR,
-    V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2, V2_MIN_QUALITY_SCORE,
+    V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_RR,
+    V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2,
     V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE, V2_REQUIRE_DIRECTIONAL_VOLUME,
     V2_HTF_OBSTACLE_FILTER_ENABLED, V2_HTF_OBSTACLE_TFS, V2_HTF_OBSTACLE_ATR_BUFFER,
-    V2_ENTRY_MODE, V2_MIN_TOUCH_DEPTH, V2_MIN_FVG_TIER,
-    V2_RETEST_ENABLED, V2_RETEST_MIN_DEPTH, V2_RETEST_MAX_DEPTH, V2_RETEST_MIN_SCORE,
+    V2_ENTRY_MODE, V2_RETEST_ENABLED, V2_RETEST_MAX_DEPTH,
     V2_ENTRY_TRIGGER, V2_REQUIRE_PRIOR_TOUCH,
     V2_REQUIRE_SUPERTREND_FILTER, V2_SUPERTREND_ATR_LENGTH,
     V2_SUPERTREND_MULTIPLIER, V2_SUPERTREND_ALPHA_PCT,
@@ -577,10 +576,9 @@ def _fvg_strength_tier(zone: FVGZone) -> tuple[str, dict]:
 
 
 def _volume_confirmation(zone: FVGZone) -> tuple[bool, dict]:
-    """Return whether the FVG formation volume confirms the zone direction."""
+    """Return telemetry for FVG formation volume; never gate retest entry."""
     tier, metrics = _fvg_strength_tier(zone)
-    passed = _tier_allowed(tier, V2_MIN_FVG_TIER)
-    return passed, metrics
+    return tier != "weak", metrics
 
 
 def _score_depth(depth: float, min_depth: float, max_depth: float) -> float:
@@ -844,7 +842,6 @@ def evaluate_v2_signal(
                     "touch_depth": touch_depth,
                     "entry_mode": V2_ENTRY_MODE,
                     "entry_trigger": "retest",
-                    "min_touch_depth": V2_MIN_TOUCH_DEPTH,
                     "retest_enabled": float(V2_RETEST_ENABLED),
                     "supertrend_trend": st_state.trend,
                     "supertrend_band": st_state.band,

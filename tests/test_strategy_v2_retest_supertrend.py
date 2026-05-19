@@ -88,9 +88,7 @@ def test_supertrend_recovery_state_identifies_basic_trend():
 
 
 def test_evaluate_signal_uses_15m_retest_without_htf_confluence(monkeypatch):
-    monkeypatch.setattr(strategy_v2, "V2_HTF_MIN_SCORE", 999)  # should not gate now
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_MIN_FVG_TIER", "weak")
     monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
 
@@ -108,7 +106,6 @@ def test_evaluate_signal_uses_15m_retest_without_htf_confluence(monkeypatch):
 
 def test_evaluate_signal_rejects_supertrend_misalignment(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_MIN_FVG_TIER", "weak")
     monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
     monkeypatch.setattr(strategy_v2, "_supertrend_recovery_state", lambda bars: strategy_v2.SuperTrendState(trend=-1, band=99.0, switch_price=101.0))

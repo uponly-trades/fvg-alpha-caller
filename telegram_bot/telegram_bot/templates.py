@@ -12,14 +12,30 @@ def _px(v: float) -> str:
     return f"${v:,.2f}" if v >= 100 else f"${v:,.4f}"
 
 
+def _tv_link(symbol: str, tf: str) -> str:
+    interval_map = {"15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240"}
+    tv_symbol = f"{symbol}.P"
+    return f"https://www.tradingview.com/chart/?symbol=BINANCE:{tv_symbol}&interval={interval_map.get(tf, '15')}"
+
+
+def _sl_open_line(*, direction: str, entry: float, sl: float) -> str:
+    if not sl or sl <= 0:
+        return "   sl OFF (isolated)"
+    sl_pct = (entry - sl) / entry * 100 if direction == "long" else (sl - entry) / entry * 100
+    return f"   sl {_px(sl)} ({_pct(-sl_pct)})"
+
+
 def fmt_opened(*, symbol, tf, direction, entry, sl, tp1, tp2,
                qty, leverage, notional, margin) -> str:
-    sl_pct = (entry - sl) / entry * 100 if direction == "long" else (sl - entry) / entry * 100
+    sl_line = _sl_open_line(direction=direction, entry=entry, sl=sl)
     return (
         f"🟢 OPENED  {symbol} {tf} {direction.upper()}\n"
-        f"   entry {_px(entry)}  sl {_px(sl)} ({_pct(-sl_pct)})\n"
+        f"   trigger FVG Retest + SuperTrend\n"
+        f"   entry {_px(entry)}\n"
+        f"{sl_line}\n"
         f"   tp1 {_px(tp1)}  tp2 {_px(tp2)}\n"
-        f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional, ${margin:.2f} margin)"
+        f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional, ${margin:.2f} margin)\n"
+        f"   <a href='{_tv_link(symbol, tf)}'>TradingView</a>"
     )
 
 

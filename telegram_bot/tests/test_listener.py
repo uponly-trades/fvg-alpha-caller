@@ -16,8 +16,8 @@ class FakeBot:
     def __init__(self):
         self.sent = []
 
-    async def send_message(self, chat_id, text):
-        self.sent.append((chat_id, text))
+    async def send_message(self, chat_id, text, **kwargs):
+        self.sent.append((chat_id, text, kwargs))
 
 
 @pytest.mark.asyncio
@@ -43,5 +43,7 @@ async def test_handle_payload_trade_opened_dispatches_message():
         assert len(bot.sent) == 1
         assert bot.sent[0][0] == 12345
         assert "OPENED" in bot.sent[0][1]
+        assert "TradingView" in bot.sent[0][1]
+        assert bot.sent[0][2].get("parse_mode") == "HTML"
     finally:
         await pool.close()

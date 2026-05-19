@@ -461,11 +461,10 @@ def test_v2_new_safety_config_imports():
     assert config.V2_HTF_OBSTACLE_TFS == ["1h", "2h", "4h"]
     assert config.V2_HTF_OBSTACLE_ATR_BUFFER >= 0
     assert config.V2_ENTRY_MODE in {"close", "touch"}
-    assert 0 <= config.V2_MIN_TOUCH_DEPTH <= 1
-    assert config.V2_MIN_FVG_TIER in {"weak", "normal", "strong"}
     assert isinstance(config.V2_RETEST_ENABLED, bool)
-    assert 0 <= config.V2_RETEST_MIN_DEPTH <= config.V2_RETEST_MAX_DEPTH <= 1
-    assert config.V2_RETEST_MIN_SCORE > 0
+    assert 0 <= config.V2_RETEST_MAX_DEPTH <= 1
+    assert config.V2_ENTRY_TRIGGER == "retest_only"
+    assert config.V2_REQUIRE_PRIOR_TOUCH is True
     assert config.V2_STRONG_VOLUME_SCORE >= config.V2_NORMAL_VOLUME_SCORE
     assert 0 <= config.V2_NORMAL_VOLUME_IMBALANCE <= 1
     assert config.V2_STRONG_VOLUME_IMBALANCE >= config.V2_NORMAL_VOLUME_IMBALANCE
@@ -637,9 +636,6 @@ def test_evaluate_v2_signal_ignores_htf_obstacle_as_entry_gate(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", True)
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_TFS", ["1h", "2h", "4h"])
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_ATR_BUFFER", 0.0)
-    monkeypatch.setattr(strategy_v2, "V2_HTF_MIN_SCORE", 1)
-    monkeypatch.setattr(strategy_v2, "V2_MIN_QUALITY_SCORE", 0.0)
-    monkeypatch.setattr(strategy_v2, "V2_MIN_FVG_TIER", "normal")
 
     trigger = make_zone(tf="15m", direction=1, top=100.0, bottom=99.0, born_time=1000, atr_val=1.0)
     trigger.quality_score = 100.0

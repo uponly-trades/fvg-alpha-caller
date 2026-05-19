@@ -50,7 +50,10 @@ services:
       MODEL_ENABLED: "false"
       STRATEGY_VERSION: v2
       V2_COOLDOWN_SEC: "1800"
-      V2_HTF_MIN_SCORE: "1"
+      V2_ENTRY_TRIGGER: retest_only
+      V2_REQUIRE_PRIOR_TOUCH: "1"
+      V2_REQUIRE_SUPERTREND_FILTER: "1"
+      V2_RETEST_MAX_DEPTH: "0.75"
       V2_HTF_TOUCH_LOOKBACK: "1"
       ATR_BUFFER_V2: "0.3"
       V2_TRAIL_ATR_BUFFER: "0.3"
