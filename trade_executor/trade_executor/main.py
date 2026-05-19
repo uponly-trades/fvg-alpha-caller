@@ -108,12 +108,17 @@ async def http_server():
     await uvicorn.Server(config).serve()
 
 
-async def get_active_symbols(pool):
+async def get_active_symbol_users(pool):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT DISTINCT symbol FROM user_trades WHERE status IN ('open','tp1_trailed')"
+            """
+            SELECT symbol, MIN(user_id) AS user_id
+            FROM user_trades
+            WHERE status IN ('open','tp1_trailed')
+            GROUP BY symbol
+            """
         )
-    return [r["symbol"] for r in rows]
+    return [(r["symbol"], int(r["user_id"])) for r in rows]
 
 
 async def run():
@@ -121,7 +126,7 @@ async def run():
     log.info("DB pool created")
 
     async def ex_factory(uid):
-        return await _build_user_ex(pool, uid)
+        return await _build_user_ex(pool, int(uid))
     await resume_in_flight(pool, ex_factory=ex_factory)
     log.info("Restart resume complete")
 
@@ -131,7 +136,7 @@ async def run():
         reconcile_loop(pool),
         run_mark_price_ws(
             pool, ex_factory=ex_factory,
-            get_active_symbols=lambda: get_active_symbols(pool),
+            get_active_symbols=lambda: get_active_symbol_users(pool),
             proxy_url=settings.BINANCE_PROXY_URL,
         ),
     )

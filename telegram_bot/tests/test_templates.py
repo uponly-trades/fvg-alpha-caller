@@ -57,11 +57,11 @@ def test_fmt_tp2_uses_plus_sign_for_profit():
     assert "+$5.41" in msg or "+5.41" in msg
 
 
-def test_fmt_tp2_single_target_uses_tp_hit_label():
+def test_fmt_tp2_single_target_uses_st_exit_label():
     msg = fmt_tp2(symbol="BTCUSDT", pnl_usdt=5.41, pnl_pct=2.0, **{**_CLOSE_KW, "tp2": 101.0})
-    assert "TP HIT" in msg
+    assert "ST EXIT" in msg
     assert "TP2 HIT" not in msg
-    assert " tp " in msg
+    assert "ST exit" in msg
     assert "tp2" not in msg
 
 
@@ -214,3 +214,27 @@ def test_fmt_trade_skipped_margin_required_is_actionable():
     assert "BTCUSDT" in msg
     assert "margin" in msg.lower()
     assert "SL" in msg
+
+
+def test_fmt_opened_pine_retest_shows_supertrend_exit_not_fake_tp():
+    msg = fmt_opened(
+        symbol="ORDIUSDT", tf="15m", direction="short",
+        entry=4.1310, sl=4.25, tp1=4.1310, tp2=4.1310,
+        qty=42.7, leverage=15, notional=176.35, margin=11.76,
+    )
+    assert "exit SuperTrend band" in msg
+    assert "tp1" not in msg.lower()
+    assert "tp2" not in msg.lower()
+
+
+def test_fmt_trade_list_pine_retest_hides_fake_tp_placeholders():
+    msg = fmt_trade_list([
+        {
+            "symbol": "BTCUSDT", "tf": "15m", "direction": "long",
+            "status": "open", "entry": 100.0, "sl_current": 95.0,
+            "tp1": 100.0, "tp2": 100.0, "pnl_usdt": None,
+        }
+    ], closed=False)
+    assert "ST exit" in msg
+    assert "TP1" not in msg
+    assert "TP2" not in msg

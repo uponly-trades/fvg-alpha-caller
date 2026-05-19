@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
 
 import websockets
 
@@ -21,8 +23,8 @@ log = logging.getLogger("trail_manager")
 async def _open_in_symbol(conn, symbol: str) -> list[dict]:
     rows = await conn.fetch(
         """
-        SELECT id, user_id, direction, qty, entry, sl, sl_order_id, sl_current,
-               tp1, tp2, tp1_order_id, tp1_qty, tp2_qty
+        SELECT id, user_id, decision_id, exit_mode, status, direction, qty, entry, sl, sl_order_id, sl_current,
+               tf, tp1, tp2, tp1_order_id, tp1_qty, tp2_qty
         FROM user_trades
         WHERE symbol=$1 AND status IN ('open','tp1_trailed')
         """,
@@ -40,11 +42,43 @@ def r_progress(*, direction: str, entry: float, sl: float, price: float) -> floa
     return (float(entry) - float(price)) / r
 
 
-import os
+def is_pine_retest_trade(trade: dict) -> bool:
+    return str(trade.get("exit_mode") or "") == "supertrend_band"
 
-# Trail mode: "structural" trips earlier (move to BE at 1R, then to +1R at 2R,
-# then +2R at 3R) which suits the new magnet-anchored TP2 (typically 1.2-2.5R).
-# Legacy "percent" mode keeps the 1.5R/2.5R/3.5R ladder used by fixed-RR TP=2.
+
+_ST_STATE_MAX_AGE_MS = int(os.environ.get("ST_STATE_MAX_AGE_MS", str(45 * 60 * 1000)))
+
+
+async def _latest_supertrend_band(conn, *, symbol: str, tf: str = "15m") -> float | None:
+    row = await conn.fetchrow(
+        """
+        SELECT band, updated_at
+        FROM supertrend_state
+        WHERE symbol=$1 AND tf=$2
+        """,
+        symbol, tf,
+    )
+    if not row:
+        return None
+    updated_at = int(row["updated_at"] or 0)
+    if updated_at and int(time.time() * 1000) - updated_at > _ST_STATE_MAX_AGE_MS:
+        return None
+    band = float(row["band"] or 0.0)
+    return band if band > 0 else None
+
+
+def should_replace_supertrend_band(*, direction: str, sl_current: float, st_band: float) -> bool:
+    if st_band <= 0:
+        return False
+    if sl_current <= 0:
+        return True
+    if direction == "long":
+        return st_band > sl_current
+    return st_band < sl_current
+
+
+# Legacy non-Pine trail mode. Pine-retets trades bypass this path and follow
+# the persisted SuperTrend band instead.
 _V2_TRAIL_MODE = os.environ.get("V2_TRAIL_MODE", "structural").lower()
 
 
@@ -52,7 +86,7 @@ def trail_sl_for_progress(*, direction: str, entry: float, sl: float, sl_current
     progress = r_progress(direction=direction, entry=entry, sl=sl, price=price)
 
     if _V2_TRAIL_MODE == "structural":
-        # Earlier breakeven + tighter ladder for magnet-mode trades.
+        # Earlier breakeven + tighter ladder for legacy non-Pine trades.
         if progress >= 3.0:
             locked_r = 2.0
         elif progress >= 2.0:
@@ -184,6 +218,49 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
         side = "long" if is_long else "short"
         close_side = "SELL" if is_long else "BUY"
 
+        if is_pine_retest_trade(t):
+            async with pool.acquire() as conn:
+                st_band = await _latest_supertrend_band(conn, symbol=symbol, tf=t.get("tf") or "15m")
+            if st_band is None:
+                log.debug("supertrend SL update skipped %s/%s: no fresh band", symbol, t["id"])
+                continue
+            if not should_replace_supertrend_band(
+                direction=side,
+                sl_current=float(t.get("sl_current") or 0.0),
+                st_band=float(st_band),
+            ):
+                continue
+            trail_price = float(st_band)
+            mark = await fetch_mark_price(ex, symbol)
+            if mark:
+                trail_price = adjust_sl_for_mark(side=side, sl_price=trail_price, mark=mark)
+            if t["sl_order_id"]:
+                await cancel_algo(ex, symbol=symbol, algo_id=t["sl_order_id"])
+            pos_side = None
+            if getattr(ex, "_is_hedge_mode", False):
+                pos_side = "LONG" if is_long else "SHORT"
+            try:
+                new_sl = await place_algo_stop(
+                    ex, symbol=symbol, close_side=close_side, quantity=float(t["qty"]),
+                    trigger_price=trail_price, order_type="STOP_MARKET",
+                    position_side=pos_side,
+                )
+            except Exception as e:
+                log.error("supertrend SL update failed for %s/%s: %s", symbol, t["id"], e)
+                continue
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE user_trades
+                    SET sl=$1, sl_current=$1, sl_order_id=$2
+                    WHERE id=$3 AND status='open'
+                    """,
+                    trail_price, algo_id_of(new_sl), t["id"],
+                )
+            trailed_any = True
+            log.info("supertrend SL updated %s/%s direction=%s band=%.6f trigger=%.6f", symbol, t["id"], side, st_band, trail_price)
+            continue
+
         # ── Phase 1: detect TP1 fill → arm protective SL ──────────────────
         if t["status"] == "open" and t.get("tp1_order_id") and t.get("tp1_qty"):
             tp1_filled = await _check_tp1_filled(ex, symbol=symbol, trade=t)
@@ -247,13 +324,19 @@ async def run_mark_price_ws(pool, *, ex_factory, get_active_symbols, proxy_url: 
     """
     while True:
         try:
-            symbols = await get_active_symbols()
-            if not symbols:
+            active = await get_active_symbols()
+            if not active:
                 await asyncio.sleep(5)
                 continue
-            streams = "/".join(f"{s.lower()}@markPrice@1s" for s in symbols)
+            symbol_users: dict[str, int | None] = {}
+            for item in active:
+                if isinstance(item, (tuple, list)) and len(item) >= 2:
+                    symbol_users[str(item[0]).upper()] = int(item[1])
+                else:
+                    symbol_users[str(item).upper()] = None
+            streams = "/".join(f"{s.lower()}@markPrice@1s" for s in symbol_users)
             url = f"wss://fstream.binance.com/stream?streams={streams}"
-            log.info("connecting mark-price WS: %d symbols", len(symbols))
+            log.info("connecting mark-price WS: %d symbols", len(symbol_users))
             async with websockets.connect(url, ping_interval=20) as ws:
                 deadline = asyncio.get_event_loop().time() + 30.0
                 async for msg in ws:
@@ -261,11 +344,19 @@ async def run_mark_price_ws(pool, *, ex_factory, get_active_symbols, proxy_url: 
                     sym = data.get("s")
                     price = float(data.get("p", 0))
                     if sym and price > 0:
-                        ex = await ex_factory(sym)
+                        uid = symbol_users.get(sym.upper())
+                        if uid is None:
+                            log.warning("mark-price WS cannot trail %s: no user id", sym)
+                            continue
+                        ex = await ex_factory(uid)
                         try:
                             await maybe_trail(pool, ex=ex, symbol=sym, price=price)
                         except Exception as e:
                             log.exception("maybe_trail failed: %s", e)
+                        finally:
+                            close = getattr(ex, "close", None)
+                            if close:
+                                await close()
                     if asyncio.get_event_loop().time() >= deadline:
                         break
         except Exception as e:

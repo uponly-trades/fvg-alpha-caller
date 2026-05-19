@@ -133,6 +133,19 @@ async def test_sl_off_skips_sl_placement_and_keeps_tp():
 
 
 @pytest.mark.asyncio
+async def test_full_sequence_can_place_only_supertrend_stop_without_tp():
+    ex = FakeOK()
+    res = await place_full_sequence(
+        ex, symbol="BTCUSDT", side="BUY", qty=0.01,
+        sl_price=95.0, tp_price=100.0, leverage=5, place_tp=False,
+    )
+    assert res.sl_order_id == "sl-1"
+    assert res.tp_order_id is None
+    tp_calls = [c for c in ex.calls if c[0] == "algoOrder" and c[1]["type"] == "TAKE_PROFIT_MARKET"]
+    assert tp_calls == []
+
+
+@pytest.mark.asyncio
 async def test_sl_off_requires_isolated_margin_mode():
     ex = FakeOK()
     with pytest.raises(OrderError) as exc:

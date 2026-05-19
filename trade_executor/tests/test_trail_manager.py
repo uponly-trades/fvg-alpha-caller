@@ -7,7 +7,12 @@ os.environ.setdefault("V2_TRAIL_MODE", "percent")
 import pytest
 
 from trade_executor import db
-from trade_executor.trail_manager import maybe_trail, r_progress, trail_sl_for_progress
+from trade_executor.trail_manager import (
+    maybe_trail,
+    r_progress,
+    should_replace_supertrend_band,
+    trail_sl_for_progress,
+)
 
 def test_r_progress_long_and_short():
     assert r_progress(direction="long", entry=100, sl=95, price=107.5) == pytest.approx(1.5)
@@ -33,15 +38,24 @@ class FakeEx:
         self.placed = []
         self.fail_cancel = fail_cancel
 
-    async def cancel_order(self, order_id, symbol):
+    async def fapiPrivateDeleteAlgoOrder(self, params):
         if self.fail_cancel:
             raise Exception("not found")
-        self.cancelled.append((order_id, symbol))
-        return {"id": order_id, "status": "CANCELED"}
+        self.cancelled.append((params["algoId"], params["symbol"]))
+        return {"algoId": params["algoId"], "algoStatus": "CANCELED"}
 
-    async def create_order(self, symbol, type_, side, amount, price=None, params=None):
-        self.placed.append((type_, side, params))
-        return {"id": "new-sl"}
+    async def fapiPublicGetPremiumIndex(self, params):
+        return {"markPrice": "100.0"}
+
+    def price_to_precision(self, symbol, price):
+        return f"{float(price):.4f}"
+
+    def amount_to_precision(self, symbol, amount):
+        return f"{float(amount):.4f}"
+
+    async def fapiPrivatePostAlgoOrder(self, params):
+        self.placed.append((params["type"], params["side"], params))
+        return {"algoId": "new-sl"}
 
 
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
@@ -168,5 +182,50 @@ def test_structural_trail_never_loosens(monkeypatch):
     importlib.reload(tm)
     # sl_current already above BE → no loosen
     assert tm.trail_sl_for_progress(direction="long", entry=100, sl=95, sl_current=105, price=105) is None
-    monkeypatch.setenv("V2_TRAIL_MODE", "percent")
-    importlib.reload(tm)
+
+
+def test_supertrend_band_replacement_only_tightens():
+    assert should_replace_supertrend_band(direction="long", sl_current=95, st_band=96) is True
+    assert should_replace_supertrend_band(direction="long", sl_current=96, st_band=95) is False
+    assert should_replace_supertrend_band(direction="short", sl_current=105, st_band=104) is True
+    assert should_replace_supertrend_band(direction="short", sl_current=104, st_band=105) is False
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
+@pytest.mark.asyncio
+async def test_pine_retest_uses_persisted_supertrend_band_not_mark_price():
+    pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO users (telegram_id, created_at, updated_at) VALUES (891, 0, 0) ON CONFLICT DO NOTHING")
+            uid = await conn.fetchval("SELECT id FROM users WHERE telegram_id=891")
+            await conn.execute("DELETE FROM user_trades WHERE id=$1", f"{uid}-pine-1")
+            await conn.execute(
+                """
+                INSERT INTO user_trades (id, user_id, decision_id, exit_mode, symbol, tf, direction,
+                  leverage, margin_usdt, notional_usdt, qty, entry, sl, sl_current, tp1, tp2,
+                  status, sl_order_id, opened_at)
+                VALUES ($1,$2,'BTCUSDT_15m_1_1','supertrend_band','BTCUSDT','15m','long',5,10,50,0.001,100,95,95,100,100,'open','sl-old-st',0)
+                """,
+                f"{uid}-pine-1", uid,
+            )
+            await conn.execute(
+                """
+                INSERT INTO supertrend_state (symbol, tf, trend, band, switch_price, bar_time, updated_at)
+                VALUES ('BTCUSDT','15m',1,96.25,101,1,CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT))
+                ON CONFLICT (symbol, tf) DO UPDATE SET band=EXCLUDED.band, updated_at=EXCLUDED.updated_at
+                """
+            )
+
+        ex = FakeEx()
+        trailed = await maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=120.0)
+        assert trailed is True
+        assert ex.cancelled == [("sl-old-st", "BTCUSDT")]
+        assert ex.placed[0][2]["triggerPrice"] == "96.2500"
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT sl_current, sl_order_id FROM user_trades WHERE id=$1", f"{uid}-pine-1")
+        assert row["sl_current"] == pytest.approx(96.25)
+        assert row["sl_order_id"] == "new-sl"
+    finally:
+        await pool.close()

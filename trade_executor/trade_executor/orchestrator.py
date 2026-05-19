@@ -97,6 +97,7 @@ async def handle_signal_for_user(
     direction = signal["direction"]
     entry = float(signal["entry"])
     sl_signal = float(signal["sl"])
+    pine_retest_signal = signal.get("event_type") == "v2_fvg_retest"
 
     # Hard reject when user combo violates SL OFF rule. We do NOT silently
     # auto-switch margin: the user must consciously fix it via the bot so they
@@ -120,20 +121,23 @@ async def handle_signal_for_user(
         )
         return OrchResult(placed=False, skip_reason="sl_off_requires_isolated")
 
-    # Widen SL by user mult against entry. Multiplier <1 would tighten; we
-    # clamp at 0.5 floor in the migration, no upper widening beyond 5x.
-    sl_mult = max(0.5, float(sl_mult or 1.0))
-    base_distance = abs(entry - sl_signal)
-    widened_distance = base_distance * sl_mult
-    if direction == "long":
-        sl = entry - widened_distance
+    if pine_retest_signal:
+        sl = sl_signal
     else:
-        sl = entry + widened_distance
+        # Widen SL by user mult against entry. Multiplier <1 would tighten; we
+        # clamp at 0.5 floor in the migration, no upper widening beyond 5x.
+        sl_mult = max(0.5, float(sl_mult or 1.0))
+        base_distance = abs(entry - sl_signal)
+        widened_distance = base_distance * sl_mult
+        if direction == "long":
+            sl = entry - widened_distance
+        else:
+            sl = entry + widened_distance
     rr_ratio = max(1.0, float(rr_ratio or 1.0))
-    risk_distance = widened_distance
+    risk_distance = abs(entry - sl)
 
-    # Prefer magnet-derived TPs from strategy if available on the signal row.
-    # Fall back to fixed RR math when fields are missing or zero.
+    # Pine retest has no fixed TP. Legacy/non-Pine signals can still use
+    # strategy-provided targets or fixed RR math.
     sig_tp1 = signal.get("tp1")
     sig_tp2 = signal.get("tp2")
     use_sig = (
@@ -141,7 +145,10 @@ async def handle_signal_for_user(
         and float(sig_tp1) > 0 and float(sig_tp2) > 0
         and float(sig_tp1) != float(sig_tp2)
     )
-    if use_sig:
+    if pine_retest_signal:
+        tp1 = entry
+        tp2 = entry
+    elif use_sig:
         tp1 = float(sig_tp1)
         tp2 = float(sig_tp2)
     else:
@@ -214,12 +221,13 @@ async def handle_signal_for_user(
                 """
                 INSERT INTO user_trades (id, user_id, decision_id, symbol, tf, direction,
                   leverage, margin_usdt, notional_usdt, qty, entry, sl, sl_current, tp1, tp2,
-                  status, opened_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'opening',$16)
+                  status, exit_mode, opened_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'opening',$16,$17)
                 """,
                 trade_id, user_id, decision_id, symbol, signal["tf"], direction,
                 leverage, size.margin_usdt, size.notional_usdt, size.qty,
-                entry, sl, sl, tp1, tp2, now,
+                entry, sl, sl, tp1, tp2,
+                "supertrend_band" if pine_retest_signal else "legacy", now,
             )
         except Exception as e:
             log.info("user_trade insert collision for %s: %s", trade_id, e)
@@ -233,6 +241,7 @@ async def handle_signal_for_user(
             sl_price=sl_for_placement, tp_price=tp2, leverage=leverage,
             margin_mode=margin_mode, rr_ratio=rr_ratio,
             tp1_price=tp1,
+            place_tp=not pine_retest_signal,
         )
     except OrderError as e:
         async with pool.acquire() as conn:
@@ -255,7 +264,7 @@ async def handle_signal_for_user(
             WHERE id=$12
             """,
             placed.avg_price, placed.sl_price, placed.sl_price,
-            placed.tp1_price or tp1, placed.tp_price,
+            placed.tp1_price or tp1, placed.tp_price if not pine_retest_signal else tp2,
             placed.entry_order_id, placed.sl_order_id, placed.tp_order_id,
             placed.tp1_order_id, placed.tp1_qty, placed.tp2_qty,
             trade_id,

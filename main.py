@@ -17,10 +17,11 @@ from config import (
 from fvg_engine import FVGTracker, detect_fvg, calc_strength
 from sim_trades import SimTradeStore
 from websocket_client import BinanceKlineWS
-from strategy_v2 import evaluate_v2_signal
+from strategy_v2 import _supertrend_recovery_state, evaluate_v2_signal
 from trail_manager import TrailManager
 from cooldown import CooldownStore
 from telegram import send_trade_recap, send_v2_alert
+from notify_bot_webhook import post_chart as _notify_bot_post_chart
 
 logging.basicConfig(
     level=logging.INFO,
@@ -242,13 +243,11 @@ class AlphaCaller:
         try:
             trigger_bars = bars_by_tf.get(sig.trigger_tf, []) or bars
             if trigger_bars and len(trigger_bars) >= 3:
-                r = abs(float(sig.entry) - float(sig.sl))
-                tp1 = sig.entry + r if sig.direction == 1 else sig.entry - r
                 v2_plan = SimpleNamespace(
                     entry=float(sig.entry),
                     sl=float(sig.sl),
-                    tp1=float(tp1),
-                    tp2=float(sig.tp),
+                    tp1=float(sig.entry),
+                    tp2=float(sig.entry),
                     direction=sig.direction_str,
                 )
                 chart_png = generate_chart(
@@ -270,6 +269,22 @@ class AlphaCaller:
             self.sim_store.add_v2_decision(sig, signal_id)
         except Exception as e:
             logger.error("v2 decision persist failed %s: %s", signal_id, e)
+        # Best-effort: ship chart PNG + minimal metadata to notify-bot so it
+        # can later attach the chart to its Signals · Exec Telegram card when
+        # app-stable reports execution. Never blocks our own alert path.
+        try:
+            _notify_bot_post_chart(
+                signal_id=signal_id,
+                symbol=symbol,
+                direction=sig.direction,
+                tf=sig.trigger_tf,
+                entry=sig.entry,
+                sl=sig.sl,
+                tp1=sig.entry,
+                png_bytes=chart_png,
+            )
+        except Exception as e:
+            logger.warning("notify-bot webhook dispatch failed %s: %s", signal_id, e)
         logger.info(
             "v2 signal %s %s %s | score=%d entry=%g sl=%g tp=%g chart=%s",
             symbol, sig.trigger_tf, sig.direction_str,
@@ -286,6 +301,16 @@ class AlphaCaller:
             return
 
         self.tracker.update_buffer(symbol, tf, bars)
+        if tf in V2_TRIGGER_TFS:
+            st = _supertrend_recovery_state(bars)
+            self.sim_store.upsert_supertrend_state(
+                symbol=symbol,
+                tf=tf,
+                trend=st.trend,
+                band=st.band,
+                switch_price=st.switch_price,
+                bar_time=bars[-1].open_time,
+            )
         self.sim_store.update_open_trades(symbol, bars[-1])
         self._maybe_send_recap()
         # 1. Mitigation pass — drops fully-mitigated zones

@@ -2,8 +2,6 @@ import os
 
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x")
 os.environ.setdefault("TELEGRAM_CHAT_ID", "x")
-os.environ.setdefault("V2_TP_MAGNET_REQUIRED", "0")
-
 import pytest
 
 import strategy_v2
@@ -89,7 +87,6 @@ def test_supertrend_recovery_state_identifies_basic_trend():
 
 def test_evaluate_signal_uses_15m_retest_without_htf_confluence(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
 
     sig = evaluate_v2_signal(
@@ -106,7 +103,6 @@ def test_evaluate_signal_uses_15m_retest_without_htf_confluence(monkeypatch):
 
 def test_evaluate_signal_rejects_supertrend_misalignment(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
     monkeypatch.setattr(strategy_v2, "_supertrend_recovery_state", lambda bars: strategy_v2.SuperTrendState(trend=-1, band=99.0, switch_price=101.0))
 
@@ -120,7 +116,6 @@ def test_evaluate_signal_rejects_supertrend_misalignment(monkeypatch):
 
 def test_evaluate_signal_rejects_short_when_supertrend_is_bullish(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
     monkeypatch.setattr(
         strategy_v2,
@@ -138,7 +133,6 @@ def test_evaluate_signal_rejects_short_when_supertrend_is_bullish(monkeypatch):
 
 def test_evaluate_signal_accepts_short_when_supertrend_is_bearish(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
-    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
     monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
     monkeypatch.setattr(
         strategy_v2,
@@ -154,3 +148,26 @@ def test_evaluate_signal_accepts_short_when_supertrend_is_bearish(monkeypatch):
     assert sig is not None
     assert sig.direction == -1
     assert sig.indicators["supertrend_trend"] == -1
+
+
+def test_evaluate_signal_supertrend_exit_uses_entry_placeholders(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: strategy_v2.SuperTrendState(trend=1, band=97.5, switch_price=101.0),
+    )
+
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"z15": zone(direction=1)},
+        {"15m": bullish_retest_bars()},
+    )
+
+    assert sig is not None
+    assert sig.sl == pytest.approx(97.5)
+    assert sig.tp == pytest.approx(sig.entry)
+    assert sig.indicators["tp1"] == pytest.approx(sig.entry)
+    assert sig.indicators["sl_mode"] == "supertrend_band"
+    assert sig.indicators["tp_mode"] == "supertrend_exit"

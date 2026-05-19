@@ -5,6 +5,7 @@ from typing import Dict, Optional, List
 from config import (
     V2_TRIGGER_TFS, V2_HTF_TFS, V2_HTF_WEIGHTS, V2_RR,
     V2_HTF_TOUCH_LOOKBACK, ATR_BUFFER_V2,
+    V2_SWING_LOOKBACK, V2_SWING_FRACTAL, V2_TP_MIN_DIST_R, V2_RR_CAP,
     V2_MIN_VOLUME_SCORE, V2_MIN_VOLUME_IMBALANCE, V2_REQUIRE_DIRECTIONAL_VOLUME,
     V2_HTF_OBSTACLE_FILTER_ENABLED, V2_HTF_OBSTACLE_TFS, V2_HTF_OBSTACLE_ATR_BUFFER,
     V2_ENTRY_MODE, V2_RETEST_ENABLED, V2_RETEST_MAX_DEPTH,
@@ -14,9 +15,6 @@ from config import (
     V2_SUPERTREND_THRESHOLD_ATR,
     V2_NORMAL_VOLUME_SCORE, V2_NORMAL_VOLUME_IMBALANCE, V2_NORMAL_MAIN_STRENGTH,
     V2_STRONG_VOLUME_SCORE, V2_STRONG_VOLUME_IMBALANCE, V2_STRONG_MAIN_STRENGTH,
-    V2_SL_MODE, V2_TP_MODE, V2_MIN_STRUCTURAL_RR, V2_RR_CAP,
-    V2_SWING_LOOKBACK, V2_SWING_FRACTAL, V2_TP_MIN_DIST_R,
-    V2_TP_MAGNET_REQUIRED,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
 
@@ -723,25 +721,12 @@ def evaluate_v2_signal(
                 float(triggered.top) if direction == 1 else float(triggered.bottom)
             )
 
-            # ---- Dynamic SL ----
+            # Pine parity: trade plan exits on the SuperTrend Recovery band.
+            # fvg retest.txt sets slPrice = stBand on entry and refreshes it
+            # every bar while the virtual trade remains open.
             side_str = "long" if direction == 1 else "short"
-            sl_legacy = _compute_sl(triggered, atr_val)
-            sl_mode_used = V2_SL_MODE
-            if V2_SL_MODE == "structural":
-                sl_struct = _structural_sl(
-                    triggered, bars, atr_val, side_str,
-                    lookback=V2_SWING_LOOKBACK, fractal=V2_SWING_FRACTAL,
-                    buffer_atr=ATR_BUFFER_V2,
-                )
-                # never tighter than legacy zone-edge anchor
-                if direction == 1:
-                    sl = min(sl_struct, sl_legacy)
-                else:
-                    sl = max(sl_struct, sl_legacy)
-                if sl == sl_legacy:
-                    sl_mode_used = "atr_fallback"
-            else:
-                sl = sl_legacy
+            sl = float(st_state.band)
+            sl_mode_used = "supertrend_band"
 
             r = abs(entry - sl)
             if r <= 0:
@@ -751,63 +736,9 @@ def evaluate_v2_signal(
                 )
                 continue
 
-            # ---- Dynamic TP magnets ----
-            tp_mode_used = V2_TP_MODE
-            tp1_magnet = None
-            tp1_kind = "none"
-            tp2_kind = "none"
-            structural_rr = 0.0
-            if V2_TP_MODE == "magnet":
-                all_zones = list(zones.values()) if isinstance(zones, dict) else []
-                htf_zones_for_magnet = {
-                    "1h": [z for z in all_zones
-                           if getattr(z, "tf", "") == "1h"
-                           and getattr(z, "symbol", "") == symbol],
-                    "4h": [z for z in all_zones
-                           if getattr(z, "tf", "") == "4h"
-                           and getattr(z, "symbol", "") == symbol],
-                }
-                tp1_magnet, tp1_kind, tp2_magnet, tp2_kind = _tp_magnets(
-                    entry=entry, side=side_str, risk=r,
-                    bars_15m=bars, htf_zones=htf_zones_for_magnet,
-                    min_dist_r=V2_TP_MIN_DIST_R, rr_cap=V2_RR_CAP,
-                    lookback=V2_SWING_LOOKBACK, fractal=V2_SWING_FRACTAL,
-                )
-                if tp1_magnet is None:
-                    if V2_TP_MAGNET_REQUIRED:
-                        logger.info(
-                            "v2 skip %s %s %s | no_tp_room entry=%g sl=%g r=%g",
-                            symbol, trigger_tf, side_str, entry, sl, r,
-                        )
-                        continue
-                    # Fallback: fixed-RR target
-                    tp_mode_used = "fixed_fallback"
-                    tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
-                    tp1_magnet = entry + r if direction == 1 else entry - r
-                    tp1_kind = "fixed_1r"
-                    tp2_kind = "fixed_rr"
-                    structural_rr = abs(tp1_magnet - entry) / r if r > 0 else 0.0
-                else:
-                    structural_rr, rr_ok = _structural_rr(
-                        entry=entry, sl=sl, tp1=tp1_magnet, min_rr=V2_MIN_STRUCTURAL_RR,
-                    )
-                    if not rr_ok:
-                        if V2_TP_MAGNET_REQUIRED:
-                            logger.info(
-                                "v2 skip %s %s %s | rr_too_low_structural rr=%.2f min=%.2f",
-                                symbol, trigger_tf, side_str, structural_rr, V2_MIN_STRUCTURAL_RR,
-                            )
-                            continue
-                        # Fallback: keep magnet TP1 even if RR low (test-mode behavior)
-                        tp = tp2_magnet
-                    else:
-                        tp = tp2_magnet
-            else:
-                tp = entry + r * V2_RR if direction == 1 else entry - r * V2_RR
-                tp1_magnet = entry + r if direction == 1 else entry - r
-                tp1_kind = "fixed_1r"
-                tp2_kind = "fixed_rr"
-                structural_rr = abs(tp1_magnet - entry) / r if r > 0 else 0.0
+            tp_mode_used = "supertrend_exit"
+            tp = entry
+            tp1 = entry
 
             obstacle = HTFObstacleDecision(False)
 
@@ -857,10 +788,7 @@ def evaluate_v2_signal(
                     "htf_obstacle_tf": obstacle.blocking_tf,
                     "sl_mode": sl_mode_used,
                     "tp_mode": tp_mode_used,
-                    "tp1": float(tp1_magnet) if tp1_magnet is not None else 0.0,
-                    "tp1_magnet_kind": tp1_kind,
-                    "tp2_magnet_kind": tp2_kind,
-                    "structural_rr": float(structural_rr),
+                    "tp1": float(tp1),
                 },
             )
     return None

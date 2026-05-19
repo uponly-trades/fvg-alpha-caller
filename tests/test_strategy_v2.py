@@ -403,9 +403,10 @@ def test_eval_15m_retest_returns_long_signal_without_htf_gate():
     assert sig.indicators["retest_score"] >= 60
     assert sig.indicators["retest_reason"] == "valid"
     assert sig.entry == pytest.approx(bars_at[-1].close)
-    # tp = entry + 2R for long
-    r = abs(sig.entry - sig.sl)
-    assert abs(sig.tp - (sig.entry + 2 * r)) < 1e-9
+    # Pine parity: no fixed TP; exit follows SuperTrend band.
+    assert sig.tp == pytest.approx(sig.entry)
+    assert sig.indicators["sl_mode"] == "supertrend_band"
+    assert sig.indicators["tp_mode"] == "supertrend_exit"
 
 
 def test_eval_no_15m_zone_returns_none_even_with_30m_zone():
@@ -450,8 +451,8 @@ def test_eval_sl_below_fvg_bottom_long():
                   for tf in ("15m", "30m", "1h", "2h", "4h")}
     sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
     assert sig is not None
-    assert sig.sl < z_15m.bottom
-    assert abs(sig.sl - 99.2) < 1e-9
+    assert sig.indicators["sl_mode"] == "supertrend_band"
+    assert sig.sl == pytest.approx(sig.indicators["supertrend_band"])
 
 
 def test_v2_new_safety_config_imports():

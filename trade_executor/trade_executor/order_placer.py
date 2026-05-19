@@ -53,6 +53,7 @@ async def place_full_sequence(
     margin_mode: str = "ISOLATED",
     rr_ratio: float = 1.0,
     tp1_price: float | None = None,
+    place_tp: bool = True,
 ) -> PlacedOrders:
     sl_off = sl_price is None or (isinstance(sl_price, (int, float)) and sl_price <= 0)
     if sl_off:
@@ -62,7 +63,7 @@ async def place_full_sequence(
                 "SL OFF requires ISOLATED margin mode; refusing CROSSED",
             )
         sl_price = None
-    if not (tp_price and tp_price > 0):
+    if place_tp and not (tp_price and tp_price > 0):
         raise OrderError("tp", f"invalid tp_price={tp_price}")
 
     try:
@@ -114,7 +115,7 @@ async def place_full_sequence(
     mark = await fetch_mark_price(ex, symbol)
     if mark and sl_price is not None:
         sl_price = adjust_sl_for_mark(side=entry_side, sl_price=sl_price, mark=mark)
-    if mark:
+    if mark and place_tp:
         tp_price = adjust_tp_for_mark(side=entry_side, tp_price=tp_price, mark=mark)
 
     # In hedge mode, position_side on the original (not flipped) side closes it.
@@ -149,6 +150,8 @@ async def place_full_sequence(
     tp1_actual: float = 0.0
 
     if (
+        place_tp
+        and
         tp1_price is not None
         and tp1_price > 0
         and TP1_FRACTION > 0.0
@@ -187,15 +190,16 @@ async def place_full_sequence(
                     tp2_qty = qty
 
     tp_id: str | None = None
-    try:
-        tp = await place_algo_stop(
-            ex, symbol=symbol, close_side=close_side, quantity=tp2_qty,
-            trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
-            position_side=pos_side_for_close,
-        )
-        tp_id = algo_id_of(tp)
-    except Exception as e:
-        log.error("TP placement failed for %s: %s — SL still active", symbol, e)
+    if place_tp:
+        try:
+            tp = await place_algo_stop(
+                ex, symbol=symbol, close_side=close_side, quantity=tp2_qty,
+                trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
+                position_side=pos_side_for_close,
+            )
+            tp_id = algo_id_of(tp)
+        except Exception as e:
+            log.error("TP placement failed for %s: %s — SL still active", symbol, e)
 
     return PlacedOrders(
         entry_order_id=entry_id,

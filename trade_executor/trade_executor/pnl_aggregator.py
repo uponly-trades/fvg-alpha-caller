@@ -103,11 +103,15 @@ def _classify_close(*, close_px: float, status_before: str, sl: float,
     return "manual_close"
 
 
+def _is_pine_retest_trade(t: dict) -> bool:
+    return str(t.get("exit_mode") or "") == "supertrend_band"
+
+
 async def reconcile_user(pool, *, ex, user_id: int) -> None:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, symbol, direction, qty, entry, status,
+            SELECT id, decision_id, exit_mode, symbol, direction, qty, entry, status,
                    sl, sl_current, tp1, tp2,
                    sl_order_id, tp_order_id, opened_at
             FROM user_trades
@@ -199,15 +203,18 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
             pnl_usdt = gross - cum_fee
             pnl_pct = (pnl_usdt / (qty * entry_px)) * 100 if entry_px else 0.0
 
-            new_status = _classify_close(
-                close_px=close_px,
-                status_before=t["status"],
-                sl=float(t["sl"] or 0),
-                sl_current=float(t["sl_current"] or 0),
-                tp1=float(t["tp1"] or 0),
-                tp2=float(t["tp2"] or 0),
-                direction=t["direction"],
-            )
+            if _is_pine_retest_trade(t):
+                new_status = "closed_sl"
+            else:
+                new_status = _classify_close(
+                    close_px=close_px,
+                    status_before=t["status"],
+                    sl=float(t["sl"] or 0),
+                    sl_current=float(t["sl_current"] or 0),
+                    tp1=float(t["tp1"] or 0),
+                    tp2=float(t["tp2"] or 0),
+                    direction=t["direction"],
+                )
 
             async with pool.acquire() as conn:
                 await conn.execute(

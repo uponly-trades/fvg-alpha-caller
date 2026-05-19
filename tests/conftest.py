@@ -13,4 +13,3 @@ os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 
 # Allow legacy tests to keep their entry±risk*RR assertions. Production
 # deployments set this to 1 (strict).
-os.environ.setdefault("V2_TP_MAGNET_REQUIRED", "0")

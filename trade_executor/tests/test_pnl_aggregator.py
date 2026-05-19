@@ -95,3 +95,21 @@ async def test_reconcile_marks_tp2_close_and_updates_daily():
         assert day["wins_count"] == 1
     finally:
         await pool.close()
+
+
+def test_pine_retest_close_is_supertrend_exit_not_tp_even_when_profitable():
+    from trade_executor.pnl_aggregator import _classify_close, _is_pine_retest_trade
+
+    trade = {"exit_mode": "supertrend_band", "decision_id": "BTCUSDT_15m_1_1"}
+    assert _is_pine_retest_trade(trade) is True
+    assert _classify_close(
+        close_px=110.0,
+        status_before="open",
+        sl=95.0,
+        sl_current=110.0,
+        tp1=100.0,
+        tp2=100.0,
+        direction="long",
+    ) == "closed_tp2"
+    # reconcile_user overrides this to closed_sl for supertrend_band trades so
+    # the close is shown as an ST-band exit, not a fake fixed TP hit.

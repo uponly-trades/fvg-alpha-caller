@@ -28,12 +28,13 @@ def _sl_open_line(*, direction: str, entry: float, sl: float) -> str:
 def fmt_opened(*, symbol, tf, direction, entry, sl, tp1, tp2,
                qty, leverage, notional, margin) -> str:
     sl_line = _sl_open_line(direction=direction, entry=entry, sl=sl)
+    exit_line = "   exit SuperTrend band (no fixed TP)" if _same_price(tp1, tp2) else f"   tp1 {_px(tp1)}  tp2 {_px(tp2)}"
     return (
         f"🟢 OPENED  {symbol} {tf} {direction.upper()}\n"
         f"   trigger FVG Retest + SuperTrend\n"
         f"   entry {_px(entry)}\n"
         f"{sl_line}\n"
-        f"   tp1 {_px(tp1)}  tp2 {_px(tp2)}\n"
+        f"{exit_line}\n"
         f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional, ${margin:.2f} margin)\n"
         f"   <a href='{_tv_link(symbol, tf)}'>TradingView</a>"
     )
@@ -53,7 +54,7 @@ def _trade_setup_block(*, tf: str, direction: str, entry: float, sl: float,
     rr = (tp_pct / abs(sl_pct)) if sl_pct else 0
     return (
         f"   {tf} {direction.upper()}  entry {_px(entry)}\n"
-        f"   sl {_px(sl)} ({_pct(-abs(sl_pct))})  {target_label} {_px(target)} ({_pct(tp_pct)})  RR <b>{rr:.2f}</b>\n"
+        f"   ST exit {_px(sl)} ({_pct(-abs(sl_pct))})  {target_label} {_px(target)} ({_pct(tp_pct)})  RR <b>{rr:.2f}</b>\n"
         f"   qty {qty}  ({leverage}x lev, ${notional:.2f} notional)"
     )
 
@@ -64,7 +65,7 @@ def fmt_tp2(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
         tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
         qty=qty, leverage=leverage, notional=notional,
     )
-    label = "TP HIT" if _same_price(tp1, tp2) else "TP2 HIT"
+    label = "ST EXIT" if _same_price(tp1, tp2) else "TP2 HIT"
     return f"✅ <b>{label}</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
@@ -74,7 +75,8 @@ def fmt_sl(*, symbol, pnl_usdt, pnl_pct, tf, direction, entry, sl, tp1, tp2,
         tf=tf, direction=direction, entry=entry, sl=sl, tp1=tp1, tp2=tp2,
         qty=qty, leverage=leverage, notional=notional,
     )
-    return f"🛑 <b>SL HIT</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
+    label = "ST EXIT" if _same_price(tp1, tp2) else "SL HIT"
+    return f"🛑 <b>{label}</b>  {symbol}  closed {_money(pnl_usdt)} ({_pct(pnl_pct)})\n{setup}"
 
 
 def fmt_breakeven(*, symbol, pnl_usdt, tf, direction, entry, sl, tp1, tp2,
@@ -328,10 +330,15 @@ def fmt_trade_list(trades: list[dict], *, closed: bool) -> str:
     lines = [title]
     for t in trades:
         pnl = "" if t.get("pnl_usdt") is None else f" pnl {_money(float(t['pnl_usdt']))}"
+        same_target = _same_price(float(t["tp1"]), float(t["tp2"]))
+        exit_part = (
+            f"ST exit {_px(float(t['sl_current']))}"
+            if same_target
+            else f"SL {_px(float(t['sl_current']))} TP1 {_px(float(t['tp1']))} TP2 {_px(float(t['tp2']))}"
+        )
         lines.append(
             f"{t['symbol']} {t['tf']} {str(t['direction']).upper()} {t['status']}\n"
-            f"entry {_px(float(t['entry']))} SL {_px(float(t['sl_current']))} "
-            f"TP1 {_px(float(t['tp1']))} TP2 {_px(float(t['tp2']))}{pnl}"
+            f"entry {_px(float(t['entry']))} {exit_part}{pnl}"
         )
     return "\n\n".join(lines)
 

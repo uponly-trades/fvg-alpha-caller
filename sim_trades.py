@@ -119,6 +119,18 @@ CREATE TABLE IF NOT EXISTS sent_recaps (
     sent_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS supertrend_state (
+    symbol       TEXT NOT NULL,
+    tf           TEXT NOT NULL,
+    trend        SMALLINT NOT NULL,
+    band         DOUBLE PRECISION NOT NULL,
+    switch_price DOUBLE PRECISION NOT NULL,
+    bar_time     BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
+    PRIMARY KEY (symbol, tf)
+);
+CREATE INDEX IF NOT EXISTS idx_supertrend_state_symbol_tf ON supertrend_state(symbol, tf);
+
 CREATE TABLE IF NOT EXISTS signal_features (
     decision_id  TEXT PRIMARY KEY REFERENCES signal_decisions(id) ON DELETE CASCADE,
     fvg_id       TEXT NOT NULL,
@@ -160,6 +172,44 @@ class SimTradeStore:
             _init_db()
         except Exception as e:
             logger.error("DB init failed: %s", e)
+
+
+    def upsert_supertrend_state(
+        self,
+        *,
+        symbol: str,
+        tf: str,
+        trend: int,
+        band: float,
+        switch_price: float,
+        bar_time: int,
+    ) -> bool:
+        try:
+            with _cursor() as cur:
+                cur.execute(
+                    """INSERT INTO supertrend_state
+                       (symbol, tf, trend, band, switch_price, bar_time, updated_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (symbol, tf) DO UPDATE SET
+                         trend=EXCLUDED.trend,
+                         band=EXCLUDED.band,
+                         switch_price=EXCLUDED.switch_price,
+                         bar_time=EXCLUDED.bar_time,
+                         updated_at=EXCLUDED.updated_at""",
+                    (
+                        symbol,
+                        tf,
+                        int(trend),
+                        float(band),
+                        float(switch_price),
+                        int(bar_time),
+                        int(time.time() * 1000),
+                    ),
+                )
+            return True
+        except Exception as e:
+            logger.error("upsert_supertrend_state failed %s %s: %s", symbol, tf, e)
+            return False
 
     def add_fvg(self, zone, chart_path: Optional[str] = None) -> bool:
         fvg_id = f"{zone.symbol}-{zone.tf}-{int(zone.born_time)}"
@@ -305,24 +355,16 @@ class SimTradeStore:
         valid=true is what poller filters on. The same signal is also written to
         sim_trades so public channel recaps remain fully simulation-based while
         the per-user bot/executor can process real trades separately.
-        tp1=entry+1R (initial executor TP), tp2=entry+2R.
+        Pine parity uses the SuperTrend band as the dynamic exit; tp1/tp2 are
+        persisted as the entry price placeholders so the executor does not
+        create fixed take-profit exits.
         Idempotent on (id) — duplicate signal_id returns False.
         """
         fvg_id = f"{signal.symbol}-{signal.trigger_tf}-{int(signal.zone_born_time)}"
         trade_id = f"{signal_id}-sim"
         now = datetime.now(timezone.utc)
-        r = abs(float(signal.entry) - float(signal.sl))
-        # Magnet-aware TP: strategy_v2 writes tp1 magnet into indicators["tp1"]
-        # and tp2 magnet into signal.tp when V2_TP_MODE=magnet. Fall back to
-        # fixed 1R/2R if magnet not produced.
-        tp1_ind = float(signal.indicators.get("tp1", 0.0) or 0.0)
-        tp2_sig = float(signal.tp or 0.0)
-        if signal.direction == 1:
-            tp1 = tp1_ind if tp1_ind > 0 else float(signal.entry) + r
-            tp2 = tp2_sig if tp2_sig > 0 else float(signal.entry) + r * 2
-        else:
-            tp1 = tp1_ind if tp1_ind > 0 else float(signal.entry) - r
-            tp2 = tp2_sig if tp2_sig > 0 else float(signal.entry) - r * 2
+        tp1 = float(signal.entry)
+        tp2 = float(signal.entry)
         try:
             with _cursor() as cur:
                 cur.execute("SELECT id FROM signal_decisions WHERE id = %s", (signal_id,))

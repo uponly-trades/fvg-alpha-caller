@@ -18,13 +18,13 @@ log = logging.getLogger("resume")
 async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitable[object]]) -> None:
     """On boot, walk every trade in (opening, open, tp1_trailed) and reconcile.
 
-    - opening: check entry order; if FILLED → place SL+TP now; else → cancel + error.
+    - opening: check entry order; if FILLED → place SL now; else → cancel + error.
     - open / tp1_trailed: leave to running loops (mark-price WS + reconcile loop).
     """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, user_id, symbol, direction, qty, entry, sl, tp2,
+            SELECT id, user_id, decision_id, exit_mode, symbol, direction, qty, entry, sl, tp2,
                    entry_order_id, status
             FROM user_trades
             WHERE status IN ('opening','open','tp1_trailed')
@@ -58,8 +58,9 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
         avg = float(order.get("average") or order.get("avgPrice") or r["entry"])
         close_side = "SELL" if r["direction"] == "long" else "BUY"
         sl_price = float(r["sl"]) if r["sl"] else 0.0
+        pine_retest = str(r.get("exit_mode") or "") == "supertrend_band"
         tp_price = float(r["tp2"]) if r["tp2"] else 0.0
-        if sl_price <= 0 or tp_price <= 0:
+        if sl_price <= 0 or (not pine_retest and tp_price <= 0):
             log.error("resume %s: invalid sl=%s tp=%s", r["id"], sl_price, tp_price)
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -71,7 +72,8 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
         mark = await fetch_mark_price(ex, r["symbol"])
         if mark:
             sl_price = adjust_sl_for_mark(side=r["direction"], sl_price=sl_price, mark=mark)
-            tp_price = adjust_tp_for_mark(side=r["direction"], tp_price=tp_price, mark=mark)
+            if not pine_retest:
+                tp_price = adjust_tp_for_mark(side=r["direction"], tp_price=tp_price, mark=mark)
 
         pos_side = None
         if getattr(ex, "_is_hedge_mode", False):
@@ -83,11 +85,14 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
                 trigger_price=sl_price, order_type="STOP_MARKET",
                 position_side=pos_side,
             )
-            tp = await place_algo_stop(
-                ex, symbol=r["symbol"], close_side=close_side, quantity=qty,
-                trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
-                position_side=pos_side,
-            )
+            tp_id = None
+            if not pine_retest:
+                tp = await place_algo_stop(
+                    ex, symbol=r["symbol"], close_side=close_side, quantity=qty,
+                    trigger_price=tp_price, order_type="TAKE_PROFIT_MARKET",
+                    position_side=pos_side,
+                )
+                tp_id = algo_id_of(tp)
         except Exception as e:
             log.error("resume SL/TP placement failed for %s: %s", r["id"], e)
             async with pool.acquire() as conn:
@@ -105,5 +110,5 @@ async def resume_in_flight(pool, *, ex_factory: Callable[[int], object | Awaitab
                   sl_order_id=$3, tp_order_id=$4
                 WHERE id=$5
                 """,
-                avg, sl_price, algo_id_of(sl), algo_id_of(tp), r["id"],
+                avg, sl_price, algo_id_of(sl), tp_id, r["id"],
             )

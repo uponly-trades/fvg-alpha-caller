@@ -203,21 +203,12 @@ V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "1800"))  # 30 minutes
 V2_MAX_SIGNAL_AGE_SEC = int(os.environ.get("V2_MAX_SIGNAL_AGE_SEC", "60"))
 
 # ============================================================================
-# Dynamic SL/TP — structure-anchored stops + magnet-anchored take-profits.
-# Spec: .specify/specs/dynamic-sltp.md
+# Dynamic exit for Pine parity retest signals.
+# Spec: docs/specs/fvg-retest-pine-parity.md
 # ============================================================================
 
-# SL anchor mode: "structural" walks back to swing extreme behind the FVG;
-# "atr" keeps the legacy zone-edge ± ATR*buffer behavior.
-V2_SL_MODE = os.environ.get("V2_SL_MODE", "structural").lower()
-
-# TP anchor mode: "magnet" snaps TP1/TP2 to nearest swing/HTF FVG magnet;
-# "fixed" keeps legacy entry ± risk * RR math.
-V2_TP_MODE = os.environ.get("V2_TP_MODE", "magnet").lower()
-
-# Minimum structural RR. If TP1 magnet sits closer than this multiple of risk,
-# the signal is rejected with reason `rr_too_low_structural`. Trading bad RR
-# is worse than waiting; let the next bar form a better setup.
+# Legacy structural/magnet helper knobs kept for helper tests and historical
+# utilities. They are not entry or exit gates for Pine-parity retest signals.
 V2_MIN_STRUCTURAL_RR = float(os.environ.get("V2_MIN_STRUCTURAL_RR", "1.2"))
 
 # Hard cap on TP2 distance to keep magnet-derived targets realistic.
@@ -227,17 +218,8 @@ V2_RR_CAP = float(os.environ.get("V2_RR_CAP", "4.0"))
 V2_SWING_LOOKBACK = int(os.environ.get("V2_SWING_LOOKBACK", "60"))
 V2_SWING_FRACTAL = int(os.environ.get("V2_SWING_FRACTAL", "2"))
 
-# Drop magnets closer than `risk * V2_TP_MIN_DIST_R` from entry. Anything
-# closer than 0.5R is noise, not a TP.
 V2_TP_MIN_DIST_R = float(os.environ.get("V2_TP_MIN_DIST_R", "0.5"))
 
-# Trail mode in trade_executor: "structural" uses swing-after-entry as the
-# trailing anchor; "percent" keeps legacy 1.5R/2.5R/3.5R ladder.
+# Trail mode for legacy non-Pine trades.
 V2_TRAIL_MODE = os.environ.get("V2_TRAIL_MODE", "structural").lower()
 V2_TRAIL_BUFFER_ATR = float(os.environ.get("V2_TRAIL_BUFFER_ATR", "0.10"))
-
-
-# When V2_TP_MODE=magnet but no magnet exists, default behavior is to skip
-# (`no_tp_room`). Set V2_TP_MAGNET_REQUIRED=0 to fall back to the legacy fixed
-# entry ± risk * RR target instead of skipping. Production default = 1 (strict).
-V2_TP_MAGNET_REQUIRED = os.environ.get("V2_TP_MAGNET_REQUIRED", "1") == "1"
