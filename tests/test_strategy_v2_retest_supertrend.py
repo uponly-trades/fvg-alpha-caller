@@ -9,6 +9,7 @@ from fvg_engine import FVGZone
 from rest_client import Bar
 from strategy_v2 import (
     _fvg_retest_decision,
+    _pine_zone_quality,
     _supertrend_recovery_state,
     evaluate_v2_signal,
 )
@@ -171,3 +172,24 @@ def test_evaluate_signal_supertrend_exit_uses_entry_placeholders(monkeypatch):
     assert sig.indicators["tp1"] == pytest.approx(sig.entry)
     assert sig.indicators["sl_mode"] == "supertrend_band"
     assert sig.indicators["tp_mode"] == "supertrend_exit"
+
+
+def test_visible_zone_quality_matches_pine_score_not_gap_over_atr():
+    older_micro = zone(direction=1, top=0.0590, bottom=0.0589)
+    older_micro.born_time = 1_000_000
+    older_micro.size = 0.0001
+    older_micro.atr = 0.0001
+    older_micro.volume_score = 1.0
+    older_micro.trend_score = 0.5
+    older_micro.mitigation = 0.0
+
+    recent_volume_gap = zone(direction=-1, top=0.0602, bottom=0.0599)
+    recent_volume_gap.born_time = 1_000_000 + 6 * 900_000
+    recent_volume_gap.size = 0.0003
+    recent_volume_gap.atr = 0.0007
+    recent_volume_gap.volume_score = 6.15
+    recent_volume_gap.trend_score = 1.0
+    recent_volume_gap.mitigation = 0.0
+
+    now_ms = 1_000_000 + 7 * 900_000
+    assert _pine_zone_quality(recent_volume_gap, now_ms) > _pine_zone_quality(older_micro, now_ms)

@@ -223,19 +223,29 @@ def _tier_allowed(tier: str, minimum: str) -> bool:
 
 
 def _zeiierman_quality(z: FVGZone) -> float:
-    """Zeiierman-style quality: absolute FVG gap normalized by ATR."""
+    """Stored telemetry: absolute FVG gap normalized by ATR."""
     atr_val = float(getattr(z, "atr", 0.0) or 0.0)
     if atr_val <= 0:
         return 0.0
     return abs(float(getattr(z, "size", 0.0) or 0.0)) / atr_val
 
 
-
-def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
-    """Live visible-zone ranking: Zeiierman gap quality minus mitigation/age decay."""
+def _pine_zone_quality(z: FVGZone, now_ms: int) -> float:
+    """Pine fvg retest.txt qualityScore used for visible-zone ranking."""
     tf_sec = _TF_SECONDS.get(z.tf, 900)
     age_bars = max(0, (now_ms - z.born_time) // (tf_sec * 1000))
-    return _zeiierman_quality(z) - z.mitigation * 0.5 - age_bars * 0.001
+    return (
+        float(getattr(z, "size", 0.0) or 0.0) * 100.0
+        + float(getattr(z, "volume_score", 0.0) or 0.0) * 10.0
+        + float(getattr(z, "trend_score", 0.0) or 0.0) * 20.0
+        - float(getattr(z, "mitigation", 0.0) or 0.0) * 50.0
+        - float(age_bars) * 0.1
+    )
+
+
+def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
+    """Live visible-zone ranking: match Pine's qualityScore sort."""
+    return _pine_zone_quality(z, now_ms)
 
 
 # Top-N zones the chart actually displays. Pine default maxZones=10.
