@@ -374,7 +374,7 @@ def test_eval_no_15m_no_30m_zones_returns_none():
 
 
 def test_eval_15m_retest_triggers_without_htf_confluence():
-    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0, born_time=1)
     zones = {"a": z_15m}
     bars_by_tf = {
         "15m": _bars_retest_long(z_15m),
@@ -389,7 +389,7 @@ def test_eval_15m_retest_triggers_without_htf_confluence():
 
 
 def test_eval_retest_does_not_gate_by_volume_confirmation():
-    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0, born_time=1)
     z_15m.volume_score = 0.8
     z_15m.fvg_buy_volume = 120.0
     z_15m.fvg_sell_volume = 80.0
@@ -409,7 +409,7 @@ def test_eval_retest_does_not_gate_by_volume_confirmation():
 
 
 def test_eval_15m_retest_returns_long_signal_without_htf_gate():
-    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0, born_time=1)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
     bars_at = _bars_retest_long(z_15m)
@@ -457,7 +457,7 @@ def test_eval_no_15m_zone_returns_none_even_with_30m_zone():
 
 
 def test_eval_short_mirror():
-    z_15m = make_zone(tf="15m", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m = make_zone(tf="15m", direction=-1, top=100.5, bottom=99.5, atr_val=1.0, born_time=1)
     z_4h = make_zone(tf="4h", direction=-1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
     bars_at = _bars_retest_short(z_15m)
@@ -473,7 +473,7 @@ def test_eval_short_mirror():
 
 
 def test_eval_sl_below_fvg_bottom_long():
-    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
+    z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0, born_time=1)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
     bars_at = _bars_retest_long(z_15m)
@@ -635,7 +635,7 @@ def test_fvg_strength_tier_weak_when_directional_volume_is_wrong():
 
 
 def test_fvg_retest_decision_accepts_bullish_reclaim():
-    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    z = make_zone(direction=1, top=100.0, bottom=98.0, born_time=1)
     bars = _bars_retest_long(z)
     decision = _fvg_retest_decision(z, bars)
     assert decision.valid is True
@@ -645,7 +645,7 @@ def test_fvg_retest_decision_accepts_bullish_reclaim():
 
 
 def test_fvg_retest_decision_rejects_plain_touch_without_reclaim():
-    z = make_zone(direction=1, top=100.0, bottom=98.0)
+    z = make_zone(direction=1, top=100.0, bottom=98.0, born_time=1)
     bars = _bars_at_zone(z)
     decision = _fvg_retest_decision(z, bars)
     assert decision.valid is False
@@ -653,7 +653,7 @@ def test_fvg_retest_decision_rejects_plain_touch_without_reclaim():
 
 
 def test_fvg_retest_decision_accepts_bearish_reject():
-    z = make_zone(direction=-1, top=100.0, bottom=98.0)
+    z = make_zone(direction=-1, top=100.0, bottom=98.0, born_time=1)
     bars = _bars_retest_short(z)
     decision = _fvg_retest_decision(z, bars)
     assert decision.valid is True
@@ -668,7 +668,7 @@ def test_evaluate_v2_signal_ignores_htf_obstacle_as_entry_gate(monkeypatch):
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_TFS", ["1h", "2h", "4h"])
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_ATR_BUFFER", 0.0)
 
-    trigger = make_zone(tf="15m", direction=1, top=100.0, bottom=99.0, born_time=1000, atr_val=1.0)
+    trigger = make_zone(tf="15m", direction=1, top=100.0, bottom=99.0, born_time=1, atr_val=1.0)
     trigger.quality_score = 100.0
     trigger.volume_score = 1.8
     trigger.fvg_buy_volume = 150.0

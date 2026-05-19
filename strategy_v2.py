@@ -616,18 +616,27 @@ def _fvg_retest_decision(
     if V2_REQUIRE_PRIOR_TOUCH and len(bars) < 2:
         return RetestDecision(valid=False, reason="no_prior_touch")
 
+    relevant_bars = list(bars)
+    if zone.born_time:
+        born_idx = next(
+            (i for i, b in enumerate(relevant_bars) if int(getattr(b, "open_time", 0) or 0) >= int(zone.born_time)),
+            None,
+        )
+        if born_idx is None:
+            return RetestDecision(valid=False, reason="zone_not_in_bars")
+        relevant_bars = relevant_bars[born_idx:]
+        if len(relevant_bars) < 2:
+            return RetestDecision(valid=False, reason="no_prior_touch")
+
     if V2_REQUIRE_PRIOR_TOUCH:
-        times_comparable = int(getattr(bars[-1], "open_time", 0) or 0) > int(zone.born_time)
         prior_touched = any(
-            (not times_comparable or int(getattr(b, "open_time", 0) or 0) > int(zone.born_time))
-            and float(b.high) >= float(zone.bottom)
-            and float(b.low) <= float(zone.top)
-            for b in bars[:-1]
+            float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
+            for b in relevant_bars[:-1]
         )
         if not prior_touched:
             return RetestDecision(valid=False, reason="no_prior_touch")
 
-    b = bars[-1]
+    b = relevant_bars[-1]
     candle_range = max(float(b.high) - float(b.low), abs(float(b.close)) * 1e-6, 1e-9)
     body_ratio = abs(float(b.close) - float(b.open)) / candle_range
     candle_touches_zone = float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)

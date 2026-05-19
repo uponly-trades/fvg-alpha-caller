@@ -20,10 +20,10 @@ def bar(t, o, h, l, c, v=100.0):
     return Bar(open_time=t, open=o, high=h, low=l, close=c, volume=v, is_closed=True)
 
 
-def zone(direction=1, top=100.0, bottom=98.0, tf="15m"):
+def zone(direction=1, top=100.0, bottom=98.0, tf="15m", born_time=1):
     z = FVGZone(
         symbol="BTCUSDT", tf=tf, direction=direction,
-        top=top, bottom=bottom, size=top-bottom, born_time=1, atr=1.0,
+        top=top, bottom=bottom, size=top-bottom, born_time=born_time, atr=1.0,
     )
     z.volume_score = 1.2
     z.main_strength = 70
@@ -65,8 +65,7 @@ def test_retest_requires_prior_touch():
 
 
 def test_retest_prior_touch_must_be_after_fvg_birth():
-    z = zone(direction=1)
-    z.born_time = 20
+    z = zone(direction=1, born_time=20)
     bars = [bar(i, 100.6, 101.2, 99.0, 100.8) for i in range(1, 20)]
     bars.append(bar(21, 105, 106, 104, 105))
     bars.append(bar(22, 100.6, 101.2, 99.0, 100.8))
@@ -75,6 +74,16 @@ def test_retest_prior_touch_must_be_after_fvg_birth():
 
     assert d.valid is False
     assert d.reason == "no_prior_touch"
+
+
+def test_retest_rejects_when_zone_birth_is_outside_available_chart_window():
+    z = zone(direction=1, born_time=30)
+    bars = bullish_retest_bars()
+
+    d = _fvg_retest_decision(z, bars)
+
+    assert d.valid is False
+    assert d.reason == "zone_not_in_bars"
 
 
 def test_retest_accepts_after_prior_touch_bullish():
@@ -233,14 +242,14 @@ def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):
     )
 
     high_rank = zone(direction=1, top=100.0, bottom=98.0)
-    high_rank.born_time = 1_000
+    high_rank.born_time = 1
     high_rank.volume_score = 6.0
     high_rank.trend_score = 1.0
     high_rank.size = 2.0
     high_rank.atr = 1.0
 
     newer_low_rank = zone(direction=1, top=101.0, bottom=100.9)
-    newer_low_rank.born_time = 2_000
+    newer_low_rank.born_time = 2
     newer_low_rank.volume_score = 0.1
     newer_low_rank.trend_score = 0.0
     newer_low_rank.size = 0.1
