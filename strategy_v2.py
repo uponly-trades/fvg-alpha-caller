@@ -692,14 +692,6 @@ def evaluate_v2_signal(
         for triggered in visible:
             direction = triggered.direction
 
-            if triggered.quality_score < V2_MIN_QUALITY_SCORE:
-                logger.info(
-                    "v2 skip %s %s %s | quality=%.1f < %.1f",
-                    symbol, trigger_tf, "long" if direction == 1 else "short",
-                    triggered.quality_score, V2_MIN_QUALITY_SCORE,
-                )
-                continue
-
             last_bar = bars[-1]
             touch_price = float(last_bar.low) if direction == 1 else float(last_bar.high)
             touch_depth = _zone_touch_depth(triggered, touch_price)
@@ -722,18 +714,13 @@ def evaluate_v2_signal(
                 )
                 continue
 
-            volume_ok, volume_metrics = _volume_confirmation(triggered)
-            if not volume_ok:
-                logger.info(
-                    "v2 skip %s %s %s | fvg_tier=%s volume_score=%.2f imbalance=%.3f aligned=%s min_tier=%s",
-                    symbol, trigger_tf, "long" if direction == 1 else "short",
-                    volume_metrics["fvg_strength_tier"], volume_metrics["volume_score"],
-                    volume_metrics["fvg_volume_imbalance"], volume_metrics["fvg_volume_aligned"],
-                    V2_MIN_FVG_TIER,
-                )
-                continue
+            # Pine fvg retest.txt does not gate retest signals by volume tier,
+            # quality threshold, or HTF confluence. Keep FVG volume metrics as
+            # telemetry only so alerts can still explain zone context.
+            _, volume_metrics = _volume_confirmation(triggered)
 
-            score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
+            score = 0
+            touches = {tf: False for tf in V2_HTF_TFS}
 
             atr_val = float(triggered.atr) if triggered.atr else 0.0
             if atr_val <= 0:

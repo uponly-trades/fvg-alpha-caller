@@ -358,7 +358,7 @@ def test_eval_15m_retest_triggers_without_htf_confluence():
     assert sig.indicators["entry_trigger"] == "retest"
 
 
-def test_eval_rejects_touched_zone_without_volume_confirmation():
+def test_eval_retest_does_not_gate_by_volume_confirmation():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     z_15m.volume_score = 0.8
     z_15m.fvg_buy_volume = 120.0
@@ -373,10 +373,12 @@ def test_eval_rejects_touched_zone_without_volume_confirmation():
         "2h": _bars_far_from_zone(z_15m),
         "4h": bars_at,
     }
-    assert evaluate_v2_signal("BTCUSDT", zones, bars_by_tf) is None
+    sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.indicators["entry_trigger"] == "retest"
 
 
-def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
+def test_eval_15m_retest_returns_long_signal_without_htf_gate():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     z_4h = make_zone(tf="4h", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m, "b": z_4h}
@@ -392,9 +394,9 @@ def test_eval_15m_touched_with_4h_confluence_returns_long_signal():
     assert sig is not None
     assert sig.direction == 1
     assert sig.trigger_tf == "15m"
-    # 4h weight = 3 (≥ V2_HTF_MIN_SCORE = 2 → passes gate alone).
-    assert sig.confluence_score == 3
-    assert sig.htf_touches["4h"] is True
+    # HTF confluence is no longer an entry gate in retest.txt parity mode.
+    assert sig.confluence_score == 0
+    assert sig.htf_touches["4h"] is False
     assert sig.htf_touches["1h"] is False
     assert sig.indicators["quality_score"] == pytest.approx(z_15m.size / z_15m.atr)
     assert sig.indicators["quality_score_formula_live"] == "zeiierman_gap_atr"
