@@ -595,9 +595,9 @@ def _fvg_retest_decision(
     zone: FVGZone,
     bars: List,
     *,
-    min_depth: float = V2_RETEST_MIN_DEPTH,
+    min_depth: float = 0.0,
     max_depth: float = V2_RETEST_MAX_DEPTH,
-    min_score: float = V2_RETEST_MIN_SCORE,
+    min_score: float = 0.0,
 ) -> RetestDecision:
     """Confirm Pine-style FVG retest on the latest closed candle.
 
@@ -627,8 +627,6 @@ def _fvg_retest_decision(
 
     if zone.direction == 1:
         depth = _zone_touch_depth(zone, float(b.low))
-        if depth < min_depth:
-            return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
         if depth > max_depth or float(b.low) <= float(zone.bottom):
             return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
         if float(b.close) <= float(zone.top):
@@ -637,8 +635,6 @@ def _fvg_retest_decision(
         reclaim_ratio = _clamp01((float(b.close) - float(zone.top)) / max(float(zone.size), 1e-9))
     else:
         depth = _zone_touch_depth(zone, float(b.high))
-        if depth < min_depth:
-            return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
         if depth > max_depth or float(b.high) >= float(zone.top):
             return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
         if float(b.close) >= float(zone.bottom):
@@ -648,15 +644,6 @@ def _fvg_retest_decision(
 
     depth_score = _score_depth(depth, min_depth, max_depth)
     score = (depth_score * 35.0) + (rejection_ratio * 45.0) + (body_ratio * 10.0) + (reclaim_ratio * 10.0)
-    if score < min_score:
-        return RetestDecision(
-            valid=False,
-            reason="retest_score_low",
-            touch_depth=depth,
-            retest_score=score,
-            rejection_ratio=rejection_ratio,
-            body_ratio=body_ratio,
-        )
     return RetestDecision(
         valid=True,
         touch_depth=depth,
