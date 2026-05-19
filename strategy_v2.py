@@ -9,6 +9,10 @@ from config import (
     V2_HTF_OBSTACLE_FILTER_ENABLED, V2_HTF_OBSTACLE_TFS, V2_HTF_OBSTACLE_ATR_BUFFER,
     V2_ENTRY_MODE, V2_MIN_TOUCH_DEPTH, V2_MIN_FVG_TIER,
     V2_RETEST_ENABLED, V2_RETEST_MIN_DEPTH, V2_RETEST_MAX_DEPTH, V2_RETEST_MIN_SCORE,
+    V2_ENTRY_TRIGGER, V2_REQUIRE_PRIOR_TOUCH,
+    V2_REQUIRE_SUPERTREND_FILTER, V2_SUPERTREND_ATR_LENGTH,
+    V2_SUPERTREND_MULTIPLIER, V2_SUPERTREND_ALPHA_PCT,
+    V2_SUPERTREND_THRESHOLD_ATR,
     V2_NORMAL_VOLUME_SCORE, V2_NORMAL_VOLUME_IMBALANCE, V2_NORMAL_MAIN_STRENGTH,
     V2_STRONG_VOLUME_SCORE, V2_STRONG_VOLUME_IMBALANCE, V2_STRONG_MAIN_STRENGTH,
     V2_SL_MODE, V2_TP_MODE, V2_MIN_STRUCTURAL_RR, V2_RR_CAP,
@@ -63,6 +67,68 @@ class RetestDecision:
     body_ratio: float = 0.0
     confirmation_close: float = 0.0
     confirmation_time: int = 0
+
+
+@dataclass(frozen=True)
+class SuperTrendState:
+    trend: int = 1
+    band: float = 0.0
+    switch_price: float = 0.0
+
+
+def _supertrend_recovery_state(
+    bars: List,
+    *,
+    atr_length: int = V2_SUPERTREND_ATR_LENGTH,
+    multiplier: float = V2_SUPERTREND_MULTIPLIER,
+    alpha_pct: float = V2_SUPERTREND_ALPHA_PCT,
+    threshold_atr: float = V2_SUPERTREND_THRESHOLD_ATR,
+) -> SuperTrendState:
+    """LuxAlgo-style SuperTrend Recovery filter from fvg retest.txt."""
+    if not bars:
+        return SuperTrendState()
+    alpha = float(alpha_pct) / 100.0
+    trend = 1
+    band = 0.0
+    switch_price = float(bars[0].close)
+    highs, lows, closes = [], [], []
+    for i, b in enumerate(bars):
+        highs.append(float(b.high))
+        lows.append(float(b.low))
+        closes.append(float(b.close))
+        atr_val = compute_atr(highs, lows, closes, atr_length) or max(float(b.high) - float(b.low), 1e-9)
+        src = (float(b.high) + float(b.low)) / 2.0
+        upper_base = src + float(multiplier) * atr_val
+        lower_base = src - float(multiplier) * atr_val
+        deviation = float(threshold_atr) * atr_val
+        at_loss = (trend == 1 and (switch_price - float(b.close)) > deviation) or (
+            trend == -1 and (float(b.close) - switch_price) > deviation
+        )
+        prev_band = band if i > 0 else (lower_base if trend == 1 else upper_base)
+        if trend == 1:
+            target_band = alpha * float(b.close) + (1.0 - alpha) * prev_band if at_loss else lower_base
+            band = max(target_band, prev_band)
+            if float(b.close) < band:
+                trend = -1
+                band = upper_base
+                switch_price = float(b.close)
+        else:
+            target_band = alpha * float(b.close) + (1.0 - alpha) * prev_band if at_loss else upper_base
+            band = min(target_band, prev_band)
+            if float(b.close) > band:
+                trend = 1
+                band = lower_base
+                switch_price = float(b.close)
+        if i == 0:
+            switch_price = float(b.close)
+    return SuperTrendState(trend=trend, band=band, switch_price=switch_price)
+
+
+def _supertrend_aligned(direction: int, bars: List) -> tuple[bool, SuperTrendState]:
+    st = _supertrend_recovery_state(bars)
+    if not V2_REQUIRE_SUPERTREND_FILTER:
+        return True, st
+    return ((direction == 1 and st.trend == 1) or (direction == -1 and st.trend == -1)), st
 
 
 def _htf_active_and_touched(
@@ -533,55 +599,68 @@ def _fvg_retest_decision(
     max_depth: float = V2_RETEST_MAX_DEPTH,
     min_score: float = V2_RETEST_MIN_SCORE,
 ) -> RetestDecision:
-    """Confirm an FVG retest on the latest closed candle."""
+    """Confirm Pine-style FVG retest on the latest closed candle.
+
+    Parity with fvg retest.txt: retest requires a prior touch. The latest candle
+    must reject from inside the still-active FVG: bull low <= top, low > bottom,
+    close > top; bear high >= bottom, high < top, close < bottom.
+    """
     if not bars:
         return RetestDecision(valid=False, reason="no_bars")
+    if V2_REQUIRE_PRIOR_TOUCH and len(bars) < 2:
+        return RetestDecision(valid=False, reason="no_prior_touch")
+
+    if V2_REQUIRE_PRIOR_TOUCH:
+        prior_touched = any(
+            float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
+            for b in bars[:-1]
+        )
+        if not prior_touched:
+            return RetestDecision(valid=False, reason="no_prior_touch")
 
     b = bars[-1]
     candle_range = max(float(b.high) - float(b.low), abs(float(b.close)) * 1e-6, 1e-9)
     body_ratio = abs(float(b.close) - float(b.open)) / candle_range
+    candle_touches_zone = float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
+    if not candle_touches_zone:
+        return RetestDecision(valid=False, reason="no_retest_touch")
 
     if zone.direction == 1:
-        if float(b.low) > float(zone.top):
-            return RetestDecision(valid=False, reason="no_retest_touch")
         depth = _zone_touch_depth(zone, float(b.low))
         if depth < min_depth:
             return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
-        if depth > max_depth or float(b.low) < float(zone.bottom):
+        if depth > max_depth or float(b.low) <= float(zone.bottom):
             return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
         if float(b.close) <= float(zone.top):
             return RetestDecision(valid=False, reason="no_bullish_reclaim", touch_depth=depth)
-        if float(b.close) <= float(b.open):
-            return RetestDecision(valid=False, reason="no_bullish_rejection", touch_depth=depth)
         rejection_ratio = _clamp01((float(b.close) - float(b.low)) / candle_range)
         reclaim_ratio = _clamp01((float(b.close) - float(zone.top)) / max(float(zone.size), 1e-9))
     else:
-        if float(b.high) < float(zone.bottom):
-            return RetestDecision(valid=False, reason="no_retest_touch")
         depth = _zone_touch_depth(zone, float(b.high))
         if depth < min_depth:
             return RetestDecision(valid=False, reason="retest_too_shallow", touch_depth=depth)
-        if depth > max_depth or float(b.high) > float(zone.top):
+        if depth > max_depth or float(b.high) >= float(zone.top):
             return RetestDecision(valid=False, reason="retest_too_deep", touch_depth=depth)
         if float(b.close) >= float(zone.bottom):
             return RetestDecision(valid=False, reason="no_bearish_reject", touch_depth=depth)
-        if float(b.close) >= float(b.open):
-            return RetestDecision(valid=False, reason="no_bearish_rejection", touch_depth=depth)
         rejection_ratio = _clamp01((float(b.high) - float(b.close)) / candle_range)
         reclaim_ratio = _clamp01((float(zone.bottom) - float(b.close)) / max(float(zone.size), 1e-9))
 
     depth_score = _score_depth(depth, min_depth, max_depth)
-    retest_score = (
-        depth_score * 35.0
-        + rejection_ratio * 30.0
-        + min(body_ratio, 1.0) * 20.0
-        + reclaim_ratio * 15.0
-    )
+    score = (depth_score * 35.0) + (rejection_ratio * 45.0) + (body_ratio * 10.0) + (reclaim_ratio * 10.0)
+    if score < min_score:
+        return RetestDecision(
+            valid=False,
+            reason="retest_score_low",
+            touch_depth=depth,
+            retest_score=score,
+            rejection_ratio=rejection_ratio,
+            body_ratio=body_ratio,
+        )
     return RetestDecision(
-        valid=retest_score >= min_score,
-        reason="valid" if retest_score >= min_score else "retest_score_low",
+        valid=True,
         touch_depth=depth,
-        retest_score=retest_score,
+        retest_score=score,
         rejection_ratio=rejection_ratio,
         body_ratio=body_ratio,
         confirmation_close=float(b.close),
@@ -594,13 +673,10 @@ def evaluate_v2_signal(
     zones: Dict[str, FVGZone],
     bars_by_tf: Dict[str, List],
 ) -> Optional[V2Signal]:
-    """Multi-TF FVG touch confluence detector.
+    """15m FVG retest trigger with SuperTrend direction filter.
 
-    Returns V2Signal if:
-      1. 15m FVG (any strength, any direction) is touched on latest bar.
-      2. HTF confluence score ≥ V2_HTF_MIN_SCORE across {30m, 1h, 2h, 4h}.
-
-    CRITICAL: Signal direction MUST match zone.direction to avoid inverted signals.
+    Entry parity target: fvg retest.txt. Touch-only signals and HTF confluence
+    are not entry gates; HTF zones are still available for TP magnets.
     """
     for trigger_tf in V2_TRIGGER_TFS:
         # Get ALL visible zones (both bullish and bearish), then filter by touch
@@ -614,12 +690,6 @@ def evaluate_v2_signal(
             continue
 
         for triggered in visible:
-            hit = _trigger_zone_touched(triggered, bars)
-            if hit is None:
-                continue
-
-            # CRITICAL FIX: Use zone.direction, NOT loop direction!
-            # This prevents inverted signals (bullish zone → SHORT signal)
             direction = triggered.direction
 
             if triggered.quality_score < V2_MIN_QUALITY_SCORE:
@@ -635,11 +705,20 @@ def evaluate_v2_signal(
             touch_depth = _zone_touch_depth(triggered, touch_price)
 
             retest = _fvg_retest_decision(triggered, bars)
-            if V2_RETEST_ENABLED and not retest.valid:
+            if V2_ENTRY_TRIGGER in {"retest", "retest_only"} and not retest.valid:
                 logger.info(
                     "v2 skip %s %s %s | retest=%s depth=%.3f score=%.1f",
                     symbol, trigger_tf, "long" if direction == 1 else "short",
                     retest.reason, retest.touch_depth, retest.retest_score,
+                )
+                continue
+
+            st_aligned, st_state = _supertrend_aligned(direction, bars)
+            if not st_aligned:
+                logger.info(
+                    "v2 skip %s %s %s | supertrend_mismatch trend=%s band=%g",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    st_state.trend, st_state.band,
                 )
                 continue
 
@@ -655,8 +734,6 @@ def evaluate_v2_signal(
                 continue
 
             score, touches = _compute_htf_confluence(zones, symbol, direction, bars_by_tf)
-            if score < V2_HTF_MIN_SCORE:
-                continue
 
             atr_val = float(triggered.atr) if triggered.atr else 0.0
             if atr_val <= 0:
@@ -760,22 +837,7 @@ def evaluate_v2_signal(
                 tp2_kind = "fixed_rr"
                 structural_rr = abs(tp1_magnet - entry) / r if r > 0 else 0.0
 
-            obstacle = _htf_obstacle_decision(
-                symbol=symbol,
-                direction=direction,
-                entry=entry,
-                tp=tp,
-                zones=zones,
-                obstacle_tfs=V2_HTF_OBSTACLE_TFS,
-                atr_buffer_mult=V2_HTF_OBSTACLE_ATR_BUFFER,
-            )
-            if V2_HTF_OBSTACLE_FILTER_ENABLED and obstacle.blocked:
-                logger.info(
-                    "v2 skip %s %s %s | htf_obstacle=%s tf=%s zone=[%g,%g]",
-                    symbol, trigger_tf, "long" if direction == 1 else "short",
-                    obstacle.reason, obstacle.blocking_tf, obstacle.zone_bottom, obstacle.zone_top,
-                )
-                continue
+            obstacle = HTFObstacleDecision(False)
 
             return V2Signal(
                 symbol=symbol,
@@ -807,8 +869,12 @@ def evaluate_v2_signal(
                     "fvg_strength_tier": volume_metrics["fvg_strength_tier"],
                     "touch_depth": touch_depth,
                     "entry_mode": V2_ENTRY_MODE,
+                    "entry_trigger": "retest",
                     "min_touch_depth": V2_MIN_TOUCH_DEPTH,
                     "retest_enabled": float(V2_RETEST_ENABLED),
+                    "supertrend_trend": st_state.trend,
+                    "supertrend_band": st_state.band,
+                    "supertrend_switch_price": st_state.switch_price,
                     "retest_score": retest.retest_score,
                     "retest_reason": retest.reason,
                     "retest_touch_depth": retest.touch_depth,

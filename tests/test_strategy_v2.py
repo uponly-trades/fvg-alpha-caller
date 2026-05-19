@@ -323,13 +323,15 @@ def _bars_far_from_zone(zone, n=25):
 
 
 def _bars_retest_long(zone, n=25):
-    bars = _bars_far_from_zone(zone, n=n - 1)
+    bars = [make_bar(i, 95.0 + i * 0.2, 96.0 + i * 0.2, 94.0 + i * 0.2, 95.5 + i * 0.2, 100.0) for i in range(1, n - 1)]
+    bars.append(make_bar(n - 1, zone.top + 0.3, zone.top + 0.6, zone.top - zone.size * 0.25, zone.top + 0.1, 100.0))
     bars.append(make_bar(n, zone.top - 0.4, zone.top + 0.5, zone.top - zone.size * 0.5, zone.top + 0.3, 100.0))
     return bars
 
 
 def _bars_retest_short(zone, n=25):
-    bars = _bars_far_from_zone(zone, n=n - 1)
+    bars = [make_bar(i, 105.0 - i * 0.2, 106.0 - i * 0.2, 104.0 - i * 0.2, 104.5 - i * 0.2, 100.0) for i in range(1, n - 1)]
+    bars.append(make_bar(n - 1, zone.bottom - 0.3, zone.bottom + zone.size * 0.25, zone.bottom - 0.6, zone.bottom - 0.1, 100.0))
     bars.append(make_bar(n, zone.bottom + 0.4, zone.bottom + zone.size * 0.5, zone.bottom - 0.5, zone.bottom - 0.3, 100.0))
     return bars
 
@@ -341,7 +343,7 @@ def test_eval_no_15m_no_30m_zones_returns_none():
     assert sig is None
 
 
-def test_eval_15m_touched_no_htf_confluence_returns_none():
+def test_eval_15m_retest_triggers_without_htf_confluence():
     z_15m = make_zone(tf="15m", direction=1, top=100.5, bottom=99.5, atr_val=1.0)
     zones = {"a": z_15m}
     bars_by_tf = {
@@ -352,7 +354,8 @@ def test_eval_15m_touched_no_htf_confluence_returns_none():
         "4h": _bars_far_from_zone(z_15m),
     }
     sig = evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
-    assert sig is None
+    assert sig is not None
+    assert sig.indicators["entry_trigger"] == "retest"
 
 
 def test_eval_rejects_touched_zone_without_volume_confirmation():
@@ -626,7 +629,7 @@ def test_fvg_retest_decision_accepts_bearish_reject():
     assert decision.touch_depth == pytest.approx(0.5)
 
 
-def test_evaluate_v2_signal_skips_long_when_bearish_htf_fvg_blocks_tp_path(monkeypatch):
+def test_evaluate_v2_signal_ignores_htf_obstacle_as_entry_gate(monkeypatch):
     import strategy_v2
 
     monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", True)
@@ -654,4 +657,6 @@ def test_evaluate_v2_signal_skips_long_when_bearish_htf_fvg_blocks_tp_path(monke
         "4h": _bars_far_from_zone(trigger),
     }
 
-    assert strategy_v2.evaluate_v2_signal("BTCUSDT", zones, bars_by_tf) is None
+    sig = strategy_v2.evaluate_v2_signal("BTCUSDT", zones, bars_by_tf)
+    assert sig is not None
+    assert sig.indicators["entry_trigger"] == "retest"

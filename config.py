@@ -170,8 +170,21 @@ V2_MIN_TOUCH_DEPTH = float(os.environ.get("V2_MIN_TOUCH_DEPTH", "0.25"))
 # enters the FVG and rejects back out in the signal direction.
 V2_RETEST_ENABLED = os.environ.get("V2_RETEST_ENABLED", "1") == "1"
 V2_RETEST_MIN_DEPTH = float(os.environ.get("V2_RETEST_MIN_DEPTH", str(V2_MIN_TOUCH_DEPTH)))
-V2_RETEST_MAX_DEPTH = float(os.environ.get("V2_RETEST_MAX_DEPTH", "0.95"))
+V2_RETEST_MAX_DEPTH = float(os.environ.get("V2_RETEST_MAX_DEPTH", "0.75"))
 V2_RETEST_MIN_SCORE = float(os.environ.get("V2_RETEST_MIN_SCORE", "60"))
+
+# Retest trigger parity with /Users/joseph/Downloads/fvg retest.txt.
+# Signals come from 15m FVG retests only; touch-only entries and HTF confluence
+# are not entry gates anymore.
+V2_ENTRY_TRIGGER = os.environ.get("V2_ENTRY_TRIGGER", "retest_only").lower()
+V2_REQUIRE_PRIOR_TOUCH = os.environ.get("V2_REQUIRE_PRIOR_TOUCH", "1") == "1"
+
+# LuxAlgo-style SuperTrend Recovery filter from fvg retest.txt.
+V2_REQUIRE_SUPERTREND_FILTER = os.environ.get("V2_REQUIRE_SUPERTREND_FILTER", "1") == "1"
+V2_SUPERTREND_ATR_LENGTH = int(os.environ.get("V2_SUPERTREND_ATR_LENGTH", "10"))
+V2_SUPERTREND_MULTIPLIER = float(os.environ.get("V2_SUPERTREND_MULTIPLIER", "3.0"))
+V2_SUPERTREND_ALPHA_PCT = float(os.environ.get("V2_SUPERTREND_ALPHA_PCT", "5.0"))
+V2_SUPERTREND_THRESHOLD_ATR = float(os.environ.get("V2_SUPERTREND_THRESHOLD_ATR", "1.0"))
 
 # v2 Zeiierman-style FVG strength tiers from formation volume and main strength.
 V2_MIN_FVG_TIER = os.environ.get("V2_MIN_FVG_TIER", "normal").lower()
