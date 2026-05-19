@@ -617,8 +617,11 @@ def _fvg_retest_decision(
         return RetestDecision(valid=False, reason="no_prior_touch")
 
     if V2_REQUIRE_PRIOR_TOUCH:
+        times_comparable = int(getattr(bars[-1], "open_time", 0) or 0) > int(zone.born_time)
         prior_touched = any(
-            float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
+            (not times_comparable or int(getattr(b, "open_time", 0) or 0) > int(zone.born_time))
+            and float(b.high) >= float(zone.bottom)
+            and float(b.low) <= float(zone.top)
             for b in bars[:-1]
         )
         if not prior_touched:

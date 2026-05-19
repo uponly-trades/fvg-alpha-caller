@@ -229,6 +229,26 @@ def compute_confluence_count(symbol: str, zone_top: float, zone_bottom: float, e
     return count
 
 
+def zones_overlap(new_top: float, new_bottom: float, existing_top: float, existing_bottom: float) -> bool:
+    return not (new_top <= existing_bottom or new_bottom >= existing_top)
+
+
+def fvg_has_overlap(
+    zones: Dict[str, 'FVGZone'],
+    symbol: str,
+    tf: str,
+    top: float,
+    bottom: float,
+    direction: int,
+) -> bool:
+    for zone in zones.values():
+        if zone.symbol != symbol or zone.tf != tf or zone.direction != direction:
+            continue
+        if zone.mitigation < 0.75 and zones_overlap(top, bottom, zone.top, zone.bottom):
+            return True
+    return False
+
+
 def compute_invalid_reason(zone: 'FVGZone', bars: List) -> Optional[str]:
     if len(bars) < 2:
         return None
@@ -732,6 +752,10 @@ class FVGTracker:
 
         fvg = detect_fvg(bars, symbol=symbol)
         if not fvg:
+            return None
+
+        if fvg_has_overlap(self.zones, symbol, tf, fvg["top"], fvg["bottom"], fvg["direction"]):
+            logger.info("Skipped overlapping FVG %s %s %s", symbol, tf, "BULL" if fvg["direction"] == 1 else "BEAR")
             return None
 
         fvg["symbol"] = symbol

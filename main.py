@@ -14,7 +14,7 @@ from config import (
     TIMEFRAMES, STRATEGY_VERSION, V2_COOLDOWN_SEC,
     V2_TRIGGER_TFS, V2_MAX_SIGNAL_AGE_SEC,
 )
-from fvg_engine import FVGTracker, detect_fvg, calc_strength
+from fvg_engine import FVGTracker, detect_fvg, calc_strength, fvg_has_overlap
 from sim_trades import SimTradeStore
 from websocket_client import BinanceKlineWS
 from strategy_v2 import _supertrend_recovery_state, evaluate_v2_signal
@@ -88,6 +88,8 @@ class AlphaCaller:
                 continue
             zone_id = f"{symbol}_{tf}_{fvg['born_time']}_{fvg['direction']}"
             if zone_id in self.tracker.zones:
+                continue
+            if fvg_has_overlap(self.tracker.zones, symbol, tf, fvg["top"], fvg["bottom"], fvg["direction"]):
                 continue
             fvg["symbol"] = symbol
             try:
@@ -166,6 +168,9 @@ class AlphaCaller:
         self.tracker.last_bar_time[key] = last_time
         fvg = detect_fvg(bars, symbol=symbol)
         if not fvg:
+            return
+        if fvg_has_overlap(self.tracker.zones, symbol, tf, fvg["top"], fvg["bottom"], fvg["direction"]):
+            logger.info("v2 skipped overlapping FVG %s %s %s", symbol, tf, "BULL" if fvg["direction"] == 1 else "BEAR")
             return
         fvg["symbol"] = symbol
         s = calc_strength(bars, fvg, symbol=symbol, existing_zones=self.tracker.zones)

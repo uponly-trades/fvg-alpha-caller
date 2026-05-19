@@ -63,6 +63,19 @@ def test_retest_requires_prior_touch():
     assert d.reason == "no_prior_touch"
 
 
+def test_retest_prior_touch_must_be_after_fvg_birth():
+    z = zone(direction=1)
+    z.born_time = 20
+    bars = [bar(i, 100.6, 101.2, 99.0, 100.8) for i in range(1, 20)]
+    bars.append(bar(21, 105, 106, 104, 105))
+    bars.append(bar(22, 100.6, 101.2, 99.0, 100.8))
+
+    d = _fvg_retest_decision(z, bars)
+
+    assert d.valid is False
+    assert d.reason == "no_prior_touch"
+
+
 def test_retest_accepts_after_prior_touch_bullish():
     d = _fvg_retest_decision(zone(direction=1), bullish_retest_bars())
     assert d.valid is True

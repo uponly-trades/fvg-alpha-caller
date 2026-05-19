@@ -26,7 +26,7 @@ def test_v2signal_fields_present():
 
 
 from rest_client import Bar
-from fvg_engine import FVGZone
+from fvg_engine import FVGZone, fvg_has_overlap
 
 
 def make_bar(open_time: int, o: float, h: float, l: float, c: float, v: float = 100.0) -> Bar:
@@ -118,6 +118,36 @@ def test_htf_zone_fully_mitigated_returns_false():
     bars = [make_bar(i, 100, 101, 99, 100.0) for i in range(1, 25)]
     result = _htf_active_and_touched(zone=zone, bars=bars, lookback=1)
     assert result is False
+
+
+def test_fvg_overlap_matches_pine_same_direction_active_zone():
+    existing = make_zone(symbol="BTCUSDT", tf="15m", direction=1, top=101.0, bottom=100.0)
+    existing.mitigation = 0.2
+
+    assert fvg_has_overlap(
+        {"existing": existing},
+        symbol="BTCUSDT",
+        tf="15m",
+        top=100.8,
+        bottom=99.8,
+        direction=1,
+    ) is True
+
+
+def test_fvg_overlap_ignores_opposite_direction_and_mostly_mitigated_zone():
+    mostly_mitigated = make_zone(symbol="BTCUSDT", tf="15m", direction=1, top=101.0, bottom=100.0)
+    mostly_mitigated.mitigation = 0.75
+    opposite = make_zone(symbol="BTCUSDT", tf="15m", direction=-1, top=101.0, bottom=100.0)
+    opposite.mitigation = 0.2
+
+    assert fvg_has_overlap(
+        {"mostly_mitigated": mostly_mitigated, "opposite": opposite},
+        symbol="BTCUSDT",
+        tf="15m",
+        top=100.8,
+        bottom=99.8,
+        direction=1,
+    ) is False
 
 
 from strategy_v2 import _latest_active_zone
