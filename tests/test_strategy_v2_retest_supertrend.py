@@ -11,6 +11,7 @@ from strategy_v2 import (
     _fvg_retest_decision,
     _pine_zone_quality,
     _supertrend_recovery_state,
+    _visible_top_zones_all,
     evaluate_v2_signal,
 )
 
@@ -206,6 +207,20 @@ def test_visible_zone_quality_matches_pine_score_not_gap_over_atr():
 
     now_ms = 1_000_000 + 7 * 900_000
     assert _pine_zone_quality(recent_volume_gap, now_ms) > _pine_zone_quality(older_micro, now_ms)
+
+
+def test_visible_zone_count_matches_pine_default_max_zones(monkeypatch):
+    zones = {}
+    for i in range(10):
+        z = zone(direction=1, top=100.0 + i, bottom=99.0 + i)
+        z.size = 1.0 + i
+        z.volume_score = 1.0
+        z.trend_score = 1.0
+        zones[str(i)] = z
+
+    visible = _visible_top_zones_all(zones, "BTCUSDT", "15m")
+
+    assert len(visible) == 8
 
 
 def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):

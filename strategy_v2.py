@@ -248,8 +248,8 @@ def _zone_live_quality(z: FVGZone, now_ms: int) -> float:
     return _pine_zone_quality(z, now_ms)
 
 
-# Top-N zones the chart actually displays. Pine default maxZones=10.
-_VISIBLE_TOP_N = 10
+# Top-N zones the chart actually displays. Pine default maxZones=8.
+_VISIBLE_TOP_N = 8
 
 
 def _visible_top_zones_all(
