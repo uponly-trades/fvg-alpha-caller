@@ -116,3 +116,41 @@ def test_evaluate_signal_rejects_supertrend_misalignment(monkeypatch):
         {"15m": bullish_retest_bars()},
     )
     assert sig is None
+
+
+def test_evaluate_signal_rejects_short_when_supertrend_is_bullish(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: strategy_v2.SuperTrendState(trend=1, band=98.0, switch_price=97.0),
+    )
+
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"z15": zone(direction=-1, top=100.0, bottom=98.0)},
+        {"15m": bearish_retest_bars()},
+    )
+    assert sig is None
+
+
+def test_evaluate_signal_accepts_short_when_supertrend_is_bearish(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_TP_MAGNET_REQUIRED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: strategy_v2.SuperTrendState(trend=-1, band=100.5, switch_price=97.0),
+    )
+
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"z15": zone(direction=-1, top=100.0, bottom=98.0)},
+        {"15m": bearish_retest_bars()},
+    )
+    assert sig is not None
+    assert sig.direction == -1
+    assert sig.indicators["supertrend_trend"] == -1
