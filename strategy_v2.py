@@ -668,15 +668,14 @@ def evaluate_v2_signal(
 ) -> Optional[V2Signal]:
     """15m FVG retest trigger with SuperTrend direction filter.
 
-    Entry parity target: fvg retest.txt. Touch-only signals and HTF confluence
-    are not entry gates; HTF zones are still available for TP magnets.
+    Entry parity target: fvg retest.txt. HTF, volume, and quality metrics are
+    telemetry only; fixed TP magnets are not used for this retest path.
     """
     for trigger_tf in V2_TRIGGER_TFS:
         # Get ALL visible zones (both bullish and bearish), then filter by touch
         visible = _visible_top_zones_all(zones, symbol, trigger_tf)
         if not visible:
             continue
-        visible.sort(key=lambda z: z.born_time, reverse=True)
 
         bars = bars_by_tf.get(trigger_tf, [])
         if not bars:

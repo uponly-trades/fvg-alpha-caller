@@ -193,3 +193,38 @@ def test_visible_zone_quality_matches_pine_score_not_gap_over_atr():
 
     now_ms = 1_000_000 + 7 * 900_000
     assert _pine_zone_quality(recent_volume_gap, now_ms) > _pine_zone_quality(older_micro, now_ms)
+
+
+def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: strategy_v2.SuperTrendState(trend=1, band=97.5, switch_price=101.0),
+    )
+
+    high_rank = zone(direction=1, top=100.0, bottom=98.0)
+    high_rank.born_time = 1_000
+    high_rank.volume_score = 6.0
+    high_rank.trend_score = 1.0
+    high_rank.size = 2.0
+    high_rank.atr = 1.0
+
+    newer_low_rank = zone(direction=1, top=101.0, bottom=100.9)
+    newer_low_rank.born_time = 2_000
+    newer_low_rank.volume_score = 0.1
+    newer_low_rank.trend_score = 0.0
+    newer_low_rank.size = 0.1
+    newer_low_rank.atr = 1.0
+
+    bars = bullish_retest_bars()
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"high_rank": high_rank, "newer_low_rank": newer_low_rank},
+        {"15m": bars},
+    )
+
+    assert sig is not None
+    assert sig.zone_top == pytest.approx(high_rank.top)
+    assert sig.zone_bottom == pytest.approx(high_rank.bottom)
