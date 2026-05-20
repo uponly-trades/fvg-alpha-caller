@@ -36,6 +36,7 @@ class FakeEx:
     def __init__(self, fail_cancel=False):
         self.cancelled = []
         self.placed = []
+        self.orders = []
         self.fail_cancel = fail_cancel
 
     async def fapiPrivateDeleteAlgoOrder(self, params):
@@ -56,6 +57,10 @@ class FakeEx:
     async def fapiPrivatePostAlgoOrder(self, params):
         self.placed.append((params["type"], params["side"], params))
         return {"algoId": "new-sl"}
+
+    async def create_order(self, symbol, type_, side, amount, price=None, params=None):
+        self.orders.append((symbol, type_, side, amount, price, params or {}))
+        return {"id": "auto-tp-market", "status": "FILLED", "average": "101.0"}
 
 
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
@@ -189,6 +194,82 @@ def test_supertrend_band_replacement_only_tightens():
     assert should_replace_supertrend_band(direction="long", sl_current=96, st_band=95) is False
     assert should_replace_supertrend_band(direction="short", sl_current=105, st_band=104) is True
     assert should_replace_supertrend_band(direction="short", sl_current=104, st_band=105) is False
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
+@pytest.mark.asyncio
+async def test_auto_tp_waits_15m_before_green_partial_close(monkeypatch):
+    monkeypatch.setenv("AUTO_TP_MIN_AGE_SEC", "900")
+    import importlib
+    import trade_executor.trail_manager as tm
+    importlib.reload(tm)
+    pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO users (telegram_id, created_at, updated_at) VALUES (892, 0, 0) ON CONFLICT DO NOTHING")
+            uid = await conn.fetchval("SELECT id FROM users WHERE telegram_id=892")
+            tid = f"{uid}-auto-wait"
+            await conn.execute("DELETE FROM user_trades WHERE id=$1", tid)
+            await conn.execute(
+                """
+                INSERT INTO user_trades (id, user_id, decision_id, symbol, tf, direction,
+                  leverage, margin_usdt, notional_usdt, qty, entry, sl, sl_current, tp1, tp2,
+                  status, sl_order_id, opened_at)
+                VALUES ($1,$2,'auto-wait','BTCUSDT','15m','long',5,10,50,0.004,100,95,95,100,100,'open','sl-auto',CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT))
+                """,
+                tid, uid,
+            )
+        ex = FakeEx()
+        trailed = await tm.maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=101.0)
+        assert trailed is False
+        assert ex.orders == []
+    finally:
+        await pool.close()
+        monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+        importlib.reload(tm)
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
+@pytest.mark.asyncio
+async def test_auto_tp_green_trade_closes_half_and_moves_sl_to_entry(monkeypatch):
+    monkeypatch.setenv("AUTO_TP_MIN_AGE_SEC", "900")
+    import importlib
+    import trade_executor.trail_manager as tm
+    importlib.reload(tm)
+    pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO users (telegram_id, created_at, updated_at) VALUES (893, 0, 0) ON CONFLICT DO NOTHING")
+            uid = await conn.fetchval("SELECT id FROM users WHERE telegram_id=893")
+            tid = f"{uid}-auto-green"
+            await conn.execute("DELETE FROM user_trades WHERE id=$1", tid)
+            await conn.execute(
+                """
+                INSERT INTO user_trades (id, user_id, decision_id, symbol, tf, direction,
+                  leverage, margin_usdt, notional_usdt, qty, entry, sl, sl_current, tp1, tp2,
+                  status, sl_order_id, opened_at)
+                VALUES ($1,$2,'auto-green','BTCUSDT','15m','long',5,10,50,0.004,100,95,95,100,100,'open','sl-auto-old',CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT) - 901000)
+                """,
+                tid, uid,
+            )
+        ex = FakeEx()
+        trailed = await tm.maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=101.0)
+        assert trailed is True
+        assert ex.orders[0][1] == "MARKET"
+        assert ex.orders[0][2] == "SELL"
+        assert ex.orders[0][3] == pytest.approx(0.002)
+        assert ex.placed[0][0] == "STOP_MARKET"
+        assert float(ex.placed[0][2]["triggerPrice"]) >= 100.0
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT status, tp1_qty, tp2_qty, sl_current FROM user_trades WHERE id=$1", tid)
+        assert row["status"] == "tp1_trailed"
+        assert row["tp1_qty"] == pytest.approx(0.002)
+        assert row["tp2_qty"] == pytest.approx(0.002)
+        assert row["sl_current"] >= 100.0
+    finally:
+        await pool.close()
+        monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+        importlib.reload(tm)
 
 
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")

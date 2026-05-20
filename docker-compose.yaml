@@ -95,6 +95,9 @@ services:
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      AUTO_TP_15M_ENABLED: "1"
+      AUTO_TP_MIN_AGE_SEC: "900"
+      AUTO_TP_FRACTION: "0.5"
     expose: ["8014"]
     networks: [fvg-net]
     logging:

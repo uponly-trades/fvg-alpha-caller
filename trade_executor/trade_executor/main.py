@@ -16,7 +16,8 @@ from trade_executor.pnl_aggregator import reconcile_user
 from trade_executor.resume import resume_in_flight
 from trade_executor.signal_poller import (load_last_seen, poll_once,
                                           save_last_seen, list_enabled_users)
-from trade_executor.trail_manager import run_mark_price_ws
+from trade_executor.algo_orders import fetch_mark_price
+from trade_executor.trail_manager import maybe_trail, run_mark_price_ws
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
@@ -103,6 +104,31 @@ async def reconcile_loop(pool):
         await asyncio.sleep(settings.PNL_RECONCILE_INTERVAL_S)
 
 
+async def auto_tp_loop(pool):
+    """15-minute safety loop: if an active trade is green, take 50% and move
+    the runner SL to entry. The trail manager enforces the min-age guard so a
+    brand-new trade cannot be TP'd immediately."""
+    while True:
+        try:
+            active = await get_active_symbol_users(pool)
+            for symbol, user_id in active:
+                try:
+                    ex = await _build_user_ex(pool, int(user_id))
+                    try:
+                        mark = await fetch_mark_price(ex, symbol)
+                        if mark:
+                            await maybe_trail(pool, ex=ex, symbol=symbol, price=mark)
+                    finally:
+                        close = getattr(ex, "close", None)
+                        if close:
+                            await close()
+                except Exception as e:
+                    log.exception("auto_tp_loop failed symbol=%s user=%s: %s", symbol, user_id, e)
+        except Exception as e:
+            log.exception("auto_tp_loop error: %s", e)
+        await asyncio.sleep(15 * 60)
+
+
 async def http_server():
     config = uvicorn.Config(app, host="0.0.0.0", port=settings.HTTP_PORT, log_level="info")
     await uvicorn.Server(config).serve()
@@ -134,6 +160,7 @@ async def run():
         http_server(),
         signal_loop(pool),
         reconcile_loop(pool),
+        auto_tp_loop(pool),
         run_mark_price_ws(
             pool, ex_factory=ex_factory,
             get_active_symbols=lambda: get_active_symbol_users(pool),

@@ -107,12 +107,20 @@ def _is_pine_retest_trade(t: dict) -> bool:
     return str(t.get("exit_mode") or "") == "supertrend_band"
 
 
+def _classify_pine_retest_close(t: dict, *, pnl_usdt: float) -> str:
+    # After auto TP has closed 50%, the runner is protected at entry/BE+.
+    # Classify a non-negative runner close as breakeven, not a fresh SL loss.
+    if float(t.get("tp1_qty") or 0.0) > 0.0 and str(t.get("status") or "") == "tp1_trailed":
+        return "closed_breakeven" if pnl_usdt >= 0 else "closed_sl"
+    return "closed_sl"
+
+
 async def reconcile_user(pool, *, ex, user_id: int) -> None:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
             SELECT id, decision_id, exit_mode, symbol, direction, qty, entry, status,
-                   sl, sl_current, tp1, tp2,
+                   sl, sl_current, tp1, tp2, tp1_qty,
                    sl_order_id, tp_order_id, opened_at
             FROM user_trades
             WHERE user_id=$1 AND status IN ('open','tp1_trailed')
@@ -204,7 +212,7 @@ async def reconcile_user(pool, *, ex, user_id: int) -> None:
             pnl_pct = (pnl_usdt / (qty * entry_px)) * 100 if entry_px else 0.0
 
             if _is_pine_retest_trade(t):
-                new_status = "closed_sl"
+                new_status = _classify_pine_retest_close(t, pnl_usdt=pnl_usdt)
             else:
                 new_status = _classify_close(
                     close_px=close_px,
