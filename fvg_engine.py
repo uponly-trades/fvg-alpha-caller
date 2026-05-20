@@ -397,11 +397,14 @@ def atr(highs: List[float], lows: List[float], closes: List[float], length: int)
     if len(highs) < length + 1 or len(lows) < length + 1 or len(closes) < length + 1:
         return None
     trs = []
-    for i in range(1, length + 1):
-        h, l, c = highs[-i], lows[-i], closes[-(i + 1)]
+    # Pine ta.atr() is ta.rma(trueRange, length): it smooths the full true
+    # range history, not just the last `length` bars. Using only the last N
+    # bars turns ATR into a short SMA and can flip SuperTrend Recovery regime
+    # away from the TradingView indicator.
+    for i in range(1, len(highs)):
+        h, l, c = highs[i], lows[i], closes[i - 1]
         tr = max(h - l, abs(h - c), abs(l - c))
         trs.append(tr)
-    trs.reverse()  # oldest first for RMA
     return rma(trs, length)
 
 
