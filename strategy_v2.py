@@ -13,10 +13,13 @@ from config import (
     V2_REQUIRE_SUPERTREND_FILTER, V2_SUPERTREND_ATR_LENGTH,
     V2_SUPERTREND_MULTIPLIER, V2_SUPERTREND_ALPHA_PCT,
     V2_SUPERTREND_THRESHOLD_ATR,
+    V2_MOMENTUM_FILTER_ENABLED, V2_MOMENTUM_FAST_TF,
+    V2_MOMENTUM_CONFIRM_TFS, V2_MOMENTUM_RSI_MID,
     V2_NORMAL_VOLUME_SCORE, V2_NORMAL_VOLUME_IMBALANCE, V2_NORMAL_MAIN_STRENGTH,
     V2_STRONG_VOLUME_SCORE, V2_STRONG_VOLUME_IMBALANCE, V2_STRONG_MAIN_STRENGTH,
 )
 from fvg_engine import FVGZone, detect_fvg, atr as compute_atr
+from indicator_context import kdj_series, rsi_series, stochrsi_series
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +74,16 @@ class SuperTrendState:
     trend: int = 1
     band: float = 0.0
     switch_price: float = 0.0
+
+
+@dataclass(frozen=True)
+class MomentumDecision:
+    aligned: bool
+    reason: str = "disabled"
+    fast_tf: str = ""
+    fast_score: int = 0
+    confirm_score: int = 0
+    detail: str = ""
 
 
 def _supertrend_recovery_state(
@@ -182,6 +195,87 @@ def _supertrend_aligned(
     if not V2_REQUIRE_SUPERTREND_FILTER:
         return True, st
     return ((direction == 1 and st.trend == 1) or (direction == -1 and st.trend == -1)), st
+
+
+def _latest_pair(values_a: List[Optional[float]], values_b: List[Optional[float]]) -> tuple[Optional[float], Optional[float]]:
+    pairs = [(a, b) for a, b in zip(values_a, values_b) if a is not None and b is not None]
+    if not pairs:
+        return None, None
+    return pairs[-1]
+
+
+def _momentum_tf_score(direction: int, bars: List) -> tuple[int, str]:
+    """Directional momentum score from RSI7 + StochRSI + KDJ.
+
+    This is intentionally a regime filter, not a new trigger. The 15m FVG
+    retest still decides timing; momentum only blocks chop when higher TFs are
+    pointing the other way.
+    """
+    if len(bars) < 30:
+        return 0, "n/a"
+    closes = [float(b.close) for b in bars]
+    highs = [float(b.high) for b in bars]
+    lows = [float(b.low) for b in bars]
+    rsi_vals = rsi_series(closes, 7)
+    stoch_k, stoch_d = stochrsi_series(closes)
+    kdj_k, kdj_d, _ = kdj_series(highs, lows, closes)
+    rsi = next((v for v in reversed(rsi_vals) if v is not None), None)
+    sk, sd = _latest_pair(stoch_k, stoch_d)
+    kk, kd = _latest_pair(kdj_k, kdj_d)
+    if rsi is None or sk is None or sd is None or kk is None or kd is None:
+        return 0, "n/a"
+    score = 0
+    if direction == 1:
+        score += 1 if rsi >= V2_MOMENTUM_RSI_MID else -1
+        score += 1 if sk >= sd else -1
+        score += 1 if kk >= kd else -1
+    else:
+        score += 1 if rsi <= V2_MOMENTUM_RSI_MID else -1
+        score += 1 if sk <= sd else -1
+        score += 1 if kk <= kd else -1
+    detail = f"rsi7={rsi:.1f} stoch={sk:.1f}/{sd:.1f} kdj={kk:.1f}/{kd:.1f}"
+    return score, detail
+
+
+def _momentum_filter_decision(direction: int, bars_by_tf: Dict[str, List]) -> MomentumDecision:
+    if not V2_MOMENTUM_FILTER_ENABLED:
+        return MomentumDecision(aligned=True, reason="disabled")
+
+    fast_score, fast_detail = _momentum_tf_score(direction, bars_by_tf.get(V2_MOMENTUM_FAST_TF, []))
+    confirm_parts = []
+    confirm_hits = 0
+    for tf in V2_MOMENTUM_CONFIRM_TFS:
+        score, detail = _momentum_tf_score(direction, bars_by_tf.get(tf, []))
+        if score > 0:
+            confirm_hits += 1
+        confirm_parts.append(f"{tf}:{score}({detail})")
+
+    if fast_score <= 0:
+        return MomentumDecision(
+            aligned=False,
+            reason="fast_tf_momentum_mismatch",
+            fast_tf=V2_MOMENTUM_FAST_TF,
+            fast_score=fast_score,
+            confirm_score=confirm_hits,
+            detail=f"{V2_MOMENTUM_FAST_TF}:{fast_score}({fast_detail}) {' '.join(confirm_parts)}",
+        )
+    if confirm_hits <= 0:
+        return MomentumDecision(
+            aligned=False,
+            reason="htf_momentum_mismatch",
+            fast_tf=V2_MOMENTUM_FAST_TF,
+            fast_score=fast_score,
+            confirm_score=confirm_hits,
+            detail=f"{V2_MOMENTUM_FAST_TF}:{fast_score}({fast_detail}) {' '.join(confirm_parts)}",
+        )
+    return MomentumDecision(
+        aligned=True,
+        reason="aligned",
+        fast_tf=V2_MOMENTUM_FAST_TF,
+        fast_score=fast_score,
+        confirm_score=confirm_hits,
+        detail=f"{V2_MOMENTUM_FAST_TF}:{fast_score}({fast_detail}) {' '.join(confirm_parts)}",
+    )
 
 
 def _htf_active_and_touched(
@@ -783,6 +877,15 @@ def evaluate_v2_signal(
                 )
                 continue
 
+            momentum = _momentum_filter_decision(direction, bars_by_tf)
+            if not momentum.aligned:
+                logger.info(
+                    "v2 skip %s %s %s | momentum=%s %s",
+                    symbol, trigger_tf, "long" if direction == 1 else "short",
+                    momentum.reason, momentum.detail,
+                )
+                continue
+
             # Pine fvg retest.txt does not gate retest signals by volume tier,
             # quality threshold, or HTF confluence. Keep FVG volume metrics as
             # telemetry only so alerts can still explain zone context.
@@ -863,6 +966,11 @@ def evaluate_v2_signal(
                     "supertrend_trend": st_state.trend,
                     "supertrend_band": st_state.band,
                     "supertrend_switch_price": st_state.switch_price,
+                    "momentum_filter_enabled": float(V2_MOMENTUM_FILTER_ENABLED),
+                    "momentum_reason": momentum.reason,
+                    "momentum_fast_score": momentum.fast_score,
+                    "momentum_confirm_score": momentum.confirm_score,
+                    "momentum_detail": momentum.detail,
                     "retest_score": retest.retest_score,
                     "retest_reason": retest.reason,
                     "retest_touch_depth": retest.touch_depth,

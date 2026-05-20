@@ -9,6 +9,7 @@ from fvg_engine import FVGZone
 from rest_client import Bar
 from strategy_v2 import (
     _fvg_retest_decision,
+    _momentum_filter_decision,
     _pine_zone_quality,
     _supertrend_recovery_state,
     _step_supertrend,
@@ -54,6 +55,14 @@ def bearish_retest_bars():
     bars.append(bar(24, 97.0, 98.8, 96.0, 97.8))      # first/prior touch
     bars.append(bar(25, 97.4, 99.0, 96.8, 97.2))      # retest + reject below bottom
     return bars
+
+
+def uptrend_bars(n=80):
+    return [bar(i, 100+i*0.2, 101+i*0.2, 99+i*0.2, 100.6+i*0.2) for i in range(n)]
+
+
+def downtrend_bars(n=80):
+    return [bar(i, 120-i*0.2, 121-i*0.2, 119-i*0.2, 119.4-i*0.2) for i in range(n)]
 
 
 def test_retest_requires_prior_touch():
@@ -306,3 +315,48 @@ def test_step_supertrend_holds_band_when_close_stays_inside():
     next_state = _step_supertrend(prev, closing_bar, atr_val=1.0)
     assert next_state.trend == 1
     assert next_state.band >= 95.0
+
+
+def test_momentum_filter_blocks_long_when_1h_and_htf_are_bearish(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_MOMENTUM_FILTER_ENABLED", True)
+    bars_by_tf = {"1h": downtrend_bars(), "2h": downtrend_bars(), "4h": downtrend_bars()}
+
+    decision = _momentum_filter_decision(1, bars_by_tf)
+
+    assert decision.aligned is False
+    assert decision.reason == "fast_tf_momentum_mismatch"
+
+
+def test_momentum_filter_allows_long_when_1h_and_one_htf_agree(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_MOMENTUM_FILTER_ENABLED", True)
+    bars_by_tf = {"1h": uptrend_bars(), "2h": uptrend_bars(), "4h": downtrend_bars()}
+
+    decision = _momentum_filter_decision(1, bars_by_tf)
+
+    assert decision.aligned is True
+    assert decision.fast_score > 0
+    assert decision.confirm_score >= 1
+
+
+def test_evaluate_signal_blocks_valid_long_retest_on_bearish_htf_momentum(monkeypatch):
+    monkeypatch.setattr(strategy_v2, "V2_MOMENTUM_FILTER_ENABLED", True)
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: SuperTrendState(trend=1, band=97.5, switch_price=101.0),
+    )
+
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"z15": zone(direction=1)},
+        {
+            "15m": bullish_retest_bars(),
+            "1h": downtrend_bars(),
+            "2h": downtrend_bars(),
+            "4h": downtrend_bars(),
+        },
+    )
+
+    assert sig is None

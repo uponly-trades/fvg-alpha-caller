@@ -181,6 +181,18 @@ V2_SUPERTREND_MULTIPLIER = float(os.environ.get("V2_SUPERTREND_MULTIPLIER", "3.0
 V2_SUPERTREND_ALPHA_PCT = float(os.environ.get("V2_SUPERTREND_ALPHA_PCT", "5.0"))
 V2_SUPERTREND_THRESHOLD_ATR = float(os.environ.get("V2_SUPERTREND_THRESHOLD_ATR", "1.0"))
 
+# Noise filter for 15m retests. Production enables this in docker-compose:
+# 15m remains the trigger, but 1h momentum must agree and at least one of
+# 2h/4h must agree before a signal is emitted.
+V2_MOMENTUM_FILTER_ENABLED = os.environ.get("V2_MOMENTUM_FILTER_ENABLED", "0") == "1"
+V2_MOMENTUM_FAST_TF = os.environ.get("V2_MOMENTUM_FAST_TF", "1h")
+V2_MOMENTUM_CONFIRM_TFS = [
+    tf.strip()
+    for tf in os.environ.get("V2_MOMENTUM_CONFIRM_TFS", "2h,4h").split(",")
+    if tf.strip()
+]
+V2_MOMENTUM_RSI_MID = float(os.environ.get("V2_MOMENTUM_RSI_MID", "50"))
+
 V2_NORMAL_VOLUME_SCORE = float(os.environ.get("V2_NORMAL_VOLUME_SCORE", "1.1"))
 V2_NORMAL_VOLUME_IMBALANCE = float(os.environ.get("V2_NORMAL_VOLUME_IMBALANCE", "0.10"))
 V2_NORMAL_MAIN_STRENGTH = int(os.environ.get("V2_NORMAL_MAIN_STRENGTH", "50"))
