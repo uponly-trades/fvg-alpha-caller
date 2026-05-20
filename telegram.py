@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import math
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
@@ -650,8 +651,8 @@ def _v2_taker_buy_sell_lines(timeframe_bars: dict, tf: str = "15m") -> List[str]
 def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = None) -> None:
     """Send a v2 entry alert. `signal` is a strategy_v2.V2Signal instance."""
     direction_emoji = "🟢 LONG" if signal.direction == 1 else "🔴 SHORT"
-    status_trade = "SIM LONG" if signal.direction == 1 else "SIM SHORT"
-    title = f"({status_trade} | {signal.symbol} | {signal.trigger_tf})"
+    side_label = "LONG" if signal.direction == 1 else "SHORT"
+    title = f"({signal.symbol} | {side_label} | {signal.trigger_tf})"
 
     sl_pct = (signal.sl - signal.entry) / signal.entry * 100 if signal.entry else 0.0
     tp = getattr(signal, "tp", None)
@@ -666,6 +667,13 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         htf_line_parts.append(f"{tf}{mark}")
     htf_line = " ".join(htf_line_parts)
     htf_max = 1 + 1 + 2 + 3  # weighted max
+
+    bull_strength = float(signal.indicators.get("bull_strength", 0) or 0)
+    bear_strength = float(signal.indicators.get("bear_strength", 0) or 0)
+    signal_strength = bull_strength if signal.direction == 1 else bear_strength
+    signal_rating = max(1, min(5, math.ceil(signal_strength / 20.0)))
+    rating_side = "BUY Retest" if signal.direction == 1 else "SELL Retest"
+    rating_line = f"{rating_side} {signal_rating}★"
 
     tp_line = (
         f"🎯 TP:    <code>{tp:g}</code> ({tp_pct:+.2f}%) RR 1:2"
@@ -682,7 +690,7 @@ def send_v2_alert(signal, timeframe_bars: dict, chart_png: Optional[bytes] = Non
         f"🛑 SL:    <code>{signal.sl:g}</code> ({sl_pct:+.2f}%)",
         tp_line,
         "",
-        f"Confluence: {_v2_confluence_stars(signal.confluence_score)}  ({signal.confluence_score}/{htf_max})",
+        rating_line,
         f"Trigger: {signal.trigger_tf} {'bullish' if signal.direction == 1 else 'bearish'} retest",
         f"HTF:     {htf_line}",
         "",

@@ -500,6 +500,8 @@ def test_v2_new_safety_config_imports():
     assert 0 <= config.V2_NORMAL_VOLUME_IMBALANCE <= 1
     assert config.V2_STRONG_VOLUME_IMBALANCE >= config.V2_NORMAL_VOLUME_IMBALANCE
     assert 0 < config.TRADE_MARGIN_USAGE_CAP <= 1
+    # Pine parity: cooldownBars=12 on 15m → 12 * 15 * 60 = 10800s.
+    assert config.V2_COOLDOWN_SEC >= 12 * 15 * 60
 
 
 from strategy_v2 import _htf_obstacle_decision

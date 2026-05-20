@@ -194,8 +194,11 @@ TRADE_MARGIN_USAGE_CAP = float(os.environ.get("TRADE_MARGIN_USAGE_CAP", "0.70"))
 # v2 trail
 V2_TRAIL_ATR_BUFFER = ATR_BUFFER_V2  # alias — trail uses same buffer
 
-# v2 throttle (mitigate higher alert volume without the optional model gate)
-V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "1800"))  # 30 minutes
+# v2 throttle (mitigate higher alert volume without the optional model gate).
+# Pine parity (fvg retest.txt: cooldownBars=12): on the 15m trigger TF, 12 bars
+# ≈ 3 hours. We translate that to a per-direction cooldown in seconds so the
+# bot can't fire signals that the chart suppresses as duplicates.
+V2_COOLDOWN_SEC = int(os.environ.get("V2_COOLDOWN_SEC", "10800"))  # 3 hours
 
 # v2 freshness — drop signals whose triggering bar is older than this many seconds.
 # Protects against placing orders on stale price after warmup gaps or lag spikes.

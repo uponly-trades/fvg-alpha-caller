@@ -49,7 +49,7 @@ services:
       DATABASE_URL: postgresql://fvg:${DB_PW}@postgres:5432/fvg
       MODEL_ENABLED: "false"
       STRATEGY_VERSION: v2
-      V2_COOLDOWN_SEC: "1800"
+      V2_COOLDOWN_SEC: "10800"
       V2_ENTRY_TRIGGER: retest_only
       V2_REQUIRE_PRIOR_TOUCH: "1"
       V2_REQUIRE_SUPERTREND_FILTER: "1"
