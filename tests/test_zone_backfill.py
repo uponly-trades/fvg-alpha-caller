@@ -137,6 +137,8 @@ def test_backfill_all_runs_per_buffer(caller, monkeypatch):
     }
     seen: list = []
     monkeypatch.setattr(caller, "_v2_backfill_zones", lambda s, t, b: seen.append((s, t)))
+    # Prevent real REST fetch from the new ST seeding path.
+    monkeypatch.setattr(caller, "_seed_supertrend", lambda s, t: None)
     caller._v2_backfill_all()
     assert sorted(seen) == sorted([("BTCUSDT", "15m"), ("BTCUSDT", "1h"), ("ETHUSDT", "4h")])
 

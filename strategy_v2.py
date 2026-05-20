@@ -121,8 +121,64 @@ def _supertrend_recovery_state(
     return SuperTrendState(trend=trend, band=band, switch_price=switch_price)
 
 
-def _supertrend_aligned(direction: int, bars: List) -> tuple[bool, SuperTrendState]:
-    st = _supertrend_recovery_state(bars)
+def _step_supertrend(
+    prev: SuperTrendState,
+    bar,
+    atr_val: float,
+    *,
+    multiplier: float = V2_SUPERTREND_MULTIPLIER,
+    alpha_pct: float = V2_SUPERTREND_ALPHA_PCT,
+    threshold_atr: float = V2_SUPERTREND_THRESHOLD_ATR,
+) -> SuperTrendState:
+    """Advance SuperTrend Recovery by exactly one bar.
+
+    Pine's stBand/stTrend/stSwitchPrice are `var` series. Recomputing the whole
+    state from a short buffer drifts away from the chart (see EIGENUSDT 15m,
+    2026-05-20: chart Bias=ST Bearish but bot sampled trend=1 from a 100-bar
+    window). The caller is expected to seed `prev` once from a long history
+    and then step every bar close through here.
+    """
+    alpha = float(alpha_pct) / 100.0
+    close = float(bar.close)
+    src = (float(bar.high) + float(bar.low)) / 2.0
+    upper_base = src + float(multiplier) * float(atr_val)
+    lower_base = src - float(multiplier) * float(atr_val)
+    deviation = float(threshold_atr) * float(atr_val)
+    trend = int(prev.trend) or 1
+    switch_price = float(prev.switch_price) if prev.switch_price else close
+    prev_band = float(prev.band) if prev.band else (lower_base if trend == 1 else upper_base)
+    at_loss = (trend == 1 and (switch_price - close) > deviation) or (
+        trend == -1 and (close - switch_price) > deviation
+    )
+    if trend == 1:
+        target_band = alpha * close + (1.0 - alpha) * prev_band if at_loss else lower_base
+        band = max(target_band, prev_band)
+        if close < band:
+            trend = -1
+            band = upper_base
+            switch_price = close
+    else:
+        target_band = alpha * close + (1.0 - alpha) * prev_band if at_loss else upper_base
+        band = min(target_band, prev_band)
+        if close > band:
+            trend = 1
+            band = lower_base
+            switch_price = close
+    return SuperTrendState(trend=trend, band=band, switch_price=switch_price)
+
+
+def _supertrend_aligned(
+    direction: int,
+    bars: List,
+    *,
+    prev_state: Optional[SuperTrendState] = None,
+) -> tuple[bool, SuperTrendState]:
+    """Return (aligned, state). When `prev_state` is given, the caller already
+    holds a seeded ST state and we should not recompute from `bars`."""
+    if prev_state is not None:
+        st = prev_state
+    else:
+        st = _supertrend_recovery_state(bars)
     if not V2_REQUIRE_SUPERTREND_FILTER:
         return True, st
     return ((direction == 1 and st.trend == 1) or (direction == -1 and st.trend == -1)), st
@@ -677,11 +733,18 @@ def evaluate_v2_signal(
     symbol: str,
     zones: Dict[str, FVGZone],
     bars_by_tf: Dict[str, List],
+    *,
+    supertrend_state: Optional["SuperTrendState"] = None,
 ) -> Optional[V2Signal]:
     """15m FVG retest trigger with SuperTrend direction filter.
 
     Entry parity target: fvg retest.txt. HTF, volume, and quality metrics are
     telemetry only; fixed TP magnets are not used for this retest path.
+
+    `supertrend_state` is the seeded, bar-by-bar advanced ST Recovery state
+    maintained by the caller (see main._st_state_step). When omitted we fall
+    back to recomputing from `bars` for tests/legacy callers; production must
+    pass the seeded state to stay in parity with the Pine indicator.
     """
     for trigger_tf in V2_TRIGGER_TFS:
         # Get ALL visible zones (both bullish and bearish), then filter by touch
@@ -709,7 +772,9 @@ def evaluate_v2_signal(
                 )
                 continue
 
-            st_aligned, st_state = _supertrend_aligned(direction, bars)
+            st_aligned, st_state = _supertrend_aligned(
+                direction, bars, prev_state=supertrend_state,
+            )
             if not st_aligned:
                 logger.info(
                     "v2 skip %s %s %s | supertrend_mismatch trend=%s band=%g",

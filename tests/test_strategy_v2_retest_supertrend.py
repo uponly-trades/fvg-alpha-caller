@@ -11,6 +11,8 @@ from strategy_v2 import (
     _fvg_retest_decision,
     _pine_zone_quality,
     _supertrend_recovery_state,
+    _step_supertrend,
+    SuperTrendState,
     _visible_top_zones_all,
     evaluate_v2_signal,
 )
@@ -265,3 +267,42 @@ def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):
     assert sig is not None
     assert sig.zone_top == pytest.approx(high_rank.top)
     assert sig.zone_bottom == pytest.approx(high_rank.bottom)
+
+
+def test_evaluate_signal_prefers_seeded_supertrend_state(monkeypatch):
+    """Pine parity: bot must trust the long-history seeded ST state, not the
+    100-bar buffered estimate. If the buffer says trend=1 but the seeded
+    state is trend=-1, a LONG retest must be rejected (regression for
+    EIGENUSDT 15m 2026-05-20 drift)."""
+    monkeypatch.setattr(strategy_v2, "V2_HTF_OBSTACLE_FILTER_ENABLED", False)
+    monkeypatch.setattr(strategy_v2, "V2_REQUIRE_SUPERTREND_FILTER", True)
+    monkeypatch.setattr(
+        strategy_v2,
+        "_supertrend_recovery_state",
+        lambda bars: SuperTrendState(trend=1, band=0.0, switch_price=100.0),
+    )
+
+    seeded_bearish = SuperTrendState(trend=-1, band=101.0, switch_price=99.0)
+
+    sig = evaluate_v2_signal(
+        "BTCUSDT",
+        {"z15": zone(direction=1)},
+        {"15m": bullish_retest_bars()},
+        supertrend_state=seeded_bearish,
+    )
+    assert sig is None
+
+
+def test_step_supertrend_flips_when_close_breaks_band():
+    prev = SuperTrendState(trend=1, band=105.0, switch_price=110.0)
+    closing_bar = bar(t=0, o=104.0, h=104.5, l=100.0, c=100.5)
+    next_state = _step_supertrend(prev, closing_bar, atr_val=1.0)
+    assert next_state.trend == -1
+
+
+def test_step_supertrend_holds_band_when_close_stays_inside():
+    prev = SuperTrendState(trend=1, band=95.0, switch_price=100.0)
+    closing_bar = bar(t=0, o=100.0, h=101.0, l=99.0, c=100.5)
+    next_state = _step_supertrend(prev, closing_bar, atr_val=1.0)
+    assert next_state.trend == 1
+    assert next_state.band >= 95.0

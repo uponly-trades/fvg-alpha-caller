@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 # trigger-TF duration in seconds (used by v2 freshness guard)
 _TF_SECONDS = {"15m": 15 * 60, "30m": 30 * 60, "1h": 60 * 60, "2h": 2 * 60 * 60, "4h": 4 * 60 * 60}
@@ -17,7 +18,15 @@ from config import (
 from fvg_engine import FVGTracker, detect_fvg, calc_strength, fvg_has_overlap
 from sim_trades import SimTradeStore
 from websocket_client import BinanceKlineWS
-from strategy_v2 import _supertrend_recovery_state, evaluate_v2_signal
+from strategy_v2 import (
+    _supertrend_recovery_state,
+    _step_supertrend,
+    SuperTrendState,
+    evaluate_v2_signal,
+)
+from fvg_engine import atr as compute_atr
+from rest_client import fetch_klines
+from config import V2_SUPERTREND_ATR_LENGTH
 from trail_manager import TrailManager
 from cooldown import CooldownStore
 from telegram import send_trade_recap, send_v2_alert
@@ -38,6 +47,12 @@ class AlphaCaller:
         self.sim_store = SimTradeStore()
         self.v2_trail = TrailManager()
         self.v2_cooldown = CooldownStore(window_sec=V2_COOLDOWN_SEC)
+        # Seeded SuperTrend Recovery state per (symbol, tf). Pine's stBand /
+        # stTrend / stSwitchPrice are `var` series — recomputing from a 100-bar
+        # WS buffer drifts away from the chart. We seed once from a long
+        # history and step bar-by-bar on every close.
+        self._st_state: dict[tuple[str, str], SuperTrendState] = {}
+        self._st_seed_limit = 1500
 
     def _timeframe_bars(self, symbol: str) -> dict:
         bars_by_tf = {}
@@ -138,7 +153,14 @@ class AlphaCaller:
             symbol, tf = key.rsplit("_", 1)
             self.tracker.update_buffer(symbol, tf, bars)
             if tf in V2_TRIGGER_TFS:
-                st = _supertrend_recovery_state(bars)
+                # Seed SuperTrend from a long REST history so we start in the
+                # same regime the user sees on the chart. WS warm-up only
+                # gives 100 closed bars which is not enough for ST Recovery
+                # (alpha=5%) to converge — see EIGENUSDT 15m 2026-05-20 drift.
+                st = self._seed_supertrend(symbol, tf)
+                if st is None:
+                    st = _supertrend_recovery_state(bars)
+                self._st_state[(symbol, tf)] = st
                 self.sim_store.upsert_supertrend_state(
                     symbol=symbol,
                     tf=tf,
@@ -155,6 +177,52 @@ class AlphaCaller:
             logger.warning("backfill save_zones failed: %s", e)
         logger.info("v2 backfill complete | zones %d -> %d (+%d)",
                     before, len(self.tracker.zones), added)
+
+    def _seed_supertrend(self, symbol: str, tf: str) -> Optional[SuperTrendState]:
+        """Fetch a long REST history and compute ST Recovery from scratch.
+
+        Called once per (symbol, tf) at warm-up so subsequent bar-by-bar
+        stepping starts in the same regime the chart shows. Returns None when
+        the REST fetch fails; caller must fall back to the buffered estimate.
+        """
+        try:
+            seed_bars = fetch_klines(symbol, tf, limit=self._st_seed_limit)
+        except Exception as e:
+            logger.warning("st seed fetch failed %s %s: %s", symbol, tf, e)
+            return None
+        if not seed_bars:
+            return None
+        try:
+            return _supertrend_recovery_state(seed_bars)
+        except Exception as e:
+            logger.warning("st seed compute failed %s %s: %s", symbol, tf, e)
+            return None
+
+    def _advance_supertrend(self, symbol: str, tf: str, bars) -> SuperTrendState:
+        """Step the seeded ST state forward by exactly one bar.
+
+        We only ever advance when the WS reports a new closed bar (caller
+        gates on `_on_bar_close`), so `bars[-1]` is the new bar. ATR uses the
+        buffered window via `compute_atr`; the result is functionally
+        identical to Pine's `ta.atr(stLengthInput)` after warm-up.
+        """
+        key = (symbol, tf)
+        prev = self._st_state.get(key)
+        if prev is None:
+            seeded = self._seed_supertrend(symbol, tf)
+            if seeded is None:
+                seeded = _supertrend_recovery_state(bars)
+            self._st_state[key] = seeded
+            return seeded
+        highs = [float(b.high) for b in bars]
+        lows = [float(b.low) for b in bars]
+        closes = [float(b.close) for b in bars]
+        atr_val = compute_atr(highs, lows, closes, V2_SUPERTREND_ATR_LENGTH) or max(
+            highs[-1] - lows[-1], 1e-9,
+        )
+        next_state = _step_supertrend(prev, bars[-1], atr_val)
+        self._st_state[key] = next_state
+        return next_state
 
     def _v2_capture_fvg(self, symbol: str, tf: str, bars) -> None:
         """v2 FVG ingest: bypass MIN_STRENGTH_TO_ALERT, store ANY detected FVG."""
@@ -227,7 +295,13 @@ class AlphaCaller:
     # - The executor still enters with a market order after the decision is persisted.
     def _v2_try_emit_signal(self, symbol: str, tf: str, bars) -> None:
         bars_by_tf = self._timeframe_bars(symbol)
-        sig = evaluate_v2_signal(symbol, self.tracker.zones, bars_by_tf)
+        st_state = self._st_state.get((symbol, tf))
+        sig = evaluate_v2_signal(
+            symbol,
+            self.tracker.zones,
+            bars_by_tf,
+            supertrend_state=st_state,
+        )
         if sig is None:
             return
         if sig.trigger_tf != tf:
@@ -317,7 +391,7 @@ class AlphaCaller:
 
         self.tracker.update_buffer(symbol, tf, bars)
         if tf in V2_TRIGGER_TFS:
-            st = _supertrend_recovery_state(bars)
+            st = self._advance_supertrend(symbol, tf, bars)
             self.sim_store.upsert_supertrend_state(
                 symbol=symbol,
                 tf=tf,
