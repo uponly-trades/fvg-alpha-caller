@@ -67,6 +67,7 @@ class RetestDecision:
     body_ratio: float = 0.0
     confirmation_close: float = 0.0
     confirmation_time: int = 0
+    prior_touch_time: int = 0
 
 
 @dataclass(frozen=True)
@@ -779,12 +780,18 @@ def _fvg_retest_decision(
             return RetestDecision(valid=False, reason="no_prior_touch")
 
     if V2_REQUIRE_PRIOR_TOUCH:
-        prior_touched = any(
-            float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
-            for b in relevant_bars[:-1]
+        prior_touch = next(
+            (
+                b for b in relevant_bars[:-1]
+                if float(b.high) >= float(zone.bottom) and float(b.low) <= float(zone.top)
+            ),
+            None,
         )
-        if not prior_touched:
+        if prior_touch is None:
             return RetestDecision(valid=False, reason="no_prior_touch")
+        prior_touch_time = int(getattr(prior_touch, "open_time", 0) or 0)
+    else:
+        prior_touch_time = 0
 
     b = relevant_bars[-1]
     candle_range = max(float(b.high) - float(b.low), abs(float(b.close)) * 1e-6, 1e-9)
@@ -820,6 +827,7 @@ def _fvg_retest_decision(
         body_ratio=body_ratio,
         confirmation_close=float(b.close),
         confirmation_time=int(getattr(b, "open_time", 0) or 0),
+        prior_touch_time=prior_touch_time,
     )
 
 
@@ -977,6 +985,7 @@ def evaluate_v2_signal(
                     "retest_rejection_ratio": retest.rejection_ratio,
                     "retest_body_ratio": retest.body_ratio,
                     "retest_confirmation_time": retest.confirmation_time,
+                    "retest_prior_touch_time": retest.prior_touch_time,
                     "htf_obstacle_blocked": float(obstacle.blocked),
                     "htf_obstacle_reason": obstacle.reason,
                     "htf_obstacle_tf": obstacle.blocking_tf,

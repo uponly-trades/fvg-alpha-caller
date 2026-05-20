@@ -98,10 +98,11 @@ def test_retest_rejects_when_zone_birth_is_outside_available_chart_window():
 
 
 def test_retest_accepts_after_prior_touch_bullish():
-    d = _fvg_retest_decision(zone(direction=1), bullish_retest_bars())
+    d = _fvg_retest_decision(zone(direction=1, born_time=20), bullish_retest_bars())
     assert d.valid is True
     assert d.reason == "valid"
     assert d.confirmation_close == pytest.approx(100.8)
+    assert d.prior_touch_time == 24
 
 
 def test_retest_rejects_when_mitigation_too_deep_for_pine_rule():
@@ -253,7 +254,7 @@ def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):
     )
 
     high_rank = zone(direction=1, top=100.0, bottom=98.0)
-    high_rank.born_time = 1
+    high_rank.born_time = 20
     high_rank.volume_score = 6.0
     high_rank.trend_score = 1.0
     high_rank.size = 2.0
@@ -276,6 +277,7 @@ def test_evaluate_signal_uses_pine_visible_rank_before_birth_time(monkeypatch):
     assert sig is not None
     assert sig.zone_top == pytest.approx(high_rank.top)
     assert sig.zone_bottom == pytest.approx(high_rank.bottom)
+    assert sig.indicators["retest_prior_touch_time"] == 24
 
 
 def test_evaluate_signal_prefers_seeded_supertrend_state(monkeypatch):

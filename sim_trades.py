@@ -402,6 +402,7 @@ class SimTradeStore:
                     "retest_rejection_ratio": float(signal.indicators.get("retest_rejection_ratio", 0.0) or 0.0),
                     "retest_body_ratio": float(signal.indicators.get("retest_body_ratio", 0.0) or 0.0),
                     "retest_confirmation_time": int(signal.indicators.get("retest_confirmation_time", 0) or 0),
+                    "retest_prior_touch_time": int(signal.indicators.get("retest_prior_touch_time", 0) or 0),
                     "htf_obstacle_blocked": bool(signal.indicators.get("htf_obstacle_blocked", 0.0)),
                     "htf_obstacle_reason": signal.indicators.get("htf_obstacle_reason", "clear"),
                     "htf_obstacle_tf": signal.indicators.get("htf_obstacle_tf", ""),
