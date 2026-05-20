@@ -97,7 +97,9 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       AUTO_TP_15M_ENABLED: "1"
       AUTO_TP_MIN_AGE_SEC: "900"
-      AUTO_TP_FRACTION: "0.5"
+      AUTO_TP_FRACTION: "0.3"
+      AUTO_BE_FIRST_15M_ENABLED: "1"
+      AUTO_CLOSE_AFTER_SEC: "7200"
     expose: ["8014"]
     networks: [fvg-net]
     logging:

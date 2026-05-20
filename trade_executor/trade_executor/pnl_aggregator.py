@@ -108,7 +108,7 @@ def _is_pine_retest_trade(t: dict) -> bool:
 
 
 def _classify_pine_retest_close(t: dict, *, pnl_usdt: float) -> str:
-    # After auto TP has closed 50%, the runner is protected at entry/BE+.
+    # After auto TP has closed a partial, the runner is protected at entry/BE+.
     # Classify a non-negative runner close as breakeven, not a fresh SL loss.
     if float(t.get("tp1_qty") or 0.0) > 0.0 and str(t.get("status") or "") == "tp1_trailed":
         return "closed_breakeven" if pnl_usdt >= 0 else "closed_sl"

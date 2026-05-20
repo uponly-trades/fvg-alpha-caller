@@ -120,7 +120,9 @@ def trail_sl_for_progress(*, direction: str, entry: float, sl: float, sl_current
 _BE_BUFFER_PCT = float(os.environ.get("V2_BE_BUFFER_PCT", "0.0005"))  # 0.05% fee cushion
 _AUTO_TP_ENABLED = os.environ.get("AUTO_TP_15M_ENABLED", "1") == "1"
 _AUTO_TP_MIN_AGE_SEC = int(os.environ.get("AUTO_TP_MIN_AGE_SEC", str(15 * 60)))
-_AUTO_TP_FRACTION = float(os.environ.get("AUTO_TP_FRACTION", "0.5"))
+_AUTO_TP_FRACTION = float(os.environ.get("AUTO_TP_FRACTION", "0.3"))
+_AUTO_BE_FIRST_ENABLED = os.environ.get("AUTO_BE_FIRST_15M_ENABLED", "1") == "1"
+_AUTO_TIMEOUT_CLOSE_SEC = int(os.environ.get("AUTO_CLOSE_AFTER_SEC", str(2 * 60 * 60)))
 
 
 def _compute_be_price(*, direction: str, entry: float, mark: float, buffer_pct: float) -> float:
@@ -157,8 +159,111 @@ async def _market_close_qty(ex, *, symbol: str, direction: str, qty: float, clos
     return await ex.create_order(symbol, "MARKET", close_side, qty, None, params)
 
 
+def _remaining_qty(trade: dict) -> float:
+    return float(trade.get("tp2_qty") or trade.get("qty") or 0.0)
+
+
+async def _replace_sl_at_entry(pool, ex, *, symbol: str, trade: dict, price: float) -> bool:
+    """At +15m, move active trade SL to entry/BE+ without taking profit yet."""
+    if not _AUTO_BE_FIRST_ENABLED:
+        return False
+    if trade.get("status") != "open":
+        return False
+    if float(trade.get("sl_current") or 0.0) > 0:
+        direction = str(trade["direction"])
+        entry = float(trade["entry"])
+        current = float(trade["sl_current"])
+        if direction == "long" and current >= entry:
+            return False
+        if direction == "short" and current <= entry:
+            return False
+    opened_at = int(trade.get("opened_at") or 0)
+    if int(time.time() * 1000) - opened_at < _AUTO_TP_MIN_AGE_SEC * 1000:
+        return False
+
+    direction = str(trade["direction"])
+    is_long = direction == "long"
+    close_side = "SELL" if is_long else "BUY"
+    qty = _remaining_qty(trade)
+    if qty <= 0:
+        return False
+    old_sl_id = trade.get("sl_order_id")
+    if old_sl_id:
+        await cancel_algo(ex, symbol=symbol, algo_id=old_sl_id)
+    mark = await fetch_mark_price(ex, symbol) or float(price)
+    entry = float(trade["entry"])
+    be_price = _compute_be_price(direction=direction, entry=entry, mark=mark, buffer_pct=_BE_BUFFER_PCT)
+    be_price = adjust_sl_for_mark(side=direction, sl_price=be_price, mark=mark)
+    pos_side = None
+    if getattr(ex, "_is_hedge_mode", False):
+        pos_side = "LONG" if is_long else "SHORT"
+    try:
+        sl_resp = await place_algo_stop(
+            ex, symbol=symbol, close_side=close_side, quantity=qty,
+            trigger_price=be_price, order_type="STOP_MARKET",
+            position_side=pos_side,
+        )
+    except Exception as e:
+        log.error("auto BE SL placement failed %s/%s: %s", symbol, trade["id"], e)
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE user_trades
+            SET sl_current=$1, sl_order_id=$2
+            WHERE id=$3 AND status='open'
+            """,
+            be_price, algo_id_of(sl_resp), trade["id"],
+        )
+        await notify(conn, "trade_tp1_trailed", {
+            "user_id": trade["user_id"],
+            "trade_id": trade["id"],
+            "protective_sl": be_price,
+            "reason": "auto_be_15m",
+        })
+    log.info("auto BE SL armed %s/%s direction=%s be=%.6f qty=%.6f", symbol, trade["id"], direction, be_price, qty)
+    return True
+
+
+async def _timeout_close(pool, ex, *, symbol: str, trade: dict) -> bool:
+    """Close any still-active trade after 2h to avoid stale/anomaly positions."""
+    if _AUTO_TIMEOUT_CLOSE_SEC <= 0:
+        return False
+    if trade.get("status") not in {"open", "tp1_trailed"}:
+        return False
+    opened_at = int(trade.get("opened_at") or 0)
+    if int(time.time() * 1000) - opened_at < _AUTO_TIMEOUT_CLOSE_SEC * 1000:
+        return False
+    direction = str(trade["direction"])
+    is_long = direction == "long"
+    close_side = "SELL" if is_long else "BUY"
+    qty = _remaining_qty(trade) if trade.get("status") == "tp1_trailed" else float(trade.get("qty") or 0.0)
+    if qty <= 0:
+        return False
+    for order_key in ("sl_order_id", "tp_order_id"):
+        oid = trade.get(order_key)
+        if oid:
+            await cancel_algo(ex, symbol=symbol, algo_id=oid)
+    try:
+        resp = await _market_close_qty(ex, symbol=symbol, direction=direction, qty=qty, close_side=close_side)
+    except Exception as e:
+        log.error("timeout close failed %s/%s: %s", symbol, trade["id"], e)
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE user_trades
+            SET tp_order_id=$1
+            WHERE id=$2 AND status IN ('open','tp1_trailed')
+            """,
+            str(resp.get("id") or resp.get("orderId") or "timeout_market_close"), trade["id"],
+        )
+    log.info("timeout close submitted %s/%s direction=%s qty=%.6f", symbol, trade["id"], direction, qty)
+    return True
+
+
 async def _auto_tp_half_and_be(pool, ex, *, symbol: str, trade: dict, price: float) -> bool:
-    """Every 15m loop: if trade is green, close 50% and move SL to entry.
+    """Every 15m loop: if trade is green, close a partial and move SL to entry.
 
     Guardrails:
     - min age defaults to 15m, so a fresh entry never TP's immediately.
@@ -245,7 +350,8 @@ async def _auto_tp_half_and_be(pool, ex, *, symbol: str, trade: dict, price: flo
             "protective_sl": be_price,
         })
     log.info(
-        "auto TP 50%% + BE SL armed %s/%s direction=%s close_qty=%.6f runner=%.6f be=%.6f",
+        "auto TP %.0f%% + BE SL armed %s/%s direction=%s close_qty=%.6f runner=%.6f be=%.6f",
+        _AUTO_TP_FRACTION * 100,
         symbol, trade["id"], direction, close_qty, runner_qty, be_price,
     )
     return True
@@ -341,7 +447,11 @@ async def maybe_trail(pool, *, ex, symbol: str, price: float) -> bool:
         side = "long" if is_long else "short"
         close_side = "SELL" if is_long else "BUY"
 
-        if await _auto_tp_half_and_be(pool, ex, symbol=symbol, trade=t, price=price):
+        if await _timeout_close(pool, ex, symbol=symbol, trade=t):
+            trailed_any = True
+            continue
+
+        if await _replace_sl_at_entry(pool, ex, symbol=symbol, trade=t, price=price):
             trailed_any = True
             continue
 

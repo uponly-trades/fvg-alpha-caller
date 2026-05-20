@@ -198,7 +198,7 @@ def test_supertrend_band_replacement_only_tightens():
 
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
 @pytest.mark.asyncio
-async def test_auto_tp_waits_15m_before_green_partial_close(monkeypatch):
+async def test_auto_be_waits_15m_before_moving_sl(monkeypatch):
     monkeypatch.setenv("AUTO_TP_MIN_AGE_SEC", "900")
     import importlib
     import trade_executor.trail_manager as tm
@@ -223,6 +223,7 @@ async def test_auto_tp_waits_15m_before_green_partial_close(monkeypatch):
         trailed = await tm.maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=101.0)
         assert trailed is False
         assert ex.orders == []
+        assert ex.placed == []
     finally:
         await pool.close()
         monkeypatch.setenv("V2_TRAIL_MODE", "percent")
@@ -231,7 +232,7 @@ async def test_auto_tp_waits_15m_before_green_partial_close(monkeypatch):
 
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
 @pytest.mark.asyncio
-async def test_auto_tp_green_trade_closes_half_and_moves_sl_to_entry(monkeypatch):
+async def test_auto_be_after_15m_moves_sl_to_entry_without_closing(monkeypatch):
     monkeypatch.setenv("AUTO_TP_MIN_AGE_SEC", "900")
     import importlib
     import trade_executor.trail_manager as tm
@@ -255,16 +256,14 @@ async def test_auto_tp_green_trade_closes_half_and_moves_sl_to_entry(monkeypatch
         ex = FakeEx()
         trailed = await tm.maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=101.0)
         assert trailed is True
-        assert ex.orders[0][1] == "MARKET"
-        assert ex.orders[0][2] == "SELL"
-        assert ex.orders[0][3] == pytest.approx(0.002)
+        assert ex.orders == []
         assert ex.placed[0][0] == "STOP_MARKET"
         assert float(ex.placed[0][2]["triggerPrice"]) >= 100.0
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT status, tp1_qty, tp2_qty, sl_current FROM user_trades WHERE id=$1", tid)
-        assert row["status"] == "tp1_trailed"
-        assert row["tp1_qty"] == pytest.approx(0.002)
-        assert row["tp2_qty"] == pytest.approx(0.002)
+        assert row["status"] == "open"
+        assert (row["tp1_qty"] or 0) == 0
+        assert (row["tp2_qty"] or 0) == 0
         assert row["sl_current"] >= 100.0
     finally:
         await pool.close()
@@ -310,3 +309,38 @@ async def test_pine_retest_uses_persisted_supertrend_band_not_mark_price():
         assert row["sl_order_id"] == "new-sl"
     finally:
         await pool.close()
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
+@pytest.mark.asyncio
+async def test_timeout_close_after_2h_submits_market_close(monkeypatch):
+    monkeypatch.setenv("AUTO_CLOSE_AFTER_SEC", "7200")
+    import importlib
+    import trade_executor.trail_manager as tm
+    importlib.reload(tm)
+    pool = await db.create_pool(os.environ["TEST_DATABASE_URL"])
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO users (telegram_id, created_at, updated_at) VALUES (894, 0, 0) ON CONFLICT DO NOTHING")
+            uid = await conn.fetchval("SELECT id FROM users WHERE telegram_id=894")
+            tid = f"{uid}-timeout"
+            await conn.execute("DELETE FROM user_trades WHERE id=$1", tid)
+            await conn.execute(
+                """
+                INSERT INTO user_trades (id, user_id, decision_id, symbol, tf, direction,
+                  leverage, margin_usdt, notional_usdt, qty, entry, sl, sl_current, tp1, tp2,
+                  status, sl_order_id, opened_at)
+                VALUES ($1,$2,'timeout','BTCUSDT','15m','long',5,10,50,0.004,100,95,101,100,100,'open','sl-timeout',CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT) - 7201000)
+                """,
+                tid, uid,
+            )
+        ex = FakeEx()
+        trailed = await tm.maybe_trail(pool, ex=ex, symbol="BTCUSDT", price=101.0)
+        assert trailed is True
+        assert ex.orders[0][1] == "MARKET"
+        assert ex.orders[0][2] == "SELL"
+        assert ex.orders[0][3] == pytest.approx(0.004)
+    finally:
+        await pool.close()
+        monkeypatch.setenv("V2_TRAIL_MODE", "percent")
+        importlib.reload(tm)
